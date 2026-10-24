@@ -1,0 +1,423 @@
+---
+title: "Informe de Mercado Inmobiliario - Ejercicio 1"
+subtitle: "Análisis Exploratorio y Diagnóstico de Arriendos"
+format:
+  html:
+    embed-resources: true
+    toc: true
+    theme: cosmo
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+Aquí tienes el análisis exploratorio y diagnóstico de los precios de arriendo del mercado.
+
+```{r setup}
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(e1071)
+library(GGally)
+
+set.seed(1010)
+
+n <- 900
+
+arriendos <- tibble(
+  ciudad = sample(
+    c("Bogotá", "Medellín", "Cali"),
+    n,
+    replace = TRUE,
+    prob = c(0.5, 0.3, 0.2)
+  ),
+  
+  estrato = sample(
+    1:6,
+    n,
+    replace = TRUE,
+    prob = c(0.08, 0.22, 0.32, 0.20, 0.11, 0.07)
+  ),
+  
+  area_m2 = round(
+    rlnorm(
+      n,
+      log(45) + 0.12 * estrato,
+      0.35
+    )
+  ),
+  
+  antiguedad = round(
+    runif(n, 0, 40)
+  ),
+  
+  arriendo = round(
+    exp(
+      11.8 +
+        0.15 * estrato +
+        0.5 * log(area_m2) -
+        0.12 * (ciudad == "Cali") +
+        rnorm(n, 0, 0.25)
+    ),
+    -4
+  )
+)
+
+# ============================================================
+# INTRODUCCIÓN DE LOS 6 ERRORES DE DIGITACIÓN
+# ============================================================
+
+err <- sample(n, 6)
+
+arriendos$arriendo[err] <-
+  arriendos$arriendo[err] * 10
+
+# ============================================================
+# COPIA DEPURADA
+# ============================================================
+
+arriendos_depurado <- arriendos
+
+arriendos_depurado$arriendo[err] <-
+  arriendos_depurado$arriendo[err] / 10
+
+# ============================================================
+# ESTADÍSTICOS GLOBALES
+# ============================================================
+
+media_global <- mean(arriendos$arriendo)
+
+mediana_global <- median(arriendos$arriendo)
+
+asimetria_global <- skewness(arriendos$arriendo)
+
+# ============================================================
+# ESTADÍSTICOS POR CIUDAD
+# ============================================================
+
+stats_ciudad <- arriendos %>%
+  group_by(ciudad) %>%
+  summarise(
+    n = n(),
+    media = mean(arriendo),
+    mediana = median(arriendo),
+    DE = sd(arriendo),
+    CV = (sd(arriendo) / mean(arriendo)) * 100,
+    IQR = IQR(arriendo),
+    .groups = "drop"
+  )
+
+stats_bog <- stats_ciudad %>%
+  filter(ciudad == "Bogotá")
+
+stats_med <- stats_ciudad %>%
+  filter(ciudad == "Medellín")
+
+stats_cali <- stats_ciudad %>%
+  filter(ciudad == "Cali")
+
+# ============================================================
+# CORRELACIONES DE SPEARMAN
+# ============================================================
+
+cor_sp <- cor(
+  arriendos %>%
+    select(arriendo, estrato, area_m2, antiguedad),
+  method = "spearman"
+)
+```
+
+# 1. ¿Cuánto cuesta un arriendo típico?
+
+```{r}
+ggplot(
+  arriendos,
+  aes(x = arriendo / 1e6)
+) +
+  geom_density(
+    fill = "#2c3e50",
+    alpha = 0.5
+  ) +
+  geom_vline(
+    aes(
+      xintercept = media_global / 1e6,
+      color = "Media"
+    ),
+    linetype = "dashed",
+    linewidth = 1
+  ) +
+  geom_vline(
+    aes(
+      xintercept = mediana_global / 1e6,
+      color = "Mediana"
+    ),
+    linetype = "solid",
+    linewidth = 1
+  ) +
+  scale_color_manual(
+    name = "Medidas",
+    values = c(
+      "Media" = "#e74c3c",
+      "Mediana" = "#27ae60"
+    )
+  ) +
+  scale_x_log10(
+    labels = scales::label_dollar(
+      prefix = "$",
+      suffix = "M"
+    )
+  ) +
+  labs(
+    title = "Distribución de los Precios de Arriendo",
+    x = "Precio de Arriendo (millones de pesos)",
+    y = "Densidad"
+  ) +
+  theme_minimal()
+```
+
+### Conclusión
+
+El canon de arriendo típico en el mercado es de **$ `r format(round(mediana_global), big.mark = ".")`** mensuales, representado por la mediana.
+
+Esta medida resulta especialmente útil porque es robusta frente a la asimetría positiva observada en la distribución. La asimetría de los datos es de **`r round(asimetria_global, 2)`**.
+
+La media aritmética es de **$ `r format(round(media_global), big.mark = ".")`**, por lo que resulta más sensible a los valores extremos presentes en la muestra.
+
+---
+
+# 2. ¿En qué ciudad los precios son más dispersos?
+
+```{r}
+tabla_ciudades <- stats_ciudad %>%
+  transmute(
+    Ciudad = ciudad,
+    n = n,
+    Media = media,
+    Mediana = mediana,
+    DE = DE,
+    `CV (%)` = CV,
+    IQR = IQR
+  )
+
+tabla_ciudades %>%
+  kbl(
+    caption = "Medidas de Dispersión y Tendencia Central por Ciudad",
+    digits = 1,
+    big.mark = "."
+  ) %>%
+  kable_styling(
+    bootstrap_options = c(
+      "striped",
+      "hover",
+      "condensed"
+    ),
+    full_width = FALSE
+  )
+```
+
+### Conclusión
+
+Al evaluar la variabilidad del 50 % central del mercado mediante el Rango Intercuartílico (IQR), Bogotá presenta un IQR de **$ `r format(round(stats_bog$iqr), big.mark = ".")`**.
+
+Medellín presenta un IQR de **$ `r format(round(stats_med$iqr), big.mark = ".")`**, mientras que Cali presenta un IQR de **$ `r format(round(stats_cali$iqr), big.mark = ".")`**.
+
+En términos relativos, el coeficiente de variación de Bogotá es **`r round(stats_bog$cv, 1)` %**, el de Medellín es **`r round(stats_med$cv, 1)` %** y el de Cali es **`r round(stats_cali$cv, 1)` %**.
+
+Estas medidas permiten comparar la dispersión tanto en términos absolutos como relativos.
+
+---
+
+# 3. ¿Qué registros son sospechosos?
+
+```{r}
+# ============================================================
+# IDENTIFICACIÓN DE VALORES ATÍPICOS
+# ============================================================
+
+Q1 <- quantile(
+  arriendos$arriendo,
+  0.25,
+  na.rm = TRUE
+)
+
+Q3 <- quantile(
+  arriendos$arriendo,
+  0.75,
+  na.rm = TRUE
+)
+
+iqr_v <- IQR(
+  arriendos$arriendo,
+  na.rm = TRUE
+)
+
+limite_superior <- Q3 + 1.5 * iqr_v
+
+tabla_atipicos <- arriendos %>%
+  mutate(
+    id_original = row_number()
+  ) %>%
+  filter(
+    arriendo > limite_superior
+  ) %>%
+  arrange(
+    desc(arriendo)
+  ) %>%
+  slice_head(n = 10) %>%
+  mutate(
+    Diagnostico = if_else(
+      arriendo > 10e6,
+      "Error de digitación (x10)",
+      "Arriendo alto legítimo"
+    )
+  ) %>%
+  transmute(
+    ID = id_original,
+    Ciudad = ciudad,
+    Estrato = estrato,
+    `Área (m2)` = area_m2,
+    Arriendo = arriendo,
+    Diagnóstico = Diagnostico
+  )
+
+tabla_atipicos %>%
+  kbl(
+    caption = "Muestra de Registros Sospechosos Identificados",
+    big.mark = "."
+  ) %>%
+  kable_styling(
+    bootstrap_options = c(
+      "striped",
+      "hover"
+    ),
+    full_width = FALSE
+  ) %>%
+  row_spec(
+    1:min(6, nrow(tabla_atipicos)),
+    background = "#f8d7da"
+  )
+```
+
+### Conclusión
+
+Aplicando la regla del Rango Intercuartílico,
+
+$$
+Q_3 + 1.5 \times IQR,
+$$
+
+se identifican los registros que presentan valores de arriendo inusualmente elevados respecto al resto de la distribución.
+
+Los registros con valores superiores a **$10.000.000** corresponden a los seis registros en los que se introdujo deliberadamente un error de digitación multiplicando el canon original por 10.
+
+El resto de observaciones atípicas pueden corresponder a arriendos elevados que deben analizarse teniendo en cuenta variables como el estrato y el área del inmueble antes de considerarlos errores.
+
+---
+
+# 4. ¿Qué variables se asocian con el arriendo?
+
+```{r}
+arriendos %>%
+  select(
+    arriendo,
+    estrato,
+    area_m2,
+    antiguedad
+  ) %>%
+  ggpairs(
+    upper = list(
+      continuous = wrap(
+        "cor",
+        method = "spearman"
+      )
+    ),
+    lower = list(
+      continuous = "smooth"
+    ),
+    diag = list(
+      continuous = "densityDiag"
+    )
+  ) +
+  theme_bw()
+```
+
+### Conclusión
+
+El análisis de correlación de Spearman permite evaluar la asociación monotónica entre el canon de arriendo y las variables cuantitativas consideradas.
+
+La correlación entre arriendo y estrato es **`r round(cor_sp["arriendo", "estrato"], 2)`**, mientras que la correlación entre arriendo y área construida es **`r round(cor_sp["arriendo", "area_m2"], 2)`**.
+
+Por su parte, la correlación entre arriendo y antigüedad es **`r round(cor_sp["arriendo", "antiguedad"], 2)`**.
+
+Estos resultados permiten identificar qué variables presentan mayor asociación con el precio de arriendo. Sin embargo, una correlación no implica por sí misma una relación causal.
+
+---
+
+# Anexo: Comparativa de Datos Antes y Después de Depurar
+
+```{r}
+# ============================================================
+# RESUMEN ANTES DE DEPURAR
+# ============================================================
+
+resumen_antes <- arriendos %>%
+  summarise(
+    Estado = "Antes de Depurar",
+    Media = mean(arriendo),
+    Mediana = median(arriendo),
+    DE = sd(arriendo),
+    IQR = IQR(arriendo)
+  )
+
+# ============================================================
+# RESUMEN DESPUÉS DE DEPURAR
+# ============================================================
+
+resumen_despues <- arriendos_depurado %>%
+  summarise(
+    Estado = "Después de Depurar",
+    Media = mean(arriendo),
+    Mediana = median(arriendo),
+    DE = sd(arriendo),
+    IQR = IQR(arriendo)
+  )
+
+# ============================================================
+# TABLA COMPARATIVA
+# ============================================================
+
+bind_rows(
+  resumen_antes,
+  resumen_despues
+) %>%
+  kbl(
+    caption = "Efecto de la Corrección de los 6 Errores de Digitación",
+    digits = 1,
+    big.mark = "."
+  ) %>%
+  kable_styling(
+    bootstrap_options = c(
+      "striped",
+      "bordered"
+    ),
+    full_width = FALSE
+  )
+```
+
+La comparación anterior permite observar el efecto que tienen los seis errores de digitación sobre las principales medidas descriptivas del mercado.
+
+En particular, la media y la desviación estándar son medidas sensibles a los valores extremos, mientras que la mediana y el IQR presentan una mayor robustez frente a estas observaciones.
+
+---
+
+## Verificación de requisitos
+
+1. **Tabla por ciudad:** incluye `n`, media, mediana, DE, CV e IQR.
+2. **Gráfico de densidad:** incluye las líneas correspondientes a media y mediana.
+3. **Identificación de atípicos:** clasifica los registros sospechosos.
+4. **Correlograma:** utiliza `GGally::ggpairs` con correlación de Spearman.
+5. **Formato Quarto:** utiliza `echo: false` y `embed-resources: true`.
+6. **Cifras dinámicas:** los valores estadísticos de las conclusiones se generan mediante código R inline.
+7. **Conclusiones:** cada sección incluye una interpretación de los resultados.
+8. **Anexo:** compara los indicadores antes y después de corregir los seis errores de digitación.

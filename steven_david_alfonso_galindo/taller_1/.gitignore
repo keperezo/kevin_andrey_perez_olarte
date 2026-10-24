@@ -1,0 +1,31 @@
+# Archivos de sesión de R y RStudio
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+
+# Temporales de Quarto (taller_1.html sí se entrega)
+.quarto/
+taller_1_files/
+*.knit.md
+
+# renv: se entrega solo renv.lock
+renv/library/
+renv/staging/
+renv/local/
+renv/cellar/
+renv/lock/
+renv/python/
+renv/sandbox/
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Prueba desde otro entorno: solo se entrega datos/prueba_otro_entorno.csv
+prueba_otro_entorno.sqlite
+raw_otro_entorno/
+
+# Bases de prueba o reconstruidas
+comparador_reconstruido.sqlite
+prueba.sqlite

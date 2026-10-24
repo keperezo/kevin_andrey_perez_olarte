@@ -1,0 +1,10 @@
+---
+title: "delimitacion_categoria"
+author: "Nayibe Yesenia Arias-Cortez"
+date: "2026-10-09"
+output: html_document
+---
+
+Cuidado capilar	
+
+Champús, acondicionadores, mascarillas, tintes y productos para peinar. Excluye medicamentos y productos infantiles.

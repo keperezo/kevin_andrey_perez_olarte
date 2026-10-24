@@ -1,0 +1,55 @@
+{
+  "ejecucion": "20261010T112803_180f96c4",
+  "comercio": "cafam",
+  "inicio": "2026-10-10T11:28:14-05:00",
+  "estado": "completa",
+  "categorias": [
+    {
+      "categoria": "2/53/59",
+      "esperados": 118,
+      "obtenidos": 118,
+      "estado": "completa",
+      "paginas": [
+        "2-53-59_0000.json.gz",
+        "2-53-59_0050.json.gz",
+        "2-53-59_0100.json.gz"
+      ],
+      "error": null
+    },
+    {
+      "categoria": "2/53/75",
+      "esperados": 26,
+      "obtenidos": 26,
+      "estado": "completa",
+      "paginas": [
+        "2-53-75_0000.json.gz"
+      ],
+      "error": null
+    },
+    {
+      "categoria": "2/53/78",
+      "esperados": 9,
+      "obtenidos": 9,
+      "estado": "completa",
+      "paginas": [
+        "2-53-78_0000.json.gz"
+      ],
+      "error": null
+    },
+    {
+      "categoria": "2/53/58",
+      "esperados": 23,
+      "obtenidos": 23,
+      "estado": "completa",
+      "paginas": [
+        "2-53-58_0000.json.gz"
+      ],
+      "error": null
+    }
+  ],
+  "auxiliares": [
+    "categorias.json.gz",
+    "robots.txt.gz"
+  ],
+  "fin": "2026-10-10T11:28:29-05:00"
+}

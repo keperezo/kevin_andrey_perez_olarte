@@ -1,0 +1,144 @@
+---
+title: "Taller 6 - Clase 9: Tablas, Gráficos y Distribuciones de Frecuencia"
+author: "Laura Katherine Martinez Castiblanco"
+output:
+  html_document:
+    theme: flatly
+    toc: false
+    self_contained: true
+    code_folding: hide
+    mathjax: default
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+
+```{r librerias_y_configuracion}
+# 1. Instalación y carga de paquetes necesarios
+paquetes   <- c("tidyverse", "readr", "dplyr", "tidyr", "stringr", "purrr", "knitr", "kableExtra", "ggplot2")
+instalados <- rownames(installed.packages())
+pendientes <- setdiff(paquetes, instalados)
+if (length(pendientes) > 0) install.packages(pendientes)
+
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+
+
+# Función auxiliar para renderizado elegante de tablas HTML
+mostrar_tabla <- function(df, caption = "", n = 10) {
+  kable(
+    head(df, n),
+    format = "html",
+    caption = caption,
+    table.attr = 'class="table table-striped table-hover table-bordered table-condensed"'
+  )
+}
+
+
+set.seed(909); n <- 1500
+dias <- seq(as.Date("2025-01-01"), as.Date("2025-12-31"), "day")
+pedidos <- tibble(
+  fecha        = sample(dias, n, replace = TRUE),
+  canal        = sample(c("App", "Web", "Tienda"), n, TRUE,
+                        prob = c(.45, .35, .20)),
+  categoria    = sample(c("Tecnología", "Hogar", "Moda"),
+                        n, replace = TRUE),
+  valor        = round(rlnorm(n, 11.5 + 0.6 *
+                   (categoria == "Tecnología"), 0.6), -2),
+  dias_entrega = rpois(n, lambda = 3) + 1,
+  calificacion = sample(1:5, n, TRUE, prob = c(1, 2, 3, 7, 7))
+)
+
+# Vista previa de la estructura del dataset
+mostrar_tabla(pedidos, caption = "Vista previa de las primeras 10 observaciones del dataset 'pedidos'", n = 10)
+```
+
+# Ejercicios prácticos
+
+## Ejercicio 1: tablas de frecuencia
+
+Construye las distribuciones de frecuencia de `calificacion` y del `valor` del pedido.
+
+
+
+```{r}
+pedidos |>
+  count(calificacion) |>
+  mutate(pct = 100 * n / sum(n), acum = cumsum(pct))
+
+pedidos |>
+  mutate(rango = cut(valor, c(0, 1e5, 2e5, 4e5, Inf),
+                     right = FALSE)) |>
+  count(rango)
+```
+
+1. **¿Qué porcentaje de pedidos tiene calificación de 4 o más?**
+
+Calculamos las frecuencias absolutas, relativas (%) y acumuladas (%) para la variable ordinal de calificación del cliente.
+
+```{r ejercicio_1_calificacion}
+# Tabla de frecuencias de calificación con renderizado en kable
+dist_calificacion <- pedidos %>%
+  count(calificacion) %>%
+  mutate(
+    pct  = round(100 * n / sum(n), 2),
+    acum = round(cumsum(pct), 2)
+  )
+
+mostrar_tabla(dist_calificacion, caption = "Distribución de frecuencias para la calificación del pedido (Escala 1-5)")
+```
+
+Se agrupan los valores continuos en rangos o intervalos (bins) definidos mediante la función `cut()`, calculando su frecuencia absoluta, relativa y acumulada.
+
+```{r ejercicio_1_valor}
+# Tabla de frecuencias agrupadas del valor de compra
+dist_valor <- pedidos %>%
+  mutate(rango = cut(valor, c(0, 1e5, 2e5, 4e5, Inf), right = FALSE, 
+                     labels = c("< $100k", "$100k - $200k", "$200k - $400k", "≥ $400k"))) %>%
+  count(rango) %>%
+  mutate(
+    pct  = round(100 * n / sum(n), 2),
+    acum = round(cumsum(pct), 2)
+  )
+
+mostrar_tabla(dist_valor, caption = "Distribución de frecuencias agrupadas para el valor del pedido (COP)")
+```
+
+```{r calculo_pregunta1}
+# Cálculo directo del porcentaje de calificaciones >= 4
+resumen_calif_4mas <- pedidos %>%
+  summarise(
+    n_pedidos_4mas = sum(calificacion >= 4),
+    total_pedidos  = n(),
+    pct_4mas       = round(100 * mean(calificacion >= 4), 2)
+  )
+
+mostrar_tabla(resumen_calif_4mas, caption = "Conteo y porcentaje de pedidos con calificación de 4 o más")
+```
+
+**Análisis e interpretación:**
+
+A partir de la tabla de frecuencias acumuladas y del cálculo explícito, un **69.73%** de los pedidos (1,046 pedidos de un total de 1,500) registraron una calificación de **4 o más** (34.00% con calificación 4 y 35.73% con calificación 5). 
+
+Desde la perspectiva de la minería de datos en la fase de **Comprensión de los Datos (CRISP-DM)**, este resultado refleja una alta satisfacción general del cliente, con casi el 70% del volumen concentrado en los niveles de evaluación superiores.
+
+---
+
+
+2. **¿Por qué la acumulada tiene sentido para `calificacion` y no para `canal`?**
+
+
+
+**Fundamentación teórica y conceptual (Escalas de Medición en KDD):**
+
+* **`calificacion` (Variable Cualitativa Ordinal / Escala Likert):** Posee una relación de orden natural intrínseca (\\(1 < 2 < 3 < 4 < 5\\)). Por tanto, la **frecuencia acumulada** tiene pleno sentido matemático y práctico, ya que permite responder preguntas del tipo *"¿qué proporción de clientes evaluó el servicio con una nota menor o igual a \\(X\\)?"* (por ejemplo, el 30.27% acumulado evaluó el servicio con 3 o menos).
+
+* **`canal` (Variable Cualitativa Nominal):** Corresponde a categorías discretas no numéricas (`App`, `Web`, `Tienda`) sin ninguna jerarquía ni orden lógico o cuantitativo prefijado (\\(App \neq Web \neq Tienda\\)). Acumular los porcentajes de variables nominales carece de significado estadístico, pues el resultado acumulado cambiaría arbitrariamente dependiendo del orden alfabético o posicional en el que se Listen las categorías.
+
+

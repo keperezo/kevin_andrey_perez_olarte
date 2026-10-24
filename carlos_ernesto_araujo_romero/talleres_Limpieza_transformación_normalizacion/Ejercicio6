@@ -1,0 +1,116 @@
+library(tidyverse)
+
+netflix <- read_csv("netflix_titles.csv", show_col_types = FALSE)
+
+# a) Detectar y corregir columnas intercambiadas (rating vs duration)
+# Identificar las filas con datos en la columna errónea
+filas_traspuestas <- netflix %>%
+  filter(is.na(duration) & str_detect(rating, "min")) %>%
+  select(show_id, title, rating, duration)
+
+cat("Filas detectadas con 'duration' dentro de 'rating':\n")
+print(filas_traspuestas)
+
+# Corrección de los registros
+netflix_corregido <- netflix %>%
+  mutate(
+    es_error = is.na(duration) & str_detect(rating, "min"),
+    duration = if_else(es_error, rating, duration),
+    rating   = if_else(es_error, NA_character_, rating)
+  ) %>%
+  select(-es_error)
+
+# Verificación
+stopifnot(sum(is.na(netflix_corregido$duration)) == 0)
+
+# b) Descomponer 'duration' y calcular promedios correctos por 'type'
+netflix_duracion <- netflix_corregido %>%
+  mutate(
+    duracion_valor  = as.numeric(str_extract(duration, "[0-9]+")),
+    duracion_unidad = str_to_lower(str_trim(str_extract(duration, "[A-Za-z]+")))
+  )
+
+# Justificación:
+# No tiene sentido un promedio global del catálogo porque mezcla escalas dimensionales 
+# incompatibles: sumar minutos de películas con temporadas de series genera un promedio espurio.
+
+promedios_tipo <- netflix_duracion %>%
+  group_by(type, duracion_unidad) %>%
+  summarise(
+    total_titulos = n(),
+    duracion_promedio = round(mean(duracion_valor, na.rm = TRUE), 2),
+    minimo = min(duracion_valor, na.rm = TRUE),
+    maximo = max(duracion_valor, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+print(promedios_tipo)
+
+# c) Conversión robusta de 'date_added' y cálculo de rezago temporal
+# Uso obligatorio de parse_date() con locale en inglés para evitar errores en sistemas en español
+netflix_fechas <- netflix_duracion %>%
+  mutate(
+    fecha_adicion = parse_date(str_trim(date_added), format = "%B %d, %Y", locale = locale("en")),
+    anio_adicion  = year(fecha_adicion),
+    rezago_anios  = anio_adicion - release_year
+  )
+
+# Detectar y explicar valores negativos
+casos_negativos <- netflix_fechas %>%
+  filter(rezago_anios < 0) %>%
+  select(title, type, release_year, date_added, fecha_adicion, rezago_anios)
+
+cat("\nRegistros con rezago negativo (date_added anterior a release_year):\n")
+print(casos_negativos)
+
+# Explicación de negativos:
+# Un rezago negativo significa que la fecha registrada de adición al catálogo es anterior 
+# al año oficial de estreno. Esto se debe a:
+# 1. Errores de digitación manual de metadatos en la plataforma.
+# 2. Festivales de cine o emisiones piloto añadidas a streaming antes de su estreno comercial internacional.
+
+# ------------------------------------------------------------------------------
+# d) Desanidar 'listed_in' con separate_longer_delim() y top 10 géneros
+# ------------------------------------------------------------------------------
+n_antes <- nrow(netflix_fechas)
+
+netflix_generos <- netflix_fechas %>%
+  separate_longer_delim(listed_in, delim = ",") %>%
+  mutate(genero = str_trim(listed_in))
+
+n_despues <- nrow(netflix_generos)
+
+cat(sprintf("\nFilas antes de separar: %d | Filas después: %d\n", n_antes, n_despues))
+
+# Top 10 géneros por tipo de contenido
+top10_generos <- netflix_generos %>%
+  count(type, genero, sort = TRUE) %>%
+  group_by(type) %>%
+  slice_max(n, n = 10) %>%
+  ungroup()
+
+print(top10_generos)
+
+# Explicación de no-sumabilidad:
+# No se pueden sumar las filas para contar títulos porque una misma película o serie 
+# suele pertenecer a 2 o 3 géneros simultáneos (ej. "Comedia", "Drama", "Romance"). 
+# La operación desanida multiplica las filas originales, inflando el total real de catálogo.
+
+# ------------------------------------------------------------------------------
+# e) Análisis de países múltiples y co-producción
+# ------------------------------------------------------------------------------
+netflix_paises <- netflix_fechas %>%
+  mutate(
+    n_paises = if_else(is.na(country), 0L, str_count(country, ",") + 1L),
+    coproduccion = n_paises > 1
+  )
+
+# Resumen de coproducciones
+table(CoProduccion = netflix_paises$coproduccion, useNA = "always")
+
+# Justificación de tratamiento para NA en 'country':
+# - Si el propósito es modelado predictivo o NLP (Machine Learning): 
+#   Conviene imputar con la categoría explícita "Desconocido". Esto evita la eliminación 
+#   de filas y permite que el modelo capture el patrón de títulos internacionales sin ficha clara.
+# - Si el propósito es análisis geográfico o regulatorio (ej. cuotas de pantalla nacional): 
+#   Conviene dejarlo como 'NA'. Imputar un país ficticio sesgaría la contabilidad oficial de producción local.

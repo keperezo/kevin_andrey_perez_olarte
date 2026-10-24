@@ -1,0 +1,377 @@
+---
+title: "Comparador de Precios en Línea: Confitería"
+subtitle: "Taller Parcial — Minería de Datos"
+author: "Carlos Araújo"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: flatly
+    toc: true
+    toc_float: true
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.align = "center")
+
+library(DBI)
+library(RSQLite)
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(highcharter)
+library(knitr)
+library(scales)
+```
+
+## 1. Introducción y Delimitación
+
+Este proyecto compara los precios del catálogo de **Confitería** en tres comercios con venta en línea en Colombia: **Éxito**, **Carulla** y **Tiendas Jumbo**.
+
+* **Productos incluidos:** Golosinas comerciales empacadas (chocolates de mesa e impulso, caramelos, gomitas, mentas y chicles).
+* **Productos excluidos:** Suplementos dietarios o vitamínicos en gomitas, pastillas medicinales o anestésicas para la garganta y confitería a granel sin empaque industrial.
+
+## 2. Fuentes y Módulo de Scraping
+
+La recolección se implementó en `scraper.R` mediante Brave Browser con `rvest::read_html_live()` y `chromote`. Las respuestas crudas se almacenan en `raw/{comercio}/{fecha}/` para permitir la reproducción sin conexión.
+
+```{r modulo_scraping}
+if (file.exists("scraper.R")) {
+  tryCatch(source("scraper.R"), error = function(e) NULL)
+}
+
+if (exists("ejecutar_recoleccion_completa")) {
+  try(ejecutar_recoleccion_completa(offline = TRUE, ruta_db = "comparador_precios.sqlite"), silent = TRUE)
+}
+
+stopifnot(file.exists("comparador_precios.sqlite"))
+```
+
+## 3. Base de Datos SQLite
+
+Los datos se estructuran en `comparador_precios.sqlite` en dos tablas: `ejecuciones` (registro de auditoría de cada corrida) y `observaciones` (precios observados con restricción `UNIQUE(comercio, sku_comercio, fecha_consulta)`).
+
+```{r conexion_sqlite}
+con <- dbConnect(SQLite(), "comparador_precios.sqlite")
+```
+
+## 4. Consultas SQL
+
+### Consulta 1: Conteos Generales y por Comercio
+
+```{r q1}
+q1_general <- dbGetQuery(con, "
+  SELECT 
+    COUNT(DISTINCT comercio) AS comercios,
+    COUNT(DISTINCT texto_original) AS presentaciones_unicas,
+    COUNT(DISTINCT id_producto_comun) AS productos_comparables,
+    COUNT(*) AS total_observaciones
+  FROM observaciones;
+")
+kable(q1_general, caption = "Resumen General")
+
+q1_comercios <- dbGetQuery(con, "
+  SELECT 
+    comercio,
+    COUNT(*) AS catalogo_total,
+    SUM(es_comparable) AS comparables
+  FROM observaciones
+  GROUP BY comercio
+  ORDER BY catalogo_total DESC;
+")
+kable(q1_comercios, caption = "Aporte por Comercio")
+```
+
+*Interpretación:* La base cuenta con 61 observaciones en 3 comercios. Jumbo aporta 29 registros, mientras Éxito y Carulla aportan 16 cada uno.
+
+### Consulta 2: Validación de Cobertura y Unicidad
+
+```{r q2}
+q2_val <- dbGetQuery(con, "
+  SELECT 
+    id_ejecucion,
+    SUM(es_comparable) AS total_comparables,
+    COUNT(DISTINCT id_producto_comun) AS productos_distintos
+  FROM observaciones
+  GROUP BY id_ejecucion;
+")
+kable(q2_val, caption = "Cobertura de la Canasta (Meta >= 24)")
+
+q2_dup <- dbGetQuery(con, "
+  SELECT comercio, sku_comercio, COUNT(*) AS repeticiones
+  FROM observaciones
+  GROUP BY comercio, sku_comercio
+  HAVING COUNT(*) > 1;
+")
+cat("Duplicados encontrados:", nrow(q2_dup), "\n")
+```
+
+*Interpretación:* Se cumple la meta obligatoria con 24 observaciones comparables exactas ($8 \text{ productos} \times 3 \text{ comercios}$) sin duplicados.
+
+### Consulta 3: Dispersión de Precios y Comercio más Barato
+
+```{r q3}
+q3 <- dbGetQuery(con, "
+  WITH stats AS (
+    SELECT 
+      id_producto_comun,
+      MIN(precio_cop) AS precio_min,
+      MAX(precio_cop) AS precio_max,
+      ROUND(AVG(precio_cop), 2) AS precio_prom
+    FROM observaciones
+    WHERE es_comparable = 1
+    GROUP BY id_producto_comun
+  )
+  SELECT 
+    s.id_producto_comun,
+    s.precio_min,
+    s.precio_max,
+    s.precio_prom,
+    o.comercio AS comercio_mas_barato
+  FROM stats s
+  JOIN observaciones o 
+    ON s.id_producto_comun = o.id_producto_comun 
+   AND s.precio_min = o.precio_cop
+  WHERE o.es_comparable = 1
+  GROUP BY s.id_producto_comun, o.comercio
+  ORDER BY s.id_producto_comun;
+")
+kable(q3, caption = "Precios Extremos y Comercio Ganador (con Empates)")
+```
+
+*Interpretación:* Éxito ofrece el menor precio en golosinas individuales. En Chocobreak 250g se presenta un empate exacto entre Éxito y Carulla a $15,700 COP.
+
+### Consulta 4: Ahorro en COP y Porcentual
+
+```{r q4}
+q4 <- dbGetQuery(con, "
+  SELECT 
+    id_producto_comun,
+    MIN(precio_cop) AS precio_min,
+    MAX(precio_cop) AS precio_max,
+    ROUND(MAX(precio_cop) - MIN(precio_cop), 0) AS ahorro_cop,
+    ROUND(100.0 * (MAX(precio_cop) - MIN(precio_cop)) / MAX(precio_cop), 1) AS ahorro_pct
+  FROM observaciones
+  WHERE es_comparable = 1
+  GROUP BY id_producto_comun
+  HAVING COUNT(DISTINCT comercio) > 1
+  ORDER BY ahorro_pct DESC;
+")
+kable(q4, caption = "Ahorro Potencial por Presentación")
+```
+
+*Interpretación:* M&M con Maní y Chocobreak 150g presentan ahorros relativos superiores al 19% al seleccionar la tienda más económica.
+
+### Consulta 5: Eficiencia Unitaria (Menor Precio por Gramo)
+
+```{r q5}
+q5 <- dbGetQuery(con, "
+  SELECT 
+    comercio,
+    texto_original AS presentacion,
+    precio_cop,
+    contenido_valor AS gramos,
+    precio_por_unidad AS cop_por_gramo
+  FROM observaciones
+  WHERE es_comparable = 1
+  ORDER BY cop_por_gramo ASC
+  LIMIT 5;
+")
+kable(q5, caption = "Top 5 Presentaciones con Menor Precio por Gramo")
+```
+
+*Interpretación:* Los empaques grandes de Chocolate Corona (450g) en Jumbo ofrecen el costo más eficiente por gramo ($34.67 COP/g).
+
+### Consulta 6: Ranking de Brechas de Precio
+
+```{r q6}
+q6 <- dbGetQuery(con, "
+  SELECT 
+    id_producto_comun,
+    MIN(precio_cop) AS precio_minimo,
+    MAX(precio_cop) AS precio_maximo,
+    ROUND(100.0 * (MAX(precio_cop) - MIN(precio_cop)) / MAX(precio_cop), 1) AS brecha_porcentual
+  FROM observaciones
+  WHERE es_comparable = 1
+  GROUP BY id_producto_comun
+  ORDER BY brecha_porcentual DESC;
+")
+kable(q6, caption = "Ranking de Dispersión Porcentual")
+```
+
+### Consulta 7: Auditoría de Datos Faltantes
+
+```{r q7}
+q7 <- dbGetQuery(con, "
+  SELECT 
+    comercio,
+    COUNT(*) AS total_registros,
+    SUM(CASE WHEN precio_cop IS NULL OR precio_cop <= 0 THEN 1 ELSE 0 END) AS nulos_precio,
+    SUM(CASE WHEN contenido_valor IS NULL THEN 1 ELSE 0 END) AS nulos_contenido,
+    SUM(CASE WHEN url_producto IS NULL THEN 1 ELSE 0 END) AS nulos_url
+  FROM observaciones
+  GROUP BY comercio;
+")
+kable(q7, caption = "Integridad de Atributos")
+```
+
+*Interpretación:* Cero valores nulos en precios, enlaces o gramajes en los tres comercios.
+
+### Consulta 8: Calidad de Atributos por Comercio
+
+```{r q8}
+q8 <- dbGetQuery(con, "
+  SELECT 
+    comercio,
+    COUNT(*) AS total_obtenido,
+    ROUND(100.0 * SUM(CASE WHEN texto_original IS NOT NULL THEN 1 ELSE 0 END) / COUNT(*), 1) AS pct_nombre,
+    ROUND(100.0 * SUM(CASE WHEN contenido_valor > 0 THEN 1 ELSE 0 END) / COUNT(*), 1) AS pct_gramaje,
+    ROUND(100.0 * SUM(es_comparable) / COUNT(*), 1) AS pct_canasta_comparable
+  FROM observaciones
+  GROUP BY comercio;
+")
+kable(q8, caption = "Cobertura de Atributos")
+```
+
+```{r desconexion_sqlite, include=FALSE}
+dbDisconnect(con)
+```
+
+## 5. Visualizaciones Interactivas
+
+```{r datos_graficos, include=FALSE}
+con <- dbConnect(SQLite(), "comparador_precios.sqlite")
+df_obs <- dbGetQuery(con, "SELECT * FROM observaciones WHERE es_comparable = 1;")
+dbDisconnect(con)
+
+colores_tiendas <- c("Carulla" = "#27AE60", "Éxito" = "#F1C40F", "Jumbo" = "#2980B9")
+
+nombres_canasta <- c(
+  "CONF_01_KINDER_LECHE_100G"    = "Kinder Chocolate 100g",
+  "CONF_02_MYM_LECHE_48G"        = "M&M con Leche 48g",
+  "CONF_03_MYM_MANI_49G"         = "M&M con Maní 49g",
+  "CONF_04_CHOCOBREAK_150G"      = "Chocobreak Surtido 150g",
+  "CONF_05_CHOCOBREAK_250G"      = "Chocobreak Surtido 250g",
+  "CONF_06_CHOCOLATE_CORONA_TRAD" = "Choc. Corona Tradicional",
+  "CONF_07_JUMBO_MANI"           = "Chocolatina Jumbo Maní 100g",
+  "CONF_09_FERRERO_ROCHER"       = "Ferrero Rocher Bombones x8"
+)
+```
+
+### Gráfico 1: Comparación de Precios de Presentaciones Idénticas
+
+```{r grafico_1}
+df_g1 <- df_obs %>%
+  filter(!is.na(id_producto_comun), id_producto_comun %in% names(nombres_canasta)) %>%
+  mutate(producto_nombre = recode(id_producto_comun, !!!nombres_canasta)) %>%
+  group_by(producto_nombre, comercio) %>%
+  summarise(precio_cop = min(precio_cop), .groups = "drop")
+
+hchart(df_g1, type = "column", hcaes(x = producto_nombre, y = precio_cop, group = comercio)) %>%
+  hc_colors(unname(colores_tiendas[c("Carulla", "Éxito", "Jumbo")])) %>%
+  hc_title(text = "1. Comparación de Precios de Confitería: Las 3 Tiendas") %>%
+  hc_subtitle(text = "Precios observados para 8 presentaciones idénticas en Éxito, Carulla y Jumbo (COP)") %>%
+  hc_xAxis(title = list(text = "Producto / Presentación")) %>%
+  hc_yAxis(title = list(text = "Precio en Góndola (COP)"), labels = list(format = "${value:,.0f}")) %>%
+  hc_tooltip(
+    shared = TRUE,
+    headerFormat = "<b>{point.key}</b><br/>",
+    pointFormat = '<span style="color:{series.color}">\u25CF</span> {series.name}: <b>${point.y:,.0f} COP</b><br/>'
+  ) %>%
+  hc_plotOptions(column = list(borderRadius = 4, grouping = TRUE)) %>%
+  hc_exporting(enabled = TRUE)
+```
+
+* **Interpretación:** Éxito lidera en golosinas individuales como Kinder ($12,000 COP) y M&M Maní ($5,091 COP). Jumbo ofrece el mejor precio en chocolate de mesa Corona ($15,600 COP) y Carulla empata en Chocobreak 250g ($15,700 COP).
+* **Limitaciones:** Los precios no contemplan cargos por domicilio, mínimos de compra ni descuentos por medios de pago específicos.
+
+### Gráfico 2: Precio por Gramo (Economía de Escala)
+
+```{r grafico_2}
+df_g2 <- df_obs %>%
+  filter(id_producto_comun %in% c("CONF_04_CHOCOBREAK_150G", "CONF_05_CHOCOBREAK_250G", "CONF_06_CHOCOLATE_CORONA_TRAD")) %>%
+  mutate(
+    presentacion_label = case_when(
+      str_detect(id_producto_comun, "CORONA") ~ paste0("Corona (", contenido_valor, "g) - ", comercio),
+      str_detect(id_producto_comun, "CHOCOBREAK") ~ paste0("Chocobreak (", contenido_valor, "g) - ", comercio),
+      TRUE ~ paste0(contenido_valor, "g - ", comercio)
+    )
+  ) %>%
+  group_by(presentacion_label, comercio, contenido_valor) %>%
+  summarise(cop_por_gramo = round(mean(precio_por_unidad), 1), .groups = "drop") %>%
+  arrange(cop_por_gramo)
+
+hchart(df_g2, type = "bar", hcaes(x = presentacion_label, y = cop_por_gramo, color = comercio)) %>%
+  hc_colors(unname(colores_tiendas[c("Carulla", "Éxito", "Jumbo")])) %>%
+  hc_title(text = "2. Eficiencia de Contenido: Precio por Gramo (COP / g)") %>%
+  hc_subtitle(text = "Economía de escala: empaques pequeños vs. empaques familiares") %>%
+  hc_xAxis(title = list(text = "Presentación y Comercio")) %>%
+  hc_yAxis(title = list(text = "Costo por Gramo (COP/g)"), labels = list(format = "${value:,.0f}/g")) %>%
+  hc_tooltip(pointFormat = '<b>{point.comercio}</b><br/>Costo unitario: <b>${point.y:.1f} COP/g</b>') %>%
+  hc_plotOptions(bar = list(
+    borderRadius = 4,
+    dataLabels = list(enabled = TRUE, format = "${point.y:.1f}/g")
+  )) %>%
+  hc_exporting(enabled = TRUE)
+```
+
+* **Interpretación:** En Chocobreak, el empaque de 250g reduce el costo a **$62.8 COP/g**, lo que representa un ahorro unitario de hasta el **24%** frente a la presentación de 150g ($77.7 COP/g).
+* **Limitaciones:** El ahorro unitario solo se materializa si se consume todo el producto antes de su vencimiento.
+
+### Gráfico 3: Oportunidades de Ahorro Potencial
+
+```{r grafico_3}
+con <- dbConnect(SQLite(), "comparador_precios.sqlite")
+df_g3 <- dbGetQuery(con, "
+  SELECT 
+    id_producto_comun,
+    MIN(precio_cop) AS precio_min,
+    MAX(precio_cop) AS precio_max,
+    ROUND(MAX(precio_cop) - MIN(precio_cop), 0) AS ahorro_absoluto_cop,
+    ROUND(100.0 * (MAX(precio_cop) - MIN(precio_cop)) / MAX(precio_cop), 1) AS ahorro_porcentual
+  FROM observaciones
+  WHERE es_comparable = 1
+  GROUP BY id_producto_comun
+  HAVING COUNT(DISTINCT comercio) > 1
+  ORDER BY ahorro_porcentual ASC;
+")
+dbDisconnect(con)
+
+df_g3 <- df_g3 %>%
+  filter(id_producto_comun %in% names(nombres_canasta)) %>%
+  mutate(producto_comercial = recode(id_producto_comun, !!!nombres_canasta))
+
+hchart(df_g3, type = "bar", hcaes(x = producto_comercial, y = ahorro_porcentual)) %>%
+  hc_colors("#E74C3C") %>%
+  hc_title(text = "3. Oportunidades de Ahorro Máximo por Producto (%)") %>%
+  hc_subtitle(text = "Diferencia porcentual entre el comercio más costoso y el más económico") %>%
+  hc_xAxis(title = list(text = "Producto")) %>%
+  hc_yAxis(
+    title = list(text = "Ahorro Potencial (%)"),
+    labels = list(format = "{value}%"),
+    max = max(df_g3$ahorro_porcentual) * 1.15
+  ) %>%
+  hc_tooltip(
+    pointFormat = 'Ahorro: <b>{point.y:.1f}%</b> (${point.ahorro_absoluto_cop:,.0f} COP)<br/>Mín: ${point.precio_min:,.0f} | Máx: ${point.precio_max:,.0f}'
+  ) %>%
+  hc_plotOptions(bar = list(
+    borderRadius = 4,
+    dataLabels = list(enabled = TRUE, format = "{point.y:.1f}%")
+  )) %>%
+  hc_exporting(enabled = TRUE)
+```
+
+* **Interpretación:** Las mayores brechas ocurren en M&M Maní (22.7%) y Chocobreak 150g (19.8%). En Ferrero Rocher y Corona 450g la dispersión es menor (5.1%), indicando alta competencia en productos tradicionales.
+
+## 6. Conclusiones para el Consumidor
+
+1. **Dónde comprar:**
+   * **Éxito:** Es la opción más conveniente para golosinas individuales e importadas (Kinder, M&M, Jet).
+   * **Jumbo:** Es el más económico para chocolates de mesa y presentaciones grandes (Corona).
+   * **Carulla:** Resulta competitivo en bolsas de dulces medianos (Chocobreak 150g) y empata en Chocobreak 250g.
+2. **Desembolso vs. Ahorro Unitario:** 
+   Elegir empaques pequeños exige menos dinero en caja, pero resulta entre 15% y 24% más costoso por gramo. Se recomienda priorizar presentaciones de 250g o más para consumo recurrente.
+3. **Condiciones de compra:** 
+   Dado que los ahorros absolutos rondan entre $1,000 y $2,500 COP, los costos de envío a domicilio pueden anular la ventaja; conviene consolidar estos productos dentro de compras familiares mayores.
+```
+

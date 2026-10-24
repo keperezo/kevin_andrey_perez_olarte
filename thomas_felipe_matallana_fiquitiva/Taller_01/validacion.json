@@ -1,0 +1,16 @@
+{
+  "ejecucion": "20261010T112803_180f96c4",
+  "observaciones_comparables": 24,
+  "faltantes_o_duplicados": [],
+  "cobertura_completa": true,
+  "integridad": "ok",
+  "reconstruccion_identica": true,
+  "offline_sin_red": true,
+  "idempotente": true,
+  "consultas_sql_ejecutadas": 14,
+  "bloques_python_ejecutados": 17,
+  "graficos_verificados": 3,
+  "render_quarto": "No completado por permisos del entorno",
+  "exportacion_html": "Jupyter + nbconvert",
+  "pull_request": "No creado"
+}

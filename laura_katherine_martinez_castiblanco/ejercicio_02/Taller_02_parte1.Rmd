@@ -1,0 +1,300 @@
+---
+title: "Taller 2 - Taller práctico de SQL Parte 1"
+author: "Laura Katherine Martinez Castiblanco"
+output:
+  html_document:
+    theme: flatly
+    toc: false
+    self_contained: true
+    code_folding: hide
+    mathjax: default
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Lamado de base de datos y conexión con SQLite
+
+```{r librerias y conexion, include=FALSE}
+# Instalamos los paquetes necesarios
+paquetes  <- c("DBI", "RSQLite", "dplyr", "knitr")
+instalados <- rownames(installed.packages())
+pendientes <- setdiff(paquetes, instalados)
+if (length(pendientes) > 0) install.packages(pendientes)
+
+library(DBI)
+library(RSQLite)
+library(dplyr)
+library(knitr)
+library(kableExtra) 
+
+# Descargar la base de datos Chinook si no existe
+url_chinook <- "https://raw.githubusercontent.com/lerocha/chinook-database/master/ChinookDatabase/DataSources/Chinook_Sqlite.sqlite"
+ruta_db     <- "chinook.db"
+
+if (!file.exists(ruta_db)) {
+  download.file(url_chinook, destfile = ruta_db, mode = "wb")
+  cat("Base de datos descargada en:", ruta_db, "\n")
+} else {
+  cat("La base de datos ya existe:", ruta_db, "\n")
+}
+
+# Abrimos la conexión
+con <- dbConnect(RSQLite::SQLite(), "chinook.db")
+cat("Conexión establecida.\n")
+```
+
+Exploración de la base de datos
+
+```{r exploracion_esquema, echo=TRUE}
+# Listar todas las tablas de la base de datos
+tablas <- dbListTables(con)
+cat("Tablas disponibles:", paste(tablas, collapse=", "), "\n\n")
+
+# Inspeccionar las columnas de las tablas clave
+cat("Columnas de la tabla 'Track':\n")
+print(dbListFields(con, "Track"))
+
+cat("\nColumnas de la tabla 'Genre':\n")
+print(dbListFields(con, "Genre"))
+
+cat("\nColumnas de la tabla 'Album':\n")
+print(dbListFields(con, "Album"))
+```
+
+
+Ejemplo de consulta
+
+```{sql consulta_1, connection=con, output.var="resultado_sql"}
+SELECT * FROM Track LIMIT 5;
+```
+
+```{r mostrar_tabla, echo=FALSE}
+
+kable(resultado_sql, caption = "Primeras 5 pistas") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+# Ejercicio 1: Análisis descriptivo de la colección musical
+
+Con la base de datos Chinook, responde las siguientes preguntas usando sentencias SQL.
+
+## 1. ¿Cuántas pistas hay en total en la base de datos?
+
+Usando la función de agregación `COUNT()`.
+
+```{sql 1item_1, connection=con}
+SELECT COUNT(TrackId) AS total_pistas
+FROM Track;
+```
+
+
+## 2. ¿Cuántos géneros distintos existen?
+
+Contar los géneros directamente desde la tabla `Genre`.
+<!-- o usar `COUNT(DISTINCT)` sobre la tabla `Track` -->
+
+```{sql 1item_2, connection=con}
+SELECT COUNT(GenreId) AS total_generos
+FROM Genre;
+```
+
+
+## 3. Obtén el nombre del género, el número de pistas y la duración promedio (en minutos) para cada género.
+   Ordena de mayor a menor número de pistas.
+   
+Se relaciona la tabla `Track` con `Genre` mediante un `INNER JOIN`. Agrupando por el nombre del género y ordenando de forma descendente (`DESC`).
+
+
+<!-- Aquí necesitamos unir (`JOIN`) la tabla `Track` con la tabla `Genre` usando la clave foránea `GenreId`. Además, la duración está en milisegundos, por lo que debemos dividir por 60,000 para obtener minutos. -->
+
+
+```{sql 1item_3, connection=con, output.var="df_generos"}
+SELECT 
+    g.Name AS genero, 
+    COUNT(t.TrackId) AS num_pistas, 
+    ROUND(AVG(t.Milliseconds) / 60000.0, 2) AS duracion_prom_min
+FROM Track t
+JOIN Genre g ON t.GenreId = g.GenreId
+GROUP BY g.Name
+ORDER BY num_pistas DESC;
+```
+
+
+```{r plot_generos, echo=FALSE}
+library(ggplot2)
+ggplot(df_generos, aes(x = reorder(genero, -num_pistas), y = num_pistas)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Número de Pistas por Género", x = "Género", y = "Cantidad de Pistas") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+## 4. ¿Cuáles son las 5 pistas más largas? Muestra el nombre, el álbum y la duración en minutos.
+
+
+Se une la tabla `Track` con `Album` para obtener el nombre del álbum. Posteriormente se ordena por la duración en milisegundos de forma descendente y se limita a 5.
+
+```{sql 1item_4, connection=con}
+SELECT 
+    t.Name AS pista, 
+    al.Title AS album, 
+    ROUND(t.Milliseconds / 60000.0, 2) AS duracion_min
+FROM Track t
+JOIN Album al ON t.AlbumId = al.AlbumId
+ORDER BY t.Milliseconds DESC
+LIMIT 5;
+```
+
+
+## 5. ¿Cuántas pistas tienen un `UnitPrice` superior a $0.99? ¿Qué porcentaje representan del total?
+
+Se cuenta el número de pista que cumplen la condición y se divide por el total de pistas en la tabla, por 100 para el porcentaje.
+
+```{sql 1item_5, connection=con}
+SELECT 
+    COUNT(CASE WHEN UnitPrice > 0.99 THEN 1 END) AS pistas_mayores_099,
+    COUNT(*) AS total_pistas,
+    ROUND(COUNT(CASE WHEN UnitPrice > 0.99 THEN 1 END) * 100.0 / COUNT(*), 2) AS porcentaje
+FROM Track;
+```
+
+
+## 6. Calcula la media, mínimo, máximo y varianza (en SQL) de la duración en milisegundos de todas las pistas.
+
+<!-- Como vimos en la teoría, SQLite no tiene una función nativa para la varianza. Debemos calcularla manualmente usando la fórmula: `AVG(x*x) - AVG(x)*AVG(x)`. -->
+
+Dado que SQLite no posee una función nativa para la varianza, se emplea la identidad algebraica `AVG(x^2) - (AVG(x))^2`.
+
+```{sql 1item_6, connection=con}
+SELECT 
+    ROUND(AVG(Milliseconds), 2) AS media_ms,
+    MIN(Milliseconds) AS minimo_ms,
+    MAX(Milliseconds) AS maximo_ms,
+    ROUND(AVG(Milliseconds * Milliseconds) - (AVG(Milliseconds) * AVG(Milliseconds)), 2) AS varianza_ms
+FROM Track;
+```
+
+
+# Ejercicio 2: Análisis descriptivo de ventas
+
+Usando las tablas `Invoice` (facturas) e `InvoiceLine` (líneas de factura), responde:
+
+
+## 1. ¿Cuál es el total de ingresos generados por la tienda? ¿Y el promedio por factura?
+
+Se emplea las funciones de agregación `SUM()` y `AVG()` sobre la columna `Total` de la tabla `Invoice`.
+
+
+```{sql ej2_item1, connection=con}
+SELECT 
+    SUM(Total) AS total_ingresos,
+    ROUND(AVG(Total), 2) AS promedio_por_factura
+FROM Invoice;
+```
+
+## 2. ¿Cuántas facturas se emitieron por año? Ordena cronológicamente.
+
+Para extraer el año de la columna `InvoiceDate`, se usa la función `SUBSTR()` que extrae una subcadena de texto. Luego se agrupa por año y contamos las facturas. Finalmente se ordena de forma ascendente.
+
+```{sql ej2_item2, connection=con}
+SELECT 
+    SUBSTR(InvoiceDate, 1, 4) AS anho,
+    COUNT(InvoiceId) AS num_facturas
+FROM Invoice
+GROUP BY anho
+ORDER BY anho ASC;
+```
+
+## 3. Identifica los **5 países con más ingresos**. Muestra: país, número de facturas, ingreso total y promedio por factura.
+
+
+Se agrupa por `BillingCountry` y calcula el número de facturas, el ingreso total y el promedio por facturas. Se ordena de forma descendente y se limita a los primeros 5.
+
+```{sql ej2_item3, connection=con, output.var="top5_paises"}
+SELECT 
+    BillingCountry AS pais,
+    COUNT(InvoiceId) AS num_facturas,
+    ROUND(SUM(Total), 2) AS ingreso_total,
+    ROUND(AVG(Total), 2) AS promedio_por_factura
+FROM Invoice
+GROUP BY pais
+ORDER BY ingreso_total DESC
+LIMIT 5;
+```
+
+
+```{r ej2_item3_plot, echo=FALSE}
+library(ggplot2)
+ggplot(top5_paises, aes(x = reorder(pais, ingreso_total), y = ingreso_total)) +
+    geom_col(fill = "steelblue") +
+    coord_flip() +
+    labs(title = "Top 5 Países por Ingresos",
+         x = "País",
+         y = "Ingreso Total (USD)") +
+    theme_minimal()
+```
+
+
+## 4. ¿Cuál es la desviación estándar del total de facturas? Calcula primero la varianza en SQL y luego obtén la raíz en R o Python.
+
+La varianza poblacional se calcula como: 
+
+**Var(X) = AVG(X²) - (AVG(X))²**.
+
+```{sql varianza_facturas, connection=con, output.var="resultado_varianza"}
+SELECT 
+    AVG(Total * Total) - (AVG(Total) * AVG(Total)) AS varianza_total
+FROM Invoice;
+```
+
+Se tiene la varianza guardada en la variable `resultado_varianza`, la cual se emplea en R para calcular la raíz cuadrada y obtener la desviación estándar.
+
+```{r calculo_desviacion_r, echo=TRUE}
+# Extraemos el valor de la varianza del data frame resultado
+valor_varianza <- resultado_varianza$varianza_total[1]
+
+# Calculamos la raíz cuadrada para obtener la desviación estándar
+desviacion_estandar <- sqrt(valor_varianza)
+
+cat("La varianza del total de facturas es:", valor_varianza, "\n")
+cat("La desviación estándar del total de facturas es:", desviacion_estandar, "\n")
+```
+
+
+## 5. Encuentra los meses con mayor y menor ingreso promedio.
+
+Con `SUBSTR(InvoiceDate, 6, 2)` se extrae los caracteres en la posición 6 y 7 (correspondientes al mes en formato YYYY-MM-DD). Se agrupa por mes y calcula el promedio de ingreso.
+
+```{sql ej2_item4, connection=con, output.var="ingreso_mensual"}
+SELECT 
+    SUBSTR(InvoiceDate, 6, 2) AS mes,
+    COUNT(InvoiceId) AS num_facturas,
+    ROUND(AVG(Total), 2) AS ingreso_promedio
+FROM Invoice
+GROUP BY mes
+ORDER BY ingreso_promedio DESC;
+```
+
+Visualizamos los resultados:
+
+```{r ej2_item4_plot, echo=FALSE}
+library(ggplot2)
+ggplot(ingreso_mensual, aes(x = mes, y = ingreso_promedio)) +
+    geom_col(fill = "steelblue") +
+    labs(title = "Ingreso Promedio por Mes",
+         x = "Mes",
+         y = "Ingreso Promedio (USD)") +
+    theme_minimal()
+```
+
+
+
+```{r cerrar, echo=FALSE}
+dbDisconnect(con)
+```

@@ -1,0 +1,556 @@
+---
+title: "Solución Taller 1"
+author: "Laura Katherine Martínez Castiblanco"
+output:
+  html_document:
+    theme: flatly
+    toc: false
+    self_contained: true
+    code_folding: hide
+    mathjax: default
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+# 4. Leer una página web
+
+```{r paquetes}
+paquetes <- c(
+  "rvest", "xml2", "dplyr", "stringr",
+  "purrr", "janitor", "readr", "knitr"
+)
+# Verificamos qué paquetes faltan. La instalación se hace por fuera de la
+# compilación para evitar cambios inesperados en el entorno del estudiante.
+instalados <- rownames(installed.packages())
+pendientes <- setdiff(paquetes, instalados)
+
+if (length(pendientes) > 0) {
+  stop(
+    "Faltan paquetes: ", paste(pendientes, collapse = ", "),
+    ". Instálelos con install.packages(c(",
+    paste(sprintf('"%s"', pendientes), collapse = ", "), "))"
+  )
+}
+
+# Cargamos los paquetes sin mostrar mensajes
+invisible(lapply(paquetes, library, character.only = TRUE))
+```
+
+
+```{r Quotes to Scrape}
+url_quotes <- "https://quotes.toscrape.com/"
+
+# Leemos el HTML de la página
+pagina_quotes <- read_html(url_quotes)
+pagina_quotes
+```
+
+
+```{r Extraer el título}
+pagina_quotes %>%
+  html_element("title") %>%
+  html_text2()
+```
+
+```{r Extraer textos}
+citas <- pagina_quotes %>%
+  html_elements(".quote .text") %>%
+  html_text2()
+
+citas
+```
+
+```{r Extraer autores}
+autores <- pagina_quotes %>%
+  html_elements(".quote .author") %>%
+  html_text2()
+
+autores
+```
+
+```{r tabla citas}
+# Creamos la tabla
+tabla_citas <- tibble(
+  cita = citas,
+  autor = autores
+)
+
+# Mostramos las citas en una tabla
+knitr::kable(
+  head(tabla_citas, 10), 
+  caption = "Primeras citas extraídas de Quotes to Scrape",
+  col.names = c("Cita", "Autor"), # Mejora: Nombres de columna claros
+  format = "html" # Usa "pipe" si prefieres formato markdown plano
+)
+```
+
+
+# 5. Citas, autores y etiquetas
+
+```{r extraeremos etiquetas}
+nodos_citas <- pagina_quotes %>%
+               html_elements(".quote")
+length(nodos_citas)
+```
+
+
+```{r Extraer información por bloque}
+tabla_citas_completa <- map_dfr(nodos_citas, function(nodo) {
+  cita <- nodo %>% html_element(".text") %>% html_text2()
+  autor <- nodo %>% html_element(".author") %>% html_text2()
+  tags <- nodo %>% html_elements(".tags .tag") %>% html_text2()
+
+  tibble(
+    cita = cita,
+    autor = autor,
+    tags = paste(tags, collapse = ", ")
+  )
+})
+
+knitr::kable(
+  head(tabla_citas_completa, 10), 
+  caption = "Citas, autores y etiquetas extraídas",
+  col.names = c("Cita", "Autor", "Tags") # Nombres de columna claros
+)
+```
+
+# 6. Limpieza básica del texto extraído
+
+```{r tabla_citas_limpia }
+tabla_citas_limpia <- tabla_citas_completa %>%
+  mutate(
+    # Quitamos las comillas tipográficas de la cita
+    cita = str_replace_all(cita, "[\u201c\u201d]", ""),
+    # Eliminamos espacios sobrantes en el texto de la cita
+    cita = str_squish(cita),
+    # Limpiamos espacios innecesarios en el nombre del autor
+    autor = str_squish(autor),
+    # Calculamos cuántas etiquetas tiene cada cita
+    n_tags = if_else(tags == "", 0L, str_count(tags, ",") + 1L)
+  )
+
+knitr::kable(
+  head(tabla_citas_limpia, 10), 
+  caption = "Citas limpias con número de etiquetas",
+  col.names = c("Cita", "Autor", "tags", "n Tags") # Nombres de columna claros
+)
+```
+
+
+```{r Resumen}
+
+tabla_citas_limpia %>%
+  count(autor, sort = TRUE) %>%
+  head(10) %>%
+  knitr::kable(
+    caption = "Autores con más citas",
+    col.names = c("Autor", "Número de citas")
+  )
+```
+
+# 7. Navegar varias páginas
+
+```{r vector de URLs}
+urls_paginas_quotes <- c(
+  "https://quotes.toscrape.com/page/1/",
+  "https://quotes.toscrape.com/page/2/",
+  "https://quotes.toscrape.com/page/3/"
+)
+
+urls_paginas_quotes
+```
+
+
+```{r función para scrapear una página}
+# Definimos una función que recibe la URL de una página
+scrapear_quotes <- function(url) {
+  # Leemos el HTML de la página
+  pagina <- read_html(url)
+  # Seleccionamos todos los bloques que contienen citas
+  nodos <- pagina %>% html_elements(".quote")
+
+  if (length(nodos) == 0) {
+    stop("No se encontraron citas en: ", url)
+  }
+
+  # Recorremos cada bloque de cita y unimos los resultados en una tabla
+  map_dfr(nodos, function(nodo) {
+    # Extraemos el texto de la cita
+    cita <- nodo %>% html_element(".text") %>% html_text2()
+    # Extraemos el nombre del autor
+    autor <- nodo %>% html_element(".author") %>% html_text2()
+    # Extraemos todas las etiquetas asociadas a la cita
+    tags <- nodo %>% html_elements(".tag") %>% html_text2()
+
+    # Construimos una fila con la información extraída
+    tibble(
+      # Guardamos la URL de origen
+      url_origen = url,
+      # Limpiamos comillas y espacios del texto de la cita
+      cita = str_squish(str_replace_all(cita, "[\u201c\u201d]", "")),
+      # Limpiamos espacios extra en el nombre del autor
+      autor = str_squish(autor),
+      # Unimos las etiquetas en un solo texto separado por comas
+      tags = paste(tags, collapse = ", ")
+    )
+  })
+}
+```
+
+
+```{r Aplicar la función}
+quotes_tres_paginas <- map_dfr(urls_paginas_quotes, scrapear_quotes)
+knitr::kable(
+  head(quotes_tres_paginas, 10), 
+  caption = "Resultados combinados de varias páginas",
+  col.names = c("URL Origen", "Cita", "Autor", "Etiquetas") # Nombres de columna claros
+)
+```
+
+
+```{r Validación}
+quotes_tres_paginas %>%
+  summarise(
+    filas = n(),
+    autores_unicos = n_distinct(autor),
+    citas_duplicadas = sum(duplicated(cita))
+  ) %>%
+   knitr::kable(
+    caption = "Validación básica del scraping de citas",
+    col.names = c("Filas totales", "Autores únicos", "Citas duplicadas")
+  )
+```
+
+# 8. Scraping de un catálogo de libros
+
+```{r Leer la página principal}
+url_books <- "https://books.toscrape.com/catalogue/page-1.html"
+pagina_books <- read_html(url_books)
+pagina_books
+```
+
+
+```{r Identificar los bloques de producto}
+nodos_libros <- pagina_books %>%
+                html_elements("article.product_pod")
+length(nodos_libros)
+```
+
+
+```{r Extraer datos de cada libro}
+# Recorremos cada bloque de libro y unimos los resultados en una tabla
+libros_pagina_1 <- map_dfr(nodos_libros, function(nodo) {
+  # Extraemos el título del libro desde el atributo title del enlace
+  titulo <- nodo %>%
+            html_element("h3 a") %>%
+            html_attr("title")
+
+  # Extraemos el precio como texto
+  precio <- nodo %>%
+            html_element(".price_color") %>%
+            html_text2()
+
+  # Extraemos el texto de disponibilidad del libro
+  disponibilidad <- nodo %>%
+                    html_element(".availability") %>%
+                    html_text2()
+
+  # Extraemos la clase CSS donde está codificado el rating
+  rating_clase <- nodo %>%
+                  html_element("p.star-rating") %>%
+                  html_attr("class")
+
+  # Extraemos el enlace relativo hacia el detalle del libro
+  enlace_relativo <- nodo %>%
+                    html_element("h3 a") %>%
+                    html_attr("href")
+
+  # Construimos una fila con las variables extraídas
+  tibble(
+    titulo          = titulo,
+    precio_texto    = precio,
+    disponibilidad  = disponibilidad,
+    rating_raw      = rating_clase,
+    enlace_relativo = enlace_relativo
+  )
+})
+
+knitr::kable(
+  head(libros_pagina_1, 10), 
+  caption = "Libros extraídos de una página (Datos crudos)",
+  col.names = c("Título", "Precio (Texto)", "Disponibilidad", "Rating (Raw)", "Enlace Relativo")
+)
+```
+
+# 9. Limpieza del catálogo
+
+```{r función que limpie los datos extraídos}
+# Definimos una función para limpiar la clase CSS del rating
+limpiar_rating <- function(x) {
+     # Quitamos el prefijo "star-rating" y dejamos solo la categoría
+     x %>%
+     str_remove("star-rating\\s+")
+}
+
+# Transformamos las variables extraídas a un formato más útil para análisis
+libros_pagina_1_limpia <- libros_pagina_1 %>%
+                          mutate(
+                            # Convertimos el precio de texto a número
+                                precio = precio_texto %>%
+                                  str_replace_all("[^0-9\\.]", "") %>%
+                                  as.numeric(),
+
+                            # Limpiamos la clase del rating para dejar solo su valor
+                            rating = limpiar_rating(rating_raw),
+
+                            # Creamos una variable lógica que indica si el libro está disponible
+                            disponible = str_detect(str_to_lower(disponibilidad), "in stock"),
+
+                            # Construimos el enlace completo hacia el detalle del libro
+                            enlace = paste0("https://books.toscrape.com/catalogue/", enlace_relativo)) %>%
+
+                          # Seleccionamos las variables finales que queremos conservar
+                          select(titulo, precio, disponibilidad, disponible, rating, enlace)
+
+# Mostramos la tabla con las variables ya transformadas
+knitr::kable(
+head(libros_pagina_1_limpia, 10),
+caption = "Libros con variables transformadas (Datos limpios)",
+col.names = c("Título", "Precio (£)", "Disponibilidad (Texto)", "Disponible (Lógico)", "Rating", "Enlace Completo")
+)
+```
+
+# 10. Scrapear varias páginas del catálogo
+
+```{r URLs de las páginas}
+urls_books <- paste0(
+  "https://books.toscrape.com/catalogue/page-",
+  1:3,
+  ".html"
+)
+
+urls_books
+```
+
+```{r Función general para libros}
+scrapear_libros <- function(url) {
+
+  # Leemos el HTML de la página indicada
+  pagina <- read_html(url)
+
+  # Seleccionamos todos los bloques que representan libros
+  nodos  <- pagina %>%
+            html_elements("article.product_pod")
+
+  if (length(nodos) == 0) {
+    stop("No se encontraron libros en: ", url)
+  }
+
+  # Recorremos cada bloque y unimos los resultados en una sola tabla
+  map_dfr(nodos, function(nodo) {
+    # Extraemos el título del libro desde el atributo title
+    titulo <- nodo %>%
+              html_element("h3 a") %>%
+              html_attr("title")
+
+    # Extraemos el precio tal como aparece en la página
+    precio <- nodo %>%
+              html_element(".price_color") %>%
+              html_text2()
+
+    # Extraemos el texto de disponibilidad
+    disponibilidad <- nodo %>%
+                      html_element(".availability") %>%
+                      html_text2()
+    # Extraemos la clase CSS que contiene la información del rating
+    rating_raw <- nodo %>%
+                  html_element("p.star-rating") %>%
+                  html_attr("class")
+
+    # Extraemos el enlace relativo hacia la página de detalle
+    enlace_relativo <- nodo %>%
+                       html_element("h3 a") %>%
+                       html_attr("href")
+
+    # Construimos una fila con los datos limpios y listos para analizar
+    tibble(
+      url_origen     = url,
+      titulo         = titulo,
+      precio         = precio %>% str_replace_all("[^0-9\\.]", "") %>% as.numeric(),
+      disponibilidad = str_squish(disponibilidad),
+      rating         = rating_raw %>% str_remove("star-rating\\s+"),
+      enlace         = paste0("https://books.toscrape.com/catalogue/", enlace_relativo)
+    )
+  })
+}
+```
+
+```{r Ejecutamos scraping multi-página}
+libros_varias_paginas <- map_dfr(urls_books, scrapear_libros)
+knitr::kable(
+  head(libros_varias_paginas, 10), 
+  caption = "Libros combinados de varias páginas",
+  col.names = c("URL Origen", "Título", "Precio (£)", "Disponibilidad", "Rating", "Enlace")
+)
+```
+
+```{r Conteo por rating}
+# Cuántos libros hay en cada categoría
+libros_varias_paginas %>%
+  count(rating, sort = TRUE) %>%
+  knitr::kable(
+    caption = "Conteo de libros por rating",
+    col.names = c("Rating", "Cantidad de libros")
+  )
+```
+
+```{r Resumen de precios}
+# Resumen de precios
+libros_varias_paginas %>%
+summarise(
+  n_libros        = n(),
+  precio_promedio = mean(precio, na.rm = TRUE),
+  precio_min      = min(precio, na.rm = TRUE),
+  precio_max      = max(precio, na.rm = TRUE)
+) %>%
+  knitr::kable(
+    caption = "Resumen estadístico de precios",
+    col.names = c("Total de libros", "Precio promedio (£)", "Precio mínimo (£)", "Precio máximo (£)")
+  )
+```
+
+# 11. Extraer tablas HTML directamente
+
+```{r Extraer tablas}
+# Definimos la URL de una página que contiene tablas HTML
+url_tabla <- "https://www.w3schools.com/html/html_tables.asp"
+# Leemos el HTML de la página
+pagina_tabla <- read_html(url_tabla)
+
+# Extraemos todas las tablas HTML y las convertimos en data frames
+tablas <- pagina_tabla %>%
+          html_table(fill = TRUE)
+
+if (length(tablas) == 0) {
+  stop("No se encontraron tablas en: ", url_tabla)
+}
+# Contamos cuántas tablas fueron encontradas en la página
+length(tablas)
+```
+
+```{r Ver primera tabla}
+# Tomamos la primera tabla extraída y limpiamos sus nombres de columnas
+tabla_ejemplo <- tablas[[1]] %>%
+                 janitor::clean_names()
+
+# Mostramos la tabla con formato amigable para el reporte
+knitr::kable(
+  head(tabla_ejemplo, 10), 
+  caption = "Ejemplo de tabla HTML extraída directamente",
+  col.names = c("Compañía", "Contacto", "País") # Nombres de columna claros y profesionales
+)
+```
+
+# 12. Buenas prácticas en scraping con R
+
+```{r }
+# Calculamos un resumen rápido para validar la calidad del scraping
+libros_varias_paginas %>%
+  summarise(
+    filas             = n(),
+    titulos_unicos    = n_distinct(titulo),
+    faltantes_precio  = sum(is.na(precio)),
+    duplicados_titulo = sum(duplicated(titulo))
+  )
+```
+
+```{r Ejemplo de scraping pausado}
+# Recorremos cada URL del catálogo
+for (u in urls_books) {
+  # Hacemos una pausa de 1 segundo entre peticiones
+  Sys.sleep(1)
+  # Mostramos en consola la URL que se está procesando
+  print(u)
+  # Aquí iría la lectura de la página
+  # read_html(u)
+}
+```
+
+```{r Guardar resultados intermedios}
+# Guardamos las citas extraídas en un archivo CSV
+write_csv(quotes_tres_paginas, "quotes_tres_paginas.csv")
+# Guardamos los libros extraídos en otro archivo CSV
+write_csv(libros_varias_paginas, "libros_varias_paginas.csv")
+```
+
+```{r Manejo básico de errores}
+# Capturamos tanto el resultado como el error para poder diagnosticarlo
+scrapear_libros_seguro <- purrr::safely(scrapear_libros)
+respuestas <- map(urls_books, scrapear_libros_seguro)
+
+# Unimos las respuestas exitosas
+resultado_seguro <- respuestas %>%
+  map("result") %>%
+  compact() %>%
+  list_rbind()
+
+# Registramos la URL y el mensaje de cada error
+errores_scraping <- tibble(
+  url = urls_books,
+  error = map_chr(
+    respuestas,
+    ~ if (is.null(.x$error)) NA_character_ else conditionMessage(.x$error)
+  )
+) %>%
+  filter(!is.na(error))
+
+resultado_seguro
+```
+# 13. Ejercicio de clase
+
+```{r }
+library(httr)
+
+url_base <- "https://www.accuweather.com/"
+robots_url <- paste0(url_base, "robots.txt")
+
+# Petición GET forzando HTTP/1.1 y con User-Agent de navegador
+respuesta_robots <- GET(
+  robots_url,
+  add_headers(`User-Agent` = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+  config(http_version = 2) # En curl, el valor 2 fuerza el uso de HTTP/1.1
+)
+
+# Imprimir el contenido de robots.txt
+if (status_code(respuesta_robots) == 200) {
+  cat(content(respuesta_robots, as = "text", encoding = "UTF-8"))
+} else {
+  print(paste("Error en la solicitud. Código:", status_code(respuesta_robots)))
+}
+```
+
+```{r }
+# Instalar si no lo tienes
+if (!require("robotstxt")) install.packages("robotstxt")
+library(robotstxt)
+
+# 1. Obtener y mostrar el archivo robots.txt completo
+robots_texto <- get_robotstxt("https://www.accuweather.com")
+cat(robots_texto)
+
+# 2. Comprobar directamente si una ruta específica está permitida para un bot
+paths_allowed(
+  domain = "https://www.accuweather.com",
+  path = "/es/co/bogota/107060/weather-forecast/107060",
+  user_agent = "*"
+)
+```
+
+```{r }
+
+```
+
+```{r }
+
+```

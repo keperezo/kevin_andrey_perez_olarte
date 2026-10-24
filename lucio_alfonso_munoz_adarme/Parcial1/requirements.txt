@@ -1,0 +1,6 @@
+# Versiones con las que probé el taller (Python 3.11 o superior)
+requests==2.34.2
+pandas==3.0.6
+matplotlib==3.11.2
+tzdata==2026.5
+jupyter==1.1.1

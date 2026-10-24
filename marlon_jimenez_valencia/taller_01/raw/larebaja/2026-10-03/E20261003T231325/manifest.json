@@ -1,0 +1,73 @@
+{
+ "comercio": "larebaja",
+ "secciones": [
+  {
+   "fq": "C:/9/",
+   "nombre": "DROGUERIA",
+   "total_reportado": 4225,
+   "particiones": [
+    {
+     "filtros": [
+      "C:/9/",
+      "P:[0 TO 19531.25]"
+     ],
+     "total": 2465
+    },
+    {
+     "filtros": [
+      "C:/9/",
+      "P:[19531.26 TO 39062.50]"
+     ],
+     "total": 567
+    },
+    {
+     "filtros": [
+      "C:/9/",
+      "P:[39062.51 TO 78125]"
+     ],
+     "total": 629
+    },
+    {
+     "filtros": [
+      "C:/9/",
+      "P:[78125.01 TO 156250]"
+     ],
+     "total": 448
+    },
+    {
+     "filtros": [
+      "C:/9/",
+      "P:[156250.01 TO 312500]"
+     ],
+     "total": 102
+    },
+    {
+     "filtros": [
+      "C:/9/",
+      "P:[312500.01 TO 625000]"
+     ],
+     "total": 13
+    },
+    {
+     "filtros": [
+      "C:/9/",
+      "P:[625000.01 TO 1250000]"
+     ],
+     "total": 1
+    }
+   ]
+  }
+ ],
+ "paginas": 89,
+ "errores": [],
+ "productos_unicos": 4222,
+ "productos_por_seccion": {
+  "DROGUERIA": 4222
+ },
+ "skus": 4276,
+ "skus_repetidos_descartados": 3,
+ "id_ejecucion": "E20261003T231325",
+ "inicio": "2026-10-03T23:13:25-05:00",
+ "fin": "2026-10-03T23:17:40-05:00",
+ "estado": "parcial"
+}

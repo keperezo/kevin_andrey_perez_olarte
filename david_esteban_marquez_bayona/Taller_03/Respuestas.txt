@@ -1,0 +1,338 @@
+> # =============================================================================
+> # EJERCICIO 1: Análisis descriptivo de la colección musical
+> # =============================================================================
+> 
+> # ---- 1.1 ¿Cuántas pistas hay en total? --------------------------------------
+> e1_1 <- dbGetQuery(con, "
++   SELECT COUNT(*) AS total_pistas
++   FROM   Track;
++ ")
+> mostrar_tabla(e1_1, caption = "1.1 Total de pistas")
+
+
+Table: 1.1 Total de pistas
+
+| total_pistas|
+|------------:|
+|        3,503|
+
+> 
+> 
+> # ---- 1.2 ¿Cuántos géneros distintos existen? --------------------------------
+> # Se cuentan tanto los géneros del catálogo (tabla Genre) como los que
+> # efectivamente tienen pistas asociadas (Track.GenreId).
+> e1_2 <- dbGetQuery(con, "
++   SELECT (SELECT COUNT(*)                FROM Genre) AS generos_catalogo,
++          (SELECT COUNT(DISTINCT GenreId) FROM Track) AS generos_con_pistas;
++ ")
+> mostrar_tabla(e1_2, caption = "1.2 Géneros distintos")
+
+
+Table: 1.2 Géneros distintos
+
+| generos_catalogo| generos_con_pistas|
+|----------------:|------------------:|
+|               25|                 25|
+
+> 
+> 
+> # ---- 1.3 Pistas y duración promedio por género -------------------------------
+> e1_3 <- dbGetQuery(con, "
++   SELECT   g.Name                                  AS genero,
++            COUNT(t.TrackId)                        AS n_pistas,
++            ROUND(AVG(t.Milliseconds) / 60000.0, 2) AS duracion_media_min
++   FROM     Track t
++   JOIN     Genre g ON t.GenreId = g.GenreId
++   GROUP BY g.GenreId, g.Name
++   ORDER BY n_pistas DESC;
++ ")
+> mostrar_tabla(e1_3, caption = "1.3 Número de pistas y duración media por género")
+
+
+Table: 1.3 Número de pistas y duración media por género
+
+|genero             | n_pistas| duracion_media_min|
+|:------------------|--------:|------------------:|
+|Rock               |    1,297|               4.73|
+|Latin              |      579|               3.88|
+|Metal              |      374|               5.16|
+|Alternative & Punk |      332|               3.91|
+|Jazz               |      130|               4.86|
+|TV Shows           |       93|              35.75|
+|Blues              |       81|               4.51|
+|Classical          |       74|               4.90|
+|Drama              |       64|              42.92|
+|R&B/Soul           |       61|               3.67|
+|Reggae             |       58|               4.12|
+|Pop                |       48|               3.82|
+|Soundtrack         |       43|               4.07|
+|Alternative        |       40|               4.40|
+|Hip Hop/Rap        |       35|               2.97|
+|Electronica/Dance  |       30|               5.05|
+|Heavy Metal        |       28|               4.96|
+|World              |       28|               3.75|
+|Sci Fi & Fantasy   |       26|              48.53|
+|Easy Listening     |       24|               3.15|
+|Comedy             |       17|              26.42|
+|Bossa Nova         |       15|               3.66|
+|Science Fiction    |       13|              43.76|
+|Rock And Roll      |       12|               2.24|
+|Opera              |        1|               2.91|
+
+> 
+> 
+> # ---- 1.4 Las 5 pistas más largas --------------------------------------------
+> e1_4 <- dbGetQuery(con, "
++   SELECT   t.Name                               AS pista,
++            a.Title                              AS album,
++            ROUND(t.Milliseconds / 60000.0, 2)   AS duracion_min
++   FROM     Track t
++   JOIN     Album a ON t.AlbumId = a.AlbumId
++   ORDER BY t.Milliseconds DESC
++   LIMIT    5;
++ ")
+> mostrar_tabla(e1_4, caption = "1.4 Las 5 pistas más largas")
+
+
+Table: 1.4 Las 5 pistas más largas
+
+|pista                       |album                                    | duracion_min|
+|:---------------------------|:----------------------------------------|------------:|
+|Occupation / Precipice      |Battlestar Galactica, Season 3           |        88.12|
+|Through a Looking Glass     |Lost, Season 3                           |        84.81|
+|Greetings from Earth, Pt. 1 |Battlestar Galactica (Classic), Season 1 |        49.34|
+|The Man With Nine Lives     |Battlestar Galactica (Classic), Season 1 |        49.28|
+|Battlestar Galactica, Pt. 2 |Battlestar Galactica (Classic), Season 1 |        49.27|
+
+> 
+> 
+> # ---- 1.5 Pistas con UnitPrice > 0.99 y su porcentaje ------------------------
+> e1_5 <- dbGetQuery(con, "
++   SELECT SUM(CASE WHEN UnitPrice > 0.99 THEN 1 ELSE 0 END)   AS pistas_precio_mayor,
++          COUNT(*)                                            AS total_pistas,
++          ROUND(100.0 * SUM(CASE WHEN UnitPrice > 0.99 THEN 1 ELSE 0 END)
++                / COUNT(*), 2)                                AS porcentaje
++   FROM   Track;
++ ")
+> mostrar_tabla(e1_5, caption = "1.5 Pistas con precio superior a $0.99")
+
+
+Table: 1.5 Pistas con precio superior a $0.99
+
+| pistas_precio_mayor| total_pistas| porcentaje|
+|-------------------:|------------:|----------:|
+|                 213|        3,503|       6.08|
+
+> 
+> 
+> # ---- 1.6 Media, mínimo, máximo y varianza de Milliseconds --------------------
+> # SQLite no trae VARIANCE(): se usa la fórmula manual vista en clase.
+> #   Varianza poblacional: AVG(x^2) - AVG(x)^2
+> #   Varianza muestral   : varianza poblacional * n / (n - 1)
+> e1_6 <- dbGetQuery(con, "
++   SELECT COUNT(*)                                             AS n,
++          ROUND(AVG(Milliseconds), 2)                          AS media_ms,
++          MIN(Milliseconds)                                    AS min_ms,
++          MAX(Milliseconds)                                    AS max_ms,
++          AVG(Milliseconds * Milliseconds)
++            - AVG(Milliseconds) * AVG(Milliseconds)            AS varianza_pob_ms,
++          (AVG(Milliseconds * Milliseconds)
++            - AVG(Milliseconds) * AVG(Milliseconds))
++            * COUNT(*) / (COUNT(*) - 1.0)                      AS varianza_muestral_ms
++   FROM   Track;
++ ")
+> mostrar_tabla(e1_6, caption = "1.6 Estadísticos de la duración (ms)")
+
+
+Table: 1.6 Estadísticos de la duración (ms)
+
+|     n|  media_ms| min_ms|    max_ms| varianza_pob_ms| varianza_muestral_ms|
+|-----:|---------:|------:|---------:|---------------:|--------------------:|
+| 3,503| 393,599.2|  1,071| 5,286,953| 286,149,105,505|      286,230,815,701|
+
+> 
+> # Verificación con R (var() usa n - 1)
+> ms <- dbGetQuery(con, "SELECT Milliseconds FROM Track;")$Milliseconds
+> cat("Verificación R -> media:", round(mean(ms), 2),
++     "| varianza muestral:", format(var(ms), big.mark = ","), "\n\n")
+Verificación R -> media: 393599.2 | varianza muestral: 286,230,815,701 
+
+> 
+> 
+> # =============================================================================
+> # EJERCICIO 2: Análisis descriptivo de ventas
+> # =============================================================================
+> 
+> # ---- 2.1 Ingreso total y promedio por factura -------------------------------
+> # Ingreso total a partir del detalle (InvoiceLine) y promedio por factura (Invoice)
+> e2_1 <- dbGetQuery(con, "
++   SELECT (SELECT ROUND(SUM(UnitPrice * Quantity), 2) FROM InvoiceLine) AS ingreso_total,
++          (SELECT COUNT(*)                            FROM Invoice)     AS n_facturas,
++          (SELECT ROUND(AVG(Total), 2)                FROM Invoice)     AS promedio_por_factura;
++ ")
+> mostrar_tabla(e2_1, caption = "2.1 Ingreso total y promedio por factura")
+
+
+Table: 2.1 Ingreso total y promedio por factura
+
+| ingreso_total| n_facturas| promedio_por_factura|
+|-------------:|----------:|--------------------:|
+|       2,328.6|        412|                 5.65|
+
+> 
+> # Comprobación: la suma de Invoice.Total coincide con la de InvoiceLine
+> dbGetQuery(con, "SELECT ROUND(SUM(Total), 2) AS total_desde_invoice FROM Invoice;")
+  total_desde_invoice
+1              2328.6
+> 
+> 
+> # ---- 2.2 Facturas por año ---------------------------------------------------
+> e2_2 <- dbGetQuery(con, "
++   SELECT   SUBSTR(InvoiceDate, 1, 4)  AS anio,
++            COUNT(*)                   AS n_facturas,
++            ROUND(SUM(Total), 2)       AS ingreso_total
++   FROM     Invoice
++   GROUP BY anio
++   ORDER BY anio;
++ ")
+> mostrar_tabla(e2_2, caption = "2.2 Facturas emitidas por año")
+
+
+Table: 2.2 Facturas emitidas por año
+
+|anio | n_facturas| ingreso_total|
+|:----|----------:|-------------:|
+|2021 |         83|        449.46|
+|2022 |         83|        481.45|
+|2023 |         83|        469.58|
+|2024 |         83|        477.53|
+|2025 |         80|        450.58|
+
+> 
+> 
+> # ---- 2.3 Top 5 países por ingresos ------------------------------------------
+> e2_3 <- dbGetQuery(con, "
++   SELECT   BillingCountry         AS pais,
++            COUNT(*)               AS n_facturas,
++            ROUND(SUM(Total), 2)   AS ingreso_total,
++            ROUND(AVG(Total), 2)   AS promedio_por_factura
++   FROM     Invoice
++   GROUP BY BillingCountry
++   ORDER BY SUM(Total) DESC
++   LIMIT    5;
++ ")
+> mostrar_tabla(e2_3, caption = "2.3 Los 5 países con más ingresos")
+
+
+Table: 2.3 Los 5 países con más ingresos
+
+|pais    | n_facturas| ingreso_total| promedio_por_factura|
+|:-------|----------:|-------------:|--------------------:|
+|USA     |         91|        523.06|                 5.75|
+|Canada  |         56|        303.96|                 5.43|
+|France  |         35|        195.10|                 5.57|
+|Brazil  |         35|        190.10|                 5.43|
+|Germany |         28|        156.48|                 5.59|
+
+> 
+> 
+> # ---- 2.4 Desviación estándar del total de facturas --------------------------
+> # Paso 1: varianza en SQL
+> e2_4 <- dbGetQuery(con, "
++   SELECT COUNT(*)                                        AS n,
++          AVG(Total * Total) - AVG(Total) * AVG(Total)    AS varianza_pob,
++          (AVG(Total * Total) - AVG(Total) * AVG(Total))
++            * COUNT(*) / (COUNT(*) - 1.0)                 AS varianza_muestral
++   FROM   Invoice;
++ ")
+> 
+> # Paso 2: raíz cuadrada en R
+> e2_4$desv_est_pob      <- sqrt(e2_4$varianza_pob)
+> e2_4$desv_est_muestral <- sqrt(e2_4$varianza_muestral)
+> mostrar_tabla(e2_4, caption = "2.4 Varianza (SQL) y desviación estándar (R) del total por factura",
++               digits = 4)
+
+
+Table: 2.4 Varianza (SQL) y desviación estándar (R) del total por factura
+
+|   n| varianza_pob| varianza_muestral| desv_est_pob| desv_est_muestral|
+|---:|------------:|-----------------:|------------:|-----------------:|
+| 412|      22.4634|           22.5181|       4.7396|            4.7453|
+
+> 
+> # Verificación con sd() de R (muestral)
+> totales <- dbGetQuery(con, "SELECT Total FROM Invoice;")$Total
+> cat("Verificación R -> sd():", round(sd(totales), 4), "\n\n")
+Verificación R -> sd(): 4.7453 
+
+> 
+> 
+> # ---- 2.5 Meses con mayor y menor ingreso promedio ---------------------------
+> # (a) Ingreso promedio por factura según el mes del año (enero a diciembre,
+> #     acumulando todos los años)
+> e2_5 <- dbGetQuery(con, "
++   SELECT   CAST(SUBSTR(InvoiceDate, 6, 2) AS INTEGER)  AS mes,
++            COUNT(*)                                    AS n_facturas,
++            ROUND(SUM(Total), 2)                        AS ingreso_total,
++            ROUND(AVG(Total), 4)                        AS ingreso_promedio
++   FROM     Invoice
++   GROUP BY mes
++   ORDER BY ingreso_promedio DESC;
++ ")
+> e2_5$nombre_mes <- month.name[e2_5$mes]
+> mostrar_tabla(e2_5, caption = "2.5a Ingreso promedio por factura según mes del año", digits = 4)
+
+
+Table: 2.5a Ingreso promedio por factura según mes del año
+
+| mes| n_facturas| ingreso_total| ingreso_promedio|nombre_mes |
+|---:|----------:|-------------:|----------------:|:----------|
+|   4|         33|        198.14|           6.0042|April      |
+|   9|         33|        196.20|           5.9455|September  |
+|   1|         34|        201.12|           5.9153|January    |
+|   6|         35|        201.10|           5.7457|June       |
+|   2|         33|        187.20|           5.6727|February   |
+|   8|         35|        198.10|           5.6600|August     |
+|   3|         35|        195.10|           5.5743|March      |
+|  10|         35|        193.10|           5.5171|October    |
+|   5|         35|        193.10|           5.5171|May        |
+|  11|         34|        186.24|           5.4776|November   |
+|   7|         35|        190.10|           5.4314|July       |
+|  12|         35|        189.10|           5.4029|December   |
+
+> 
+> cat("Mes con MAYOR ingreso promedio:", e2_5$nombre_mes[1],
++     "(", e2_5$ingreso_promedio[1], ")\n")
+Mes con MAYOR ingreso promedio: April ( 6.0042 )
+> cat("Mes con MENOR ingreso promedio:", e2_5$nombre_mes[nrow(e2_5)],
++     "(", e2_5$ingreso_promedio[nrow(e2_5)], ")\n\n")
+Mes con MENOR ingreso promedio: December ( 5.4029 )
+
+> 
+> # (b) Complemento: los mismos cálculos por año-mes (cada mes calendario concreto)
+> e2_5b <- dbGetQuery(con, "
++   WITH por_mes AS (
++     SELECT   SUBSTR(InvoiceDate, 1, 7)  AS anio_mes,
++              COUNT(*)                   AS n_facturas,
++              ROUND(SUM(Total), 2)       AS ingreso_total,
++              ROUND(AVG(Total), 2)       AS ingreso_promedio
++     FROM     Invoice
++     GROUP BY anio_mes
++   )
++   SELECT 'Mayor' AS extremo, * FROM por_mes
++   WHERE  ingreso_promedio = (SELECT MAX(ingreso_promedio) FROM por_mes)
++   UNION ALL
++   SELECT 'Menor' AS extremo, * FROM por_mes
++   WHERE  ingreso_promedio = (SELECT MIN(ingreso_promedio) FROM por_mes);
++ ")
+> mostrar_tabla(e2_5b, caption = "2.5b Año-mes con mayor y menor ingreso promedio por factura")
+
+
+Table: 2.5b Año-mes con mayor y menor ingreso promedio por factura
+
+|extremo |anio_mes | n_facturas| ingreso_total| ingreso_promedio|
+|:-------|:--------|----------:|-------------:|----------------:|
+|Mayor   |2024-09  |          6|         46.71|             7.79|
+|Menor   |2023-11  |          6|         23.76|             3.96|
+
+> 

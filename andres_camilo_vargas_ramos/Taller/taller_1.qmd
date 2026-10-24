@@ -1,0 +1,657 @@
+---
+title: "Taller 1 — Comparador de precios: salud digestiva"
+subtitle: "Minería de Datos - Universidad Nacional de Colombia"
+author: "Andres Camilo Vargas Ramos"
+date: today
+lang: es
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: show
+    code-tools: true
+    embed-resources: true
+    df-print: kable
+execute:
+  warning: false
+  message: false
+params:
+  ejecutar_scraping: false        
+  id_principal: "20261008T184604" 
+---
+
+```{r}
+#| label: setup
+#| code-summary: "Configuración"
+library(DBI); library(RSQLite)
+library(dplyr); library(tidyr); library(purrr)
+library(ggplot2); library(scales); library(knitr)
+source("scraper.R", encoding = "UTF-8")   
+ID_PRINCIPAL <- params$id_principal
+
+
+# Recolección 
+if (isTRUE(params$ejecutar_scraping)) {
+  resumen_nueva <- ejecutar_recoleccion()
+  print(resumen_nueva)
+}
+
+con <- dbConnect(SQLite(), "comparador_precios.sqlite")
+
+# Colores
+colores <- c("Colsubsidio" = "#1b9e77", "Cruz Verde" = "#d95f02", "Farmatodo" = "#7570b3")
+cop <- function(x) paste0("$", format(round(x), big.mark = ".", decimal.mark = ",", trim = TRUE))
+```
+
+# Introducción
+
+Este trabajo construye un comparador de precios para la categoría salud digestiva a partir de datos recolectados con web scraping en tres droguerías con venta en línea en Colombia: **Colsubsidio**, **Farmatodo** y **Cruz Verde**.
+
+El objetivo es identificar dónde resulta más económico comprar cada producto y qué presentación ofrece el menor precio por unidad de contenido cuando la comparación es válida. Para ello se recolectó la categoría completa en cada comercio y, dentro de esos datos, se identificaron 12 presentaciones idénticas presentes en las tres tiendas: sueros de rehidratación (Electrolit, Pedialyte Max 60, Hidraplus, Solhidrex), un laxante en dos tamaños (Dulcolax 5 mg × 10 y × 20 grageas), un antiemético (Mareol) y un antiácido (Gaviscon Doble Acción).
+
+Todo el proceso se desarrolló en R. Los precios corresponden al momento de la captura (ejecución `r ID_PRINCIPAL`) y no deben interpretarse como permanentes.
+
+# Fuentes y scraping
+
+## Comercios y páginas consideradas
+
+```{r}
+#| label: tbl-fuentes
+#| tbl-cap: "Páginas de cada comercio consideradas equivalentes a la categoría"
+tibble(
+  Comercio   = c("Colsubsidio", "Farmatodo", "Cruz Verde"),
+  `Página o sección` = c(
+    "https://www.drogueriascolsubsidio.com/medicamentos/venta-libre/bienestar-digestivo",
+    CONFIG_LIVE$farmatodo$construir_url(1),
+    CONFIG_LIVE$cruzverde$construir_url(1)),
+  `Estrategia` = c("API JSON interna de VTEX (peticiones HTTP directas)",
+                   "Navegador controlado (read_html_live) + clic en «Cargar más»",
+                   "Navegador controlado (read_html_live) + clic en «Ver más productos»")
+)
+```
+
+Cada sitio organiza sus categorías de forma distinta. Se consideraron equivalentes a la categoría de la planilla «Bienestar digestivo» (Colsubsidio) y «Salud digestiva» (Farmatodo y Cruz Verde). En Farmatodo esta sección incluye las subcategorías antiácidos y antiulcerosos, digestivos, antidiarreicos y sueros, laxantes y fibras, antiflatulentos y productos para el mareo.
+
+**Delimitación de la categoría.** 
+
+Según la planilla, la categoría incluye antiácidos, medicamentos para el reflujo, laxantes, antidiarreicos, antiflatulentos y antieméticos, así como soluciones medicinales de rehidratación oral.
+
+Las secciones de los tres comercios son más amplias que esa delimitación, y se recolectaron completas para documentar la oferta de cada sitio. Los siguientes tipos de producto aparecen en ellas pero no pertenecen a la categoría y se excluyeron de la selección de comparables:
+
+- probióticos (por ejemplo Enterogermina, Floratil, Bisbacter y Multiflora);
+- analgésicos o productos para el malestar general, como Bonfiest (ácido acetilsalicílico y cafeína) y Alka-Seltzer Extreme;
+- suplementos nutricionales y minerales (por ejemplo Enerzinc y Nescare).
+
+Las 12 presentaciones comparables pertenecen a la categoría: Electrolit, Pedialyte Max 60, Hidraplus y Solhidrex son soluciones de rehidratación oral con fórmula especificada en mEq de sodio u OMS; Dulcolax es un laxante; Mareol (dimenhidrinato) es un antiemético; y Gaviscon Doble Acción es un antiácido para el reflujo.
+
+Como los conteos de productos por comercio incluyen toda la sección recolectada, también reflejan estos productos fuera de la delimitación.
+
+## Estrategia de extracción
+
+**Colsubsidio (VTEX).** El sitio carga los productos desde un servicio interno de la plataforma VTEX. Se identificó en las herramientas de desarrollador del navegador (pestaña *Network*) y se consulta directamente con `httr2`:
+
+-   Árbol de categorías: `/api/catalog_system/pub/category/tree/3`, usado para encontrar la ruta `medicamentos/venta-libre/bienestar-digestivo` (función `listar_categorias_colsubsidio()`).
+-   Productos: `/api/catalog_system/pub/products/search/{ruta}?_from=0&_to=49`, recorriendo páginas de 50 productos.
+-   El encabezado HTTP `resources` (por ejemplo `0-49/138`) informa el total de productos de la categoría y se usa para verificar que la recolección está completa.
+-   Cada producto puede tener varios ítems (SKU): se registra uno por presentación, con precio (`Price`), precio antes del descuento (`ListPrice`) y disponibilidad (`AvailableQuantity`).
+
+**Farmatodo y Cruz Verde (contenido dinámico).** Ambos sitios son aplicaciones Angular que cargan los productos con JavaScript, así que se usa `rvest::read_html_live()`, que controla Chrome mediante `chromote`. La función `capturar_live()`:
+
+1.  abre la página de la categoría y espera a que se pinten los productos;
+2.  hace clic en el botón «Cargar más» (Farmatodo) o «Ver más productos» (Cruz Verde), buscándolo por su texto, hasta que el número de productos deja de aumentar;
+3.  en Cruz Verde, recorre la página de arriba abajo para que carguen las imágenes diferidas, de las que se obtiene el código del producto;
+4.  guarda el HTML completo renderizado en `raw/`.
+
+El parseo (`parsear_live()`) se hace siempre sobre el HTML guardado, con selectores CSS definidos en `CONFIG_LIVE`:
+
+```{r}
+#| label: tbl-selectores
+#| tbl-cap: "Selectores CSS utilizados"
+map_dfr(CONFIG_LIVE, function(cfg) tibble(
+  Comercio = cfg$comercio,
+  Ficha    = cfg$selector_ficha,
+  Nombre   = cfg$selector_nombre,
+  Marca    = cfg$selector_marca,
+  Precio   = paste(cfg$selector_precio, collapse = " / "),
+  `Precio antes` = cfg$selector_precio_antes
+))
+```
+
+Decisiones de extracción:
+
+-   **Farmatodo** muestra tres precios: Prime (requiere membresía), oferta y normal tachado. Se registra el precio de oferta (o el normal si no hay oferta), que es el que paga cualquier cliente; el tachado se conserva como `precio_antes` y el precio Prime se excluye. El SKU es el número de la URL del producto (`/producto/1054484-...`).
+-   **Cruz Verde** no incluye enlace al producto en la tarjeta, por lo que se registra como URL la página de la categoría de la que se extrajo el precio. El SKU se obtiene del nombre de archivo de la imagen del producto (`.../images/large/560396_...`). Se descartan las tarjetas sin nombre (espacios vacíos con la misma estructura).
+-   En Colsubsidio se usa un user agent de navegador, una tasa máxima de una petición por segundo (`req_throttle`) y reintentos (`req_retry`). En Farmatodo y Cruz Verde, que se recorren con Chrome, se hacen pausas de varios segundos entre cargas y clics. En ambos casos el objetivo es no sobrecargar los sitios.
+
+**Revisión de `robots.txt` (consultado el 2026-10-07).**
+
+- **Farmatodo** permite las rutas de categoría y de producto (`/categorias/`, `/producto/`) y bloquea el buscador (`/buscar*`, `/busqueda*`), el carrito y la cuenta. La recolección usa solo la página de la categoría.
+- **Cruz Verde** permite las rutas de categoría (`/medicamentos/...`) y bloquea el buscador (`/search`), la bolsa de compras, los pagos y la cuenta. La recolección usa solo la página de la categoría.
+- **Colsubsidio** bloquea para robots genéricos la ruta `/api/`, que es la que se usó para obtener los productos desde el servicio interno de VTEX. Aunque el taller acepta la consulta de servicios internos y el archivo `robots.txt` expresa una preferencia del sitio y no una prohibición legal, la extracción de Colsubsidio no sigue esa indicación. Para mitigar el impacto se hicieron muy pocas peticiones (3 por ejecución, de 50 productos cada una), con una tasa máxima de una petición por segundo y solo de información pública de precios. Una alternativa más respetuosa sería extraer los datos de la página HTML de la categoría (ruta permitida), con el costo de una extracción más lenta y frágil.
+
+**Términos y condiciones (consultados el 2026-10-07).**
+
+- **Cruz Verde:** los términos y condiciones de uso del sitio web (vigentes desde el 13 de marzo de 2023) no mencionan explícitamente la extracción automatizada de datos. Sí prohíben la reproducción total o parcial del sitio sin autorización escrita, el uso de sus marcas y signos distintivos, y cualquier acción que altere o afecte el funcionamiento del sitio. La recolección realizada no reproduce el sitio ni sus contenidos: extrae únicamente precios y datos públicos de los productos para un análisis académico, con pocas peticiones y pausas entre ellas para no afectar su funcionamiento. Los términos también aclaran que Cruz Verde solo responde por los precios publicados en su propio sitio, no por los que aparezcan en otros medios; por eso los precios de este comparador deben verificarse en el sitio antes de comprar.
+
+- **Farmatodo:** los términos y condiciones del sitio no mencionan explícitamente la extracción automatizada de datos. Prohíben las acciones que alteren o afecten el funcionamiento del sitio, la ingeniería inversa de su código y la creación masiva o automatizada de cuentas; la recolección no crea cuentas, no inicia sesión y hace pocas peticiones con pausas entre ellas. Los términos establecen además que el contenido del sitio (textos e imágenes) está protegido por derechos de propiedad intelectual; por eso las copias crudas de `raw/` se conservan únicamente para verificar la extracción en el marco académico del taller y no se redistribuyen con otro fin.
+
+- **Colsubsidio:** los términos y condiciones de la página web no mencionan explícitamente la extracción automatizada de datos, pero su cláusula de propiedad intelectual es la más estricta de los tres sitios: prohíbe la apropiación, copia, réplica o uso de todo el material del sitio, incluidos los textos, sin consentimiento escrito de Colsubsidio. Junto con el bloqueo de la ruta `/api/` en su `robots.txt`, esto indica que el sitio no autoriza la reutilización de sus contenidos. En este trabajo los textos originales de los anuncios y las copias crudas se conservan únicamente porque el taller los exige para verificar la extracción, con fines académicos y sin redistribución comercial. Para cualquier uso distinto, sería necesario solicitar autorización a Colsubsidio o limitar la recolección a los datos de precio.
+
+Ninguna de las extracciones accede a áreas privadas (cuentas, carrito o pagos) ni usa credenciales. La recolección tiene fines académicos, se limita a información pública de precios y no redistribuye contenidos de los sitios.
+
+## Ejecuciones de recolección
+
+```{r}
+#| label: tbl-ejecuciones
+#| tbl-cap: "Tabla de ejecuciones registradas por el scraper"
+dbGetQuery(con, "
+  SELECT id_ejecucion, comercio, inicio, modo, n_registros, n_esperado, estado, detalle
+  FROM ejecuciones ORDER BY inicio")
+```
+
+La tabla incluye ejecuciones de prueba (fallidas o con errores corregidos después) que se conservan como historial. El análisis usa la ejecución **`r ID_PRINCIPAL`**, en la que se recolectaron las tres tiendas en una misma corrida.
+
+**Completitud.** En Colsubsidio el número de productos obtenidos coincide con el total que reporta el sitio (138 de 138). Farmatodo y Cruz Verde no muestran un total; en ellas la recolección se considera completa porque el scraper pulsó el botón de cargar más productos hasta que el número de fichas dejó de aumentar y el resultado fue estable entre ejecuciones (en la ejecución principal, 80 productos en Farmatodo y 224 en Cruz Verde). Las diferencias entre fichas cargadas y registros guardados se deben a productos patrocinados que aparecen repetidos en el listado (se conservan una vez por SKU) y a una tarjeta vacía en Cruz Verde.
+
+## Datos recolectados
+
+La siguiente tabla muestra todos los productos obtenidos en la ejecución principal, tal como quedaron en la tabla `observaciones` de SQLite: nombre original del anuncio, marca, precio, precio anterior, indicador de promoción, URL de extracción y fecha y hora de consulta. Las columnas `comparable` e `id_producto` identifican las 12 presentaciones de la comparación. En Cruz Verde el enlace lleva a la página de la categoría, porque sus tarjetas no enlazan al producto.
+
+```{r}
+#| label: tbl-datos
+#| tbl-cap: "Productos recolectados en la ejecución principal"
+datos <- dbGetQuery(con, "
+  SELECT comercio, sku, nombre_original, marca, precio, precio_antes, promocion,
+         comparable, id_producto, url, fecha_hora_consulta
+  FROM v_observaciones
+  WHERE id_ejecucion = ?
+  ORDER BY comercio, nombre_original", params = list(ID_PRINCIPAL)) |>
+  mutate(url = sprintf('<a href="%s" target="_blank">abrir</a>', url))
+
+DT::datatable(
+  datos,
+  escape   = FALSE,
+  filter   = "top",
+  rownames = FALSE,
+  options  = list(pageLength = 10, scrollX = TRUE)
+) |>
+  DT::formatCurrency(c("precio", "precio_antes"), currency = "$", digits = 0,
+                     mark = ".", dec.mark = ",")
+```
+
+## Copias crudas y modo sin conexión
+
+Cada ejecución guarda las respuestas originales comprimidas en `raw/<comercio>/<id_ejecucion>/`, junto con su URL y la hora de consulta. El siguiente bloque reprocesa esas copias **sin volver a consultar los sitios** y verifica que se obtienen los mismos registros:
+
+```{r}
+#| label: tbl-offline
+#| tbl-cap: "Verificación del modo sin conexión"
+tibble(comercio = names(COMERCIOS)) |>
+  mutate(n_sin_conexion = map_int(comercio, ~ nrow(COMERCIOS[[.x]](ID_PRINCIPAL, offline = TRUE)))) |>
+  left_join(dbGetQuery(con, "SELECT comercio, n_registros FROM ejecuciones WHERE id_ejecucion = ?",
+                       params = list(ID_PRINCIPAL)), by = "comercio") |>
+  mutate(coincide = n_sin_conexion == n_registros)
+```
+
+**Prueba en otro entorno.** El código se probó en Google Colab (entorno R, R 4.6.1) el 2026-10-07. Los paquetes se instalaron desde los binarios para Ubuntu de Posit Package Manager, porque la compilación desde el código fuente falló para `websocket`, `dplyr`, `RSQLite` y `chromote`. El modo sin conexión reprocesó las copias de `raw/` de una ejecución anterior (`20261004T201002`) y obtuvo los mismos registros que en el computador personal: 138 en Colsubsidio, 79 en Farmatodo y 224 en Cruz Verde. Esa base y sus copias crudas se perdieron después en el computador personal, por lo que el análisis usa una nueva recolección completa (`20261008T184604`), cuyo modo sin conexión se verifica en la tabla anterior. La recolección en línea de Colsubsidio, que usa peticiones HTTP directas, terminó con estado `completa` y 138 de 138 productos esperados (ejecución `20261007T233941`, guardada en una base de prueba aparte). Farmatodo y Cruz Verde no se recolectaron en línea en Colab porque requieren Chrome, que no está disponible en ese entorno.
+
+# Preparación de los datos
+
+## Limpieza
+
+Reglas aplicadas en la extracción (`scraper.R`):
+
+-   **Precios** convertidos a número en COP (`"$ 12.900"` → `12900`); un precio ausente o igual a cero queda como `NULL`, nunca como cero.
+-   **Promoción**: `promocion = 1` cuando existe un precio anterior mayor que el precio de venta.
+-   **Texto original** del anuncio conservado sin limpieza (`nombre_original`, `descripcion_original`); las versiones estandarizadas se guardan en campos propios de la tabla `productos`.
+-   **Fecha y hora** de consulta en ISO 8601 y hora de Colombia (por ejemplo `2026-10-08T18:46:04-05:00`).
+-   **Descartes**: tarjetas sin nombre de producto (1 en Cruz Verde) y registros repetidos del mismo SKU dentro de una ejecución (productos patrocinados).
+
+## Correspondencia de productos
+
+La correspondencia de las presentaciones comparables se realizó manualmente con reglas documentadas, verificando **marca, variante, sabor, contenido, número de unidades y concentración**. Un hallazgo importante es que el nombre no basta para identificar una presentación: Colsubsidio publica con el mismo nombre («Dulcolax 5 Mg Gragea») las cajas de 10 y de 20 grageas, y en la mayoría de sus anuncios no indica el tamaño. Por eso, para Colsubsidio se confirmó la presentación en la página de cada producto («FRASCO X 625 ML», «CAJA X 20 GRG») y su código de barras **EAN**.
+
+Se excluyeron de la comparación presentaciones que no eran equivalentes entre tiendas, por ejemplo Alka-Seltzer Extreme (tabletas en una tienda, polvo en otra) y Floratil (sin número de cápsulas en Colsubsidio). En Pedialyte solo se emparejó la variante «Max 60», porque las variantes «Active» y «30 mEq» se nombran distinto en cada tienda.
+
+```{r}
+#| label: correspondencia
+#| code-summary: "Carga de productos comparables y correspondencia (correspondencia.R)"
+invisible(capture.output(source("correspondencia.R", encoding = "UTF-8")))
+con <- dbConnect(SQLite(), "comparador_precios.sqlite")   # correspondencia.R cierra su conexión
+```
+
+```{r}
+#| label: tbl-productos
+#| tbl-cap: "Presentaciones comparables y su contenido estandarizado"
+dbGetQuery(con, "SELECT * FROM productos")
+```
+
+```{r}
+#| label: tbl-correspondencia
+#| tbl-cap: "Correspondencia entre el identificador común y el SKU de cada comercio"
+dbGetQuery(con, "
+  SELECT c.id_producto, c.comercio, c.sku, o.nombre_original, c.verificado, c.nota
+  FROM correspondencia c
+  LEFT JOIN observaciones o
+    ON o.comercio = c.comercio AND o.sku = c.sku AND o.id_ejecucion = ?
+  ORDER BY c.id_producto, c.comercio", params = list(ID_PRINCIPAL))
+```
+
+# Base de datos SQLite
+
+La base `comparador_precios.sqlite` contiene cuatro tablas y una vista:
+
+-   **`ejecuciones`**: una fila por comercio y corrida del scraper (identificador, inicio, fin, modo, registros obtenidos, total esperado y estado `completa`, `parcial` o `fallida`).
+-   **`observaciones`**: cada producto tal como aparece en un comercio en un momento dado (precio, promoción, URL, texto original, fecha y hora). Tiene una **restricción de unicidad** sobre `(comercio, sku, fecha_hora_consulta)`, de modo que una misma observación no se inserta dos veces y las ejecuciones nuevas se agregan sin sobrescribir las anteriores.
+-   **`productos`**: identificador común de las presentaciones comparables, con marca, subcategoría, contenido y unidad estandarizados.
+-   **`correspondencia`**: relaciona el identificador común con el SKU de cada comercio.
+-   **`v_observaciones`** (vista): todas las observaciones con su `id_producto` y el indicador `comparable` (1 si pertenece a las presentaciones comparables, 0 si es parte del resto de la categoría).
+
+
+
+```{r}
+#| label: esquema
+#| code-summary: "Definición de tablas y vista"
+cat(dbGetQuery(con, "SELECT sql FROM sqlite_master WHERE type IN ('table', 'view')
+                     AND name NOT LIKE 'sqlite_%'")$sql, sep = "\n\n")
+```
+
+# Consultas SQL
+
+Todas las consultas se refieren a la ejecución principal `r ID_PRINCIPAL`, salvo que se indique lo contrario.
+
+## ¿Cuántos comercios, productos y observaciones contiene la base?
+
+```{sql}
+--| connection: con
+SELECT
+  (SELECT COUNT(DISTINCT comercio) FROM observaciones)                AS n_comercios,
+  (SELECT COUNT(DISTINCT comercio || '|' || sku) FROM observaciones
+    WHERE id_ejecucion = ?ID_PRINCIPAL)                               AS n_productos_ejec_principal,
+  (SELECT COUNT(*) FROM productos)                                    AS n_presentaciones_comparables,
+  (SELECT COUNT(*) FROM observaciones)                                AS n_observaciones,
+  (SELECT COUNT(DISTINCT id_ejecucion) FROM observaciones)            AS n_ejecuciones
+```
+
+```{sql}
+--| connection: con
+SELECT comercio,
+       COUNT(DISTINCT sku) AS n_productos,
+       SUM(comparable)     AS n_comparables
+FROM v_observaciones
+WHERE id_ejecucion = ?ID_PRINCIPAL
+GROUP BY comercio
+ORDER BY n_productos DESC
+```
+
+La base reúne 3 comercios y 12 presentaciones comparables. En la ejecución principal se obtuvieron 442 productos de la categoría: Cruz Verde aporta la oferta más amplia (224), seguida de Colsubsidio (138) y Farmatodo (80). Las 12 presentaciones comparables están en los tres comercios. El total de observaciones incluye las ejecuciones de prueba.
+
+## ¿Hay al menos 24 observaciones comparables en una misma ejecución? ¿Hay registros repetidos?
+
+```{sql}
+--| connection: con
+SELECT COUNT(*)                                       AS n_obs_comparables,
+       COUNT(DISTINCT id_producto)                    AS n_presentaciones,
+       COUNT(DISTINCT comercio)                       AS n_comercios,
+       COUNT(DISTINCT id_producto || '|' || comercio) AS n_pares_producto_comercio,
+       CASE WHEN COUNT(DISTINCT id_producto || '|' || comercio) >= 24
+            THEN 'cumple' ELSE 'no cumple' END       AS minimo_24
+FROM v_observaciones
+WHERE comparable = 1 AND id_ejecucion = ?ID_PRINCIPAL
+```
+
+```{sql}
+--| connection: con
+SELECT id_producto, comercio, COUNT(*) AS n_registros, GROUP_CONCAT(sku) AS skus
+FROM v_observaciones
+WHERE comparable = 1 AND id_ejecucion = ?ID_PRINCIPAL
+GROUP BY id_producto, comercio
+HAVING COUNT(*) > 1
+```
+
+La ejecución principal contiene 36 observaciones comparables (12 presentaciones × 3 comercios), por encima del mínimo de 24. La segunda consulta no devuelve filas: no hay registros repetidos del mismo producto y comercio en esa ejecución.
+
+## Precio mínimo, máximo y promedio por presentación, y comercio más barato
+
+```{sql}
+--| connection: con
+--| max.print: 20
+WITH base AS (
+  SELECT v.id_producto, p.nombre_std, v.comercio, v.precio
+  FROM v_observaciones v
+  JOIN productos p ON p.id_producto = v.id_producto
+  WHERE v.id_ejecucion = ?ID_PRINCIPAL AND v.precio IS NOT NULL
+),
+est AS (
+  SELECT id_producto, nombre_std,
+         MIN(precio) AS precio_min, MAX(precio) AS precio_max,
+         ROUND(AVG(precio), 0) AS precio_promedio
+  FROM base GROUP BY id_producto, nombre_std
+)
+SELECT e.id_producto, e.nombre_std, e.precio_min, e.precio_max, e.precio_promedio,
+       GROUP_CONCAT(b.comercio, ', ') AS comercio_mas_barato,
+       COUNT(b.comercio)              AS n_empatados
+FROM est e
+JOIN base b ON b.id_producto = e.id_producto AND b.precio = e.precio_min
+GROUP BY e.id_producto
+ORDER BY e.id_producto
+```
+
+Farmatodo ofrece el menor precio en las 12 presentaciones. En Gaviscon Doble Acción × 12 sachets empata con Colsubsidio (\$35.955). Dentro de cada comercio, el precio es igual para todos los sabores de una misma marca y presentación (por ejemplo, los tres Electrolit cuestan \$8.650 en Colsubsidio), lo que sugiere que los precios se fijan por presentación y no por sabor.
+
+## Ahorro al elegir la oferta más económica
+
+```{sql}
+--| connection: con
+--| max.print: 20
+SELECT v.id_producto, p.nombre_std,
+       MAX(v.precio)                 AS precio_max,
+       MIN(v.precio)                 AS precio_min,
+       MAX(v.precio) - MIN(v.precio) AS ahorro_cop,
+       ROUND(100.0 * (MAX(v.precio) - MIN(v.precio)) / MAX(v.precio), 1) AS ahorro_pct
+FROM v_observaciones v
+JOIN productos p ON p.id_producto = v.id_producto
+WHERE v.id_ejecucion = ?ID_PRINCIPAL AND v.precio IS NOT NULL
+GROUP BY v.id_producto
+ORDER BY v.id_producto
+```
+
+Elegir la oferta más barata permite ahorrar entre el 11,2 % y el 17,9 % frente al precio más alto observado. En pesos, el mayor ahorro corresponde a Gaviscon (\$6.462) y el menor a Solhidrex (\$455): un porcentaje alto no implica un ahorro grande en dinero cuando el producto es económico.
+
+## Menor precio por unidad entre tamaños del mismo producto
+
+```{sql}
+--| connection: con
+WITH familias AS (
+  SELECT marca_std, unidad
+  FROM productos
+  GROUP BY marca_std, unidad
+  HAVING COUNT(DISTINCT contenido) > 1
+)
+SELECT p.marca_std, p.unidad, p.nombre_std, v.comercio, v.precio, p.contenido,
+       ROUND(v.precio / p.contenido, 1) AS precio_por_unidad,
+       RANK() OVER (PARTITION BY p.marca_std, p.unidad
+                    ORDER BY v.precio / p.contenido) AS ranking
+FROM v_observaciones v
+JOIN productos p ON p.id_producto = v.id_producto
+JOIN familias f  ON f.marca_std = p.marca_std AND f.unidad = p.unidad
+WHERE v.id_ejecucion = ?ID_PRINCIPAL AND v.precio IS NOT NULL
+ORDER BY p.marca_std, ranking
+```
+
+El único producto comparable en dos tamaños es Dulcolax 5 mg. La caja de 20 grageas en Farmatodo tiene el menor precio por gragea (\$1.549), un 13,4 % menos que la caja de 10 en la misma tienda (\$1.789). Pero la caja grande no siempre gana: la de 20 en Colsubsidio (\$1.815 por gragea) es más cara por unidad que la de 10 en Farmatodo. El ranking compara solo precios por gragea; no se mezcla con precios por mL o por g.
+
+## Mayores diferencias de precio entre comercios
+
+```{sql}
+--| connection: con
+--| max.print: 20
+WITH base AS (
+  SELECT v.id_producto, p.nombre_std, v.comercio, v.precio
+  FROM v_observaciones v
+  JOIN productos p ON p.id_producto = v.id_producto
+  WHERE v.id_ejecucion = ?ID_PRINCIPAL AND v.precio IS NOT NULL
+),
+est AS (
+  SELECT id_producto, nombre_std, MIN(precio) AS pmin, MAX(precio) AS pmax
+  FROM base GROUP BY id_producto, nombre_std
+)
+SELECT e.id_producto, e.nombre_std,
+       (SELECT GROUP_CONCAT(comercio, ', ') FROM base b
+         WHERE b.id_producto = e.id_producto AND b.precio = e.pmax) AS comercio_mas_caro,
+       (SELECT GROUP_CONCAT(comercio, ', ') FROM base b
+         WHERE b.id_producto = e.id_producto AND b.precio = e.pmin) AS comercio_mas_barato,
+       e.pmax - e.pmin                              AS ahorro_cop,
+       ROUND(100.0 * (e.pmax - e.pmin) / e.pmax, 1) AS ahorro_pct
+FROM est e
+ORDER BY ahorro_pct DESC
+```
+
+Las mayores diferencias porcentuales están en Mareol (17,9 %), Dulcolax × 10 (17,5 %) y Pedialyte Max 60 (16,6 %). El comercio más caro cambia según el producto: Cruz Verde en Mareol, Solhidrex y Gaviscon; Colsubsidio en Electrolit, Pedialyte y Dulcolax; y ambos empatan en Hidraplus.
+
+## Datos faltantes o inconsistentes
+
+```{sql}
+--| connection: con
+SELECT comercio,
+       COUNT(*)                               AS n,
+       SUM(precio IS NULL)                    AS sin_precio,
+       SUM(marca IS NULL OR TRIM(marca) = '') AS sin_marca,
+       SUM(subcategoria IS NULL)              AS sin_subcategoria,
+       SUM(disponible IS NULL)                AS sin_disponibilidad,
+       SUM(sku LIKE 'sin_sku:%')              AS sin_sku,
+       SUM(promocion = 1)                     AS en_promocion
+FROM observaciones
+WHERE id_ejecucion = ?ID_PRINCIPAL
+GROUP BY comercio
+```
+
+```{sql}
+--| connection: con
+SELECT comercio, sku, nombre_original, precio, precio_antes
+FROM observaciones
+WHERE id_ejecucion = ?ID_PRINCIPAL AND precio_antes IS NOT NULL AND precio_antes <= precio
+```
+
+```{sql}
+--| connection: con
+--| max.print: 20
+SELECT comercio, nombre_original, COUNT(*) AS n, GROUP_CONCAT(sku, ', ') AS skus
+FROM observaciones
+WHERE id_ejecucion = ?ID_PRINCIPAL
+GROUP BY comercio, LOWER(TRIM(nombre_original))
+HAVING COUNT(*) > 1
+```
+
+```{sql}
+--| connection: con
+SELECT comercio,
+       SUM(promocion = 1)                  AS comparables_en_promocion,
+       COALESCE(SUM(disponible = 0), 0)    AS comparables_agotados,
+       SUM(disponible IS NULL)             AS comparables_sin_dato_disponibilidad
+FROM v_observaciones
+WHERE comparable = 1 AND id_ejecucion = ?ID_PRINCIPAL
+GROUP BY comercio
+```
+
+```{r}
+#| label: faltantes-resumen
+#| include: false
+falt <- dbGetQuery(con, "
+  SELECT SUM(precio IS NULL) AS sin_precio, SUM(sku LIKE 'sin_sku:%') AS sin_sku,
+         SUM(subcategoria IS NULL) AS sin_subcat,
+         SUM(marca IS NULL OR TRIM(marca) = '') AS sin_marca
+  FROM observaciones WHERE id_ejecucion = ?", params = list(ID_PRINCIPAL))
+promo <- dbGetQuery(con, "
+  SELECT comercio, SUM(promocion = 1) AS n FROM v_observaciones
+  WHERE comparable = 1 AND id_ejecucion = ? GROUP BY comercio", params = list(ID_PRINCIPAL))
+pr <- setNames(promo$n, promo$comercio)
+dup <- dbGetQuery(con, "
+  SELECT COUNT(*) AS n FROM (SELECT 1 FROM observaciones WHERE id_ejecucion = ?
+  GROUP BY comercio, LOWER(TRIM(nombre_original)) HAVING COUNT(*) > 1)",
+  params = list(ID_PRINCIPAL))$n
+```
+
+-   Hay `r falt$sin_precio` productos sin precio y `r falt$sin_sku` sin SKU. Farmatodo y Cruz Verde no publican subcategoría ni disponibilidad en sus listados (`r falt$sin_subcat` registros sin subcategoría), y `r falt$sin_marca` producto(s) no tienen marca.
+-   No hay precios anteriores menores o iguales al precio de venta (la segunda consulta no devuelve filas).
+-   Los `r dup` nombres repetidos corresponden a presentaciones distintas publicadas con el mismo nombre (por ejemplo, Dulcolax × 10 y × 20 en Colsubsidio). Esto muestra que el nombre no identifica una presentación y justifica la correspondencia por SKU, verificada con el EAN.
+-   El factor que más afecta la comparación son las **promociones**: estaban en promoción `r pr[["Farmatodo"]]` de los 12 comparables de Farmatodo, `r pr[["Cruz Verde"]]` de Cruz Verde y `r pr[["Colsubsidio"]]` de Colsubsidio. Parte de las diferencias de precio se debe a descuentos temporales.
+
+## Oferta por comercio y ejecución, y calidad de la información
+
+```{sql}
+--| connection: con
+--| max.print: 20
+SELECT o.id_ejecucion, o.comercio, e.estado,
+       COUNT(*) AS n_productos,
+       ROUND(100.0 * AVG(o.descripcion_original IS NOT NULL
+                         AND TRIM(o.descripcion_original) <> ''), 1) AS pct_descripcion,
+       ROUND(100.0 * AVG(o.marca IS NOT NULL AND TRIM(o.marca) <> ''), 1) AS pct_marca,
+       ROUND(100.0 * AVG(
+         LOWER(o.nombre_original) GLOB '*[0-9]ml*' OR LOWER(o.nombre_original) GLOB '*[0-9] ml*' OR
+         LOWER(o.nombre_original) GLOB '*[0-9]g*'  OR LOWER(o.nombre_original) GLOB '*[0-9] g*'  OR
+         LOWER(o.nombre_original) GLOB '*[0-9]mg*' OR LOWER(o.nombre_original) GLOB '*[0-9] mg*' OR
+         LOWER(o.nombre_original) GLOB '*x [0-9]*' OR LOWER(o.nombre_original) GLOB '*x[0-9]*'
+       ), 1) AS pct_contenido
+FROM observaciones o
+JOIN ejecuciones e ON e.id_ejecucion = o.id_ejecucion AND e.comercio = o.comercio
+GROUP BY o.id_ejecucion, o.comercio
+ORDER BY o.id_ejecucion, o.comercio
+```
+
+Se considera que un anuncio tiene *contenido identificable* cuando su nombre incluye un número seguido de mL, g o mg, o una cantidad del tipo «x 12». El tamaño de la oferta se mantiene estable entre ejecuciones. Solo el 33,3 % de los nombres de Colsubsidio permite identificar el contenido y el 56,5 % tiene descripción, lo que obligó a verificar los tamaños en la página de cada producto. En Farmatodo y Cruz Verde la descripción está presente en el 100 % porque corresponde al texto completo de la tarjeta.
+
+## Canasta común
+
+Como la comparación de promedios entre surtidos diferentes no es válida, se compara una canasta con **exactamente las mismas 12 presentaciones** en los tres comercios, con cobertura completa y precios de la misma ejecución:
+
+```{sql}
+--| connection: con
+--| output.var: canasta
+SELECT comercio,
+       COUNT(*)    AS n_presentaciones,
+       SUM(precio) AS total_canasta
+FROM v_observaciones
+WHERE comparable = 1 AND id_ejecucion = ?ID_PRINCIPAL AND precio IS NOT NULL
+GROUP BY comercio
+ORDER BY total_canasta
+```
+
+```{r}
+#| label: tbl-canasta
+#| tbl-cap: "Costo de la canasta común de 12 presentaciones"
+canasta |> mutate(diferencia_vs_mas_barato = total_canasta - min(total_canasta))
+```
+
+La canasta completa cuesta `r cop(canasta$total_canasta[1])` en `r canasta$comercio[1]`, `r cop(canasta$total_canasta[3] - canasta$total_canasta[1])` menos que en `r canasta$comercio[3]` (`r round(100 * (canasta$total_canasta[3] - canasta$total_canasta[1]) / canasta$total_canasta[3], 1)` %). La diferencia entre los otros dos comercios es mínima: aunque cada uno es el más caro en productos distintos, sus canastas cuestan casi lo mismo.
+
+# Visualizaciones
+
+```{r}
+#| label: datos-graficos
+precios <- dbGetQuery(con, "
+  SELECT v.id_producto, p.nombre_std, p.contenido, p.unidad,
+         v.comercio, v.precio, v.precio_antes, v.promocion
+  FROM v_observaciones v
+  JOIN productos p ON p.id_producto = v.id_producto
+  WHERE v.id_ejecucion = ? AND v.precio IS NOT NULL", params = list(ID_PRINCIPAL))
+
+orden <- precios |> group_by(nombre_std) |> summarise(m = min(precio)) |>
+  arrange(m) |> pull(nombre_std)
+etiqueta_ejec <- paste("Ejecución", ID_PRINCIPAL, "· precios en COP")
+```
+
+## Precio de las mismas presentaciones entre comercios
+
+```{r}
+#| label: fig-precios
+#| fig-cap: "Precio de cada presentación comparable por comercio"
+#| fig-height: 6
+desfase <- c("Colsubsidio" = 0.22, "Cruz Verde" = 0, "Farmatodo" = -0.22)
+precios |>
+  mutate(y = as.numeric(factor(nombre_std, levels = orden)) + desfase[comercio]) |>
+  ggplot(aes(precio, y, color = comercio)) +
+  geom_point(size = 3) +
+  scale_y_continuous(breaks = seq_along(orden), labels = orden) +
+  scale_x_log10(labels = label_dollar(prefix = "$", big.mark = ".", decimal.mark = ",")) +
+  scale_color_manual(values = colores) +
+  labs(x = "Precio del empaque (COP, escala logarítmica)", y = NULL, color = "Comercio",
+       caption = etiqueta_ejec) +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "top", panel.grid.minor = element_blank())
+```
+
+Los precios de las presentaciones van de unos \$2.300 (Solhidrex) a más de \$40.000 (Gaviscon), por eso se usa escala logarítmica: así las diferencias entre comercios se ven proporcionales en todos los productos. Farmatodo (morado) queda a la izquierda en todas las presentaciones. *Limitación*: el gráfico compara el precio del empaque, no el precio por unidad, y no debe usarse para comparar productos distintos entre sí.
+
+## Oportunidades de ahorro
+
+```{r}
+#| label: fig-sobrecosto
+#| fig-cap: "Sobrecosto de cada comercio frente al precio mínimo de la presentación"
+#| fig-height: 6
+precios |>
+  group_by(nombre_std) |>
+  mutate(sobrecosto = 100 * (precio / min(precio) - 1)) |>
+  ungroup() |>
+  ggplot(aes(comercio, factor(nombre_std, levels = orden), fill = sobrecosto)) +
+  geom_tile(color = "white", linewidth = 1) +
+  geom_text(aes(label = ifelse(sobrecosto == 0, "mínimo", sprintf("+%.1f %%", sobrecosto))),
+            size = 3.3) +
+  scale_fill_gradient(low = "#f7f7f7", high = "#d6604d", name = "Sobrecosto (%)") +
+  labs(x = NULL, y = NULL, caption = etiqueta_ejec) +
+  theme_minimal(base_size = 11) +
+  theme(panel.grid = element_blank())
+```
+
+Cada celda indica cuánto más se paga en ese comercio frente a la opción más barata de la misma presentación. Las celdas más oscuras son las mayores oportunidades de ahorro: Mareol en Cruz Verde, y Dulcolax y Pedialyte en Colsubsidio.
+
+```{r}
+#| label: fig-ahorro
+#| fig-cap: "Ahorro máximo por presentación (precio más alto menos precio más bajo)"
+#| fig-height: 5
+precios |>
+  group_by(nombre_std) |>
+  summarise(ahorro = max(precio) - min(precio), pct = 100 * ahorro / max(precio)) |>
+  ggplot(aes(ahorro, reorder(nombre_std, ahorro))) +
+  geom_col(fill = "grey45", width = 0.7) +
+  geom_text(aes(label = sprintf("%s (%.1f %%)", cop(ahorro), pct)), hjust = -0.08, size = 3.3) +
+  scale_x_continuous(labels = label_dollar(prefix = "$", big.mark = ".", decimal.mark = ","),
+                     expand = expansion(mult = c(0, 0.3))) +
+  labs(x = "Ahorro (COP)", y = NULL, caption = etiqueta_ejec) +
+  theme_minimal(base_size = 11) +
+  theme(panel.grid.minor = element_blank(), panel.grid.major.y = element_blank())
+```
+
+Las barras muestran el ahorro en pesos; el porcentaje entre paréntesis lo relativiza frente al precio más alto. Gaviscon y Dulcolax × 20 concentran los mayores ahorros en dinero, aunque en porcentaje están en un rango similar al de los sueros.
+
+## Precio por unidad de contenido
+
+```{r}
+#| label: fig-unidad
+#| fig-cap: "Precio por gragea de Dulcolax 5 mg según tamaño y comercio"
+#| fig-height: 4
+precios |>
+  filter(unidad == "gragea") |>
+  mutate(ppu = precio / contenido, tamano = paste("Caja x", contenido, "grageas")) |>
+  ggplot(aes(tamano, ppu, fill = comercio)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  geom_text(aes(label = cop(ppu)), position = position_dodge(width = 0.8),
+            vjust = -0.4, size = 3.3) +
+  scale_fill_manual(values = colores) +
+  scale_y_continuous(labels = label_dollar(prefix = "$", big.mark = ".", decimal.mark = ","),
+                     expand = expansion(mult = c(0, 0.12))) +
+  labs(x = NULL, y = "Precio por gragea (COP)", fill = "Comercio", caption = etiqueta_ejec) +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "top")
+```
+
+En los tres comercios la caja de 20 grageas tiene un menor precio por gragea que la de 10. Sin embargo, el comercio pesa tanto como el tamaño: la caja de 10 en Farmatodo es más barata por gragea que la de 20 en Colsubsidio. Solo se comparan precios por gragea del mismo producto y concentración (bisacodilo 5 mg); los mg corresponden al principio activo de cada gragea, no al contenido del empaque.
+
+# Limitaciones y conclusiones
+
+## Limitaciones
+
+-   **Momento de captura.** Los precios corresponden a la ejecución `r ID_PRINCIPAL` y pueden cambiar en cualquier momento; no son permanentes.
+-   **Promociones.** Casi todos los productos de Farmatodo y la mayoría de los de Cruz Verde estaban en promoción. Las conclusiones pueden cambiar cuando terminen esas campañas; una segunda ejecución en otra fecha permitiría verificarlo.
+-   **Condiciones de compra.** No se consideraron costos de envío, montos mínimos, descuentos con membresía (como el precio Prime de Farmatodo), convenios ni medios de pago.
+-   **Descuentos para socios.** Cruz Verde ofrece a los inscritos en su Club un descuento permanente del 5 % y descuentos de hasta 25 % los miércoles en medicamentos seleccionados, no acumulables con otras promociones. Del mismo modo, Farmatodo tiene un precio Prime para miembros. Los precios analizados son los públicos, sin estos beneficios, por lo que el precio final para un socio puede ser menor.
+-   **Canal y entrega.** Según los términos de los tres comercios, los precios del sitio web pueden ser diferentes a los de sus droguerías físicas (y, en Colsubsidio, a los de sus catálogos, call center o WhatsApp) y no incluyen el costo de entrega. Los precios analizados corresponden solo al canal en línea.
+-   **Condiciones de Farmatodo.** Según sus términos, los precios del sitio pueden corregirse si contienen errores y cada referencia tiene un máximo de 3 unidades por pedido.
+-   **Disponibilidad.** Solo Colsubsidio reporta disponibilidad en sus datos, y la página web la presenta según la ubicación del cliente. Un precio bajo no garantiza que el producto esté disponible.
+-   **URL en Cruz Verde.** Las tarjetas no enlazan al producto, por lo que se registra la página de la categoría como URL de extracción.
+-   **Uso de los datos.** El `robots.txt` de Colsubsidio bloquea la ruta `/api/` usada en la extracción, y los términos de los tres sitios protegen sus contenidos por propiedad intelectual. Los datos y las copias crudas se usan solo con fines académicos y para verificar la extracción, sin redistribución.
+-   **Medicamentos.** Las comparaciones se hacen entre presentaciones idénticas. Un menor precio no es una recomendación de sustitución terapéutica entre productos distintos.
+
+## Conclusión para el consumidor
+
+-   **Dónde comprar.** Con los precios observados, **Farmatodo** es la opción más económica para las 12 presentaciones comparadas (en Gaviscon empata con Colsubsidio). Comprar en Farmatodo ahorra entre el 11 % y el 18 % frente a la tienda más cara de cada producto, y la canasta completa cuesta `r cop(canasta$total_canasta[1])`.
+-   **Entre Colsubsidio y Cruz Verde** no hay un ganador claro: cada una es más cara en productos distintos y sus canastas cuestan casi lo mismo. Conviene revisar producto por producto.
+-   **Tamaño grande.** En Dulcolax, la caja de 20 grageas ofrece un menor precio por gragea (en Farmatodo, \$1.549 frente a \$1.789). Conviene si se va a usar todo el contenido, porque exige un desembolso mayor (\$30.983 frente a \$17.893). Además, la ventaja del tamaño grande no compensa elegir un comercio caro.
+-   **Ahorro unitario frente a desembolso.** El mayor ahorro porcentual (Mareol, 17,9 %) no es el mayor ahorro en pesos (Gaviscon, \$6.462). Para el consumidor, el ahorro en pesos importa más en productos costosos o de compra frecuente.
+
+```{r}
+#| label: cierre
+#| include: false
+dbDisconnect(con)
+```

@@ -1,0 +1,1067 @@
+---
+title: "Taller 1 · Comparador de precios de cuidado bucal"
+subtitle: "Minería de Datos (2016325) · Universidad Nacional de Colombia"
+author: "David Márquez"
+date: today
+date-format: "D [de] MMMM [de] YYYY"
+lang: es
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: true
+    code-summary: "Ver código"
+    code-tools: true
+    embed-resources: true
+    theme: cosmo
+    fig-width: 9
+jupyter: python3
+execute:
+  warning: false
+---
+
+```{python}
+#| tags: [parameters]
+#| code-fold: false
+# Parámetros (quarto render taller_1.qmd -P EJECUTAR_SCRAPING:true)
+EJECUTAR_SCRAPING = False       # True: nueva ejecución en línea antes del análisis
+VERIFICAR_SIN_CONEXION = True   # reprocesa raw/ en una base temporal y compara con la base entregada
+EJECUCION_REFERENCIA = None     # None: la más reciente con cobertura completa (regla R9)
+```
+
+```{python}
+#| label: configuracion
+import json, sqlite3, sys, tempfile, textwrap, platform
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import matplotlib
+import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
+from IPython.display import display, HTML
+
+import scraper      # módulo de extracción (una función por comercio)
+import limpieza     # reglas de normalización y correspondencia
+
+DB = scraper.DB_PATH
+plt.rcParams.update({"figure.dpi": 110, "axes.spines.top": False, "axes.spines.right": False,
+                     "axes.titleweight": "bold", "axes.titlesize": 12})
+
+def cop(x):
+    return "—" if x is None or pd.isna(x) else "$ " + f"{x:,.0f}".replace(",", ".")
+
+def pct(x):
+    return "—" if x is None or pd.isna(x) else f"{x:.1f} %".replace(".", ",")
+
+def num(x, d=2):
+    return "—" if x is None or pd.isna(x) else f"{x:,.{d}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+FMT_COP = FuncFormatter(lambda x, _: cop(x))
+
+def consulta(sql, **params):
+    return pd.read_sql_query(sql, con, params=params)
+
+def tabla(df, cop_cols=(), pct_cols=(), dec_cols=(), max_filas=60):
+    t = df.copy()
+    for c in cop_cols: t[c] = t[c].map(cop)
+    for c in pct_cols: t[c] = t[c].map(pct)
+    for c in dec_cols: t[c] = t[c].map(num)
+    t = t.astype(object).where(t.notna(), "—")
+    nota = ""
+    if len(t) > max_filas:
+        nota = f"<p><em>Se muestran {max_filas} de {len(t)} filas.</em></p>"
+        t = t.head(max_filas)
+    return HTML(t.to_html(index=False, na_rep="—", border=0, escape=True,
+                          classes="table table-sm table-striped") + nota)
+
+def ent(x):
+    return "—" if x is None or pd.isna(x) else f"{int(x):,}".replace(",", ".")
+
+def md(texto):
+    print(textwrap.dedent(texto).strip() + "\n")
+```
+
+```{python}
+#| label: ejecucion
+#| code-fold: false
+if EJECUTAR_SCRAPING:
+    display(scraper.ejecutar_recoleccion())          # en línea: una sola llamada
+
+if not Path(DB).exists():
+    raise FileNotFoundError("No existe comparador_precios.sqlite. Ejecute `python scraper.py` "
+                            "o renderice con -P EJECUTAR_SCRAPING:true")
+
+con = scraper.conectar(DB)
+if EJECUCION_REFERENCIA:
+    limpieza.marcar_comparables(con, EJECUCION_REFERENCIA); con.commit()
+
+params = dict(con.execute("SELECT clave, valor FROM parametros").fetchall())
+EJEC = params.get("ejecucion_referencia")
+COM_REF = params.get("comercios_referencia", "").split(",")
+N_COM = len(COM_REF)
+NOMBRES = dict(con.execute("SELECT comercio_id, nombre FROM comercios").fetchall())
+PALETA = ["#1b9e77", "#d95f02", "#7570b3", "#e7298a", "#66a61e", "#e6ab02"]
+COLORES = {NOMBRES[c]: PALETA[i % len(PALETA)] for i, c in enumerate(sorted(NOMBRES))}
+N_COMPARABLES = con.execute("SELECT COUNT(*) FROM productos WHERE comparable = 1").fetchone()[0]
+print(f"Ejecución de referencia: {EJEC} · comercios: {', '.join(NOMBRES[c] for c in COM_REF)} · "
+      f"presentaciones comparables: {N_COMPARABLES}")
+```
+
+# Introducción
+
+```{python}
+#| echo: false
+#| output: asis
+ejecuciones = consulta("SELECT DISTINCT ejecucion_id, MIN(inicio) AS inicio FROM ejecuciones GROUP BY ejecucion_id ORDER BY 1")
+md(f"""
+Este trabajo construye un comparador de precios para la categoría **cuidado bucal** a partir de
+datos recolectados mediante *web scraping* en **{N_COM} comercios con venta en línea en Colombia**:
+{", ".join(f"**{NOMBRES[c]}**" for c in COM_REF)}. El objetivo es identificar dónde resulta más
+económico comprar cada presentación y, cuando hay varios tamaños del mismo producto, cuál ofrece el
+menor precio por unidad de contenido (mL, g, m o unidad).
+
+La base contiene **{len(ejecuciones)} ejecuciones** de recolección
+({", ".join(f"`{e}`" for e in ejecuciones.ejecucion_id)}). Las comparaciones se hacen con los precios
+de una misma ejecución, la de referencia (`{EJEC}`), elegida con la regla R9 (sección 3).
+""")
+```
+
+**Delimitación de la categoría.** Se consideran de cuidado bucal las cremas dentales, cepillos
+dentales (manuales, eléctricos, interdentales y sus repuestos), enjuagues bucales, seda e hilo dental,
+productos de blanqueamiento, limpiadores linguales, productos para el aliento, cuidado de prótesis dental
+y los kits que combinan estos productos. Se excluyen artículos que algunos comercios ubican en la misma
+sección pero que no pertenecen a la categoría (chicles, caramelos, protectores labiales, productos para
+mascotas, entre otros). Esta delimitación sigue la registrada en la planilla
+«Categorías de Productos - Estudiantes».
+
+```{python}
+#| echo: false
+display(tabla(pd.DataFrame(limpieza.SUBCATEGORIAS, columns=["Subcategoría", "Expresión regular (R3)"])))
+```
+
+```{python}
+#| echo: false
+comparables = consulta("""
+    SELECT p.nombre_estandar AS presentacion, p.subcategoria, p.marca, p.contenido_total, p.unidad,
+           p.metodo_correspondencia AS metodo, p.ean
+    FROM productos p WHERE p.comparable = 1 ORDER BY p.subcategoria, p.nombre_estandar""")
+display(tabla(comparables, dec_cols=["contenido_total"], max_filas=200))
+```
+
+```{python}
+#| echo: false
+#| output: asis
+md(f"""
+La tabla anterior lista las **{len(comparables)} presentaciones comparables**: aparecen con precio
+disponible en los {N_COM} comercios dentro de la misma ejecución y provienen de la extracción completa
+de la categoría, no de búsquedas manuales. Se distribuyen en
+{comparables.subcategoria.nunique()} subcategorías y {comparables.marca.nunique()} marcas.
+""")
+```
+
+# Fuentes y *scraping*
+
+## Comercios y estrategia de extracción
+
+Los tres comercios usan la plataforma VTEX. Sus páginas de categoría se alimentan de servicios JSON
+públicos del propio sitio; el módulo `scraper.py` los consulta con peticiones HTTP directas
+(librería `requests`), sin automatizar un navegador:
+
+1. **Árbol de categorías** — `GET /api/catalog_system/pub/category/tree/4`. Se recorre el árbol y se
+   eligen las secciones cuyo nombre coincide con `(cuidado|salud|higiene) (oral|bucal|dental)`
+   (sin bajar dentro de una sección ya elegida y excluyendo rutas de mascotas).
+2. **Productos de cada sección** — `GET /api/catalog_system/pub/products/search?fq=C:/<ids>/&_from=&_to=&O=OrderByNameASC`,
+   de 50 en 50 (máximo que admite la API). El encabezado `resources: 0-49/N` informa el total *N*
+   que reporta el sitio y permite saber cuándo termina la paginación. La API no pagina más allá de
+   2 500 resultados; ninguna sección llega a ese límite, y si lo superara la ejecución quedaría
+   registrada como parcial.
+3. **Copias crudas** — cada respuesta se guarda sin modificar, comprimida, en
+   `raw/<comercio>/<fecha>/<ejecución>/` con un `manifest.json` (URL, parámetros, fecha y hora, código HTTP).
+   Los datos **siempre se procesan desde estas copias**, tanto en línea como sin conexión, por lo que
+   ambos modos producen el mismo resultado (sección 7.3). Cada ejecución guarda también el
+   `robots.txt` de cada sitio.
+
+Los servicios se identificaron con las herramientas de desarrollador del navegador (pestaña *Red*)
+al abrir la página de la categoría en cada sitio: las peticiones a `/api/catalog_system/...` devuelven
+el JSON con nombre, marca, EAN, precio, precio de lista y disponibilidad que la página muestra.
+
+```{python}
+#| echo: false
+display(tabla(consulta("SELECT nombre AS comercio, tipo, url_base, plataforma FROM comercios ORDER BY nombre")))
+```
+
+```{python}
+#| code-fold: false
+# Una función por comercio, mismas columnas de salida (scraper.COLUMNAS)
+[f.__name__ for f in scraper.FUNCIONES.values()], len(scraper.COLUMNAS)
+```
+
+## Secciones equivalentes a la categoría y productos excluidos
+
+```{python}
+#| echo: false
+secciones = consulta("""
+    SELECT c.nombre AS comercio, s.ruta_nombres AS seccion, s.filtro, s.api, s.url,
+           s.total_reportado, s.n_obtenidos
+    FROM secciones s JOIN comercios c ON c.comercio_id = s.comercio_id
+    WHERE s.ejecucion_id = :e ORDER BY c.nombre""", e=EJEC)
+display(tabla(secciones))
+excluidos = consulta("""
+    SELECT c.nombre AS comercio, a.motivo_exclusion AS motivo, COUNT(*) AS anuncios,
+           GROUP_CONCAT(a.nombre_original, ' | ') AS ejemplos
+    FROM anuncios a JOIN comercios c ON c.comercio_id = a.comercio_id
+    WHERE a.incluido = 0 GROUP BY c.nombre, a.motivo_exclusion ORDER BY anuncios DESC""")
+excluidos["ejemplos"] = excluidos["ejemplos"].map(lambda s: textwrap.shorten(s or "", 160))
+display(tabla(excluidos))
+```
+
+```{python}
+#| echo: false
+#| output: asis
+md(f"""
+La primera tabla documenta qué secciones de cada sitio se consideraron equivalentes a la categoría
+(nombre, ruta de identificadores usada como filtro y URL de la página). La segunda resume los
+**{int(excluidos.anuncios.sum()) if len(excluidos) else 0} anuncios excluidos** por no pertenecer a cuidado bucal según la
+delimitación (regla R4 o exclusión manual); quedan en la base con `incluido = 0` para que la exclusión
+sea verificable.
+""")
+```
+
+## Completitud de la recolección
+
+```{python}
+#| echo: false
+completitud = consulta("""
+    SELECT e.ejecucion_id, c.nombre AS comercio, e.inicio, e.estado, e.total_reportado_sitio,
+           e.n_productos AS productos_obtenidos, e.n_registros AS skus_obtenidos, e.mensaje
+    FROM ejecuciones e JOIN comercios c ON c.comercio_id = e.comercio_id
+    ORDER BY e.ejecucion_id, c.nombre""")
+display(tabla(completitud))
+web = Path("conteo_sitio_web.csv")
+if web.exists():
+    conteo = pd.read_csv(web, comment="#")
+    if len(conteo):
+        display(tabla(conteo))
+```
+
+```{python}
+#| echo: false
+#| output: asis
+ref = completitud[completitud.ejecucion_id == EJEC]
+completas = (ref.estado == "completa").sum()
+md(f"""
+En la ejecución de referencia, {completas} de {len(ref)} comercios quedaron con estado **completa**:
+el número de productos obtenidos coincide con el total que reporta el propio sitio en el encabezado
+`resources` de su API (es la cifra con la que el sitio pagina la categoría). El número de SKU puede
+superar al de productos porque un producto VTEX puede tener varias variantes (por ejemplo, colores de
+un cepillo). Como verificación adicional, el archivo opcional `conteo_sitio_web.csv` registra el número
+de resultados que muestra la página web de la categoría el día de la captura.
+""")
+```
+
+## Condiciones de uso y buenas prácticas
+
+```{python}
+#| echo: false
+robots = scraper.revisar_robots(COM_REF, modo="sin_conexion")
+display(tabla(robots))
+```
+
+Buenas prácticas aplicadas: pausa de 1 s entre peticiones, reintentos con espera exponencial ante
+respuestas 429/5xx, un *User-Agent* que identifica el uso académico, solo servicios públicos (sin
+inicio de sesión, sin datos personales ni carrito), y consulta únicamente de la categoría asignada.
+La tabla anterior evalúa con `urllib.robotparser` si las rutas usadas están permitidas en el
+`robots.txt` de cada sitio (la copia queda en `raw/<comercio>/robots/`); el analizador estándar no
+interpreta comodines (`*`), por lo que el resultado se revisó también leyendo el archivo.
+
+## Prueba en un entorno distinto
+
+```{python}
+#| echo: false
+#| output: asis
+prueba = Path("prueba_entorno.json")
+if prueba.exists():
+    info = json.loads(prueba.read_text(encoding="utf-8"))
+    md(f"""El código se probó el {info['fecha_hora']} en `{info['sistema']}` (Python {info['python']},
+    Google Colab: {'sí' if info.get('colab') else 'no'}) con `python scraper.py --probar`:""")
+    print(pd.DataFrame(info["resultados"]).to_markdown(index=False))
+else:
+    md("""*Pendiente: ejecutar `!python scraper.py --probar` en Google Colab y subir el archivo
+    `prueba_entorno.json` generado (ver README).*""")
+```
+
+# Preparación de los datos
+
+## Reglas de limpieza y correspondencia
+
+El texto original de cada anuncio (nombre, nombre del SKU, marca, categoría, descripción y ficha técnica)
+se conserva sin cambios en la tabla `anuncios`. Las versiones estandarizadas se guardan en campos
+propios (`*_std`, `contenido_*`, `familia`, `producto_id`) mediante `limpieza.py`:
+
+| Regla | Descripción |
+|---|---|
+| R1 | Texto en minúsculas, sin tildes ni signos; coma decimal → punto. |
+| R2 | Marca: primero una marca conocida en el nombre; si no, el campo marca del comercio. |
+| R3 | Subcategoría por expresiones regulares (tabla de la introducción) sobre nombre + ruta de categoría. |
+| R4 | Exclusión de anuncios que no son cuidado bucal (chicles, labiales, mascotas…). |
+| R5 | Contenido y unidades: `75 ml`, `3 x 75 ml`, `100 ml caja x 3 und`, `x2`, `lleve 3 pague 2`; conversión a mL, g o m (1 L = 1000 mL, 1 kg = 1000 g, 1 g = 1000 mg); contenido total = contenido × unidades; cepillos en unidades. |
+| R6 | Concentración de flúor (ppm) o de principio activo (%) cuando aparece. |
+| R7 | Familia: nombre sin tamaño, empaque ni marca (agrupa tamaños del mismo producto). |
+| R8 | Correspondencia: manual (`correspondencias_manuales.csv`) → EAN/GTIN con dígito de control válido (separado por unidades) → clave normalizada. |
+| R9 | Comparable: presentación con precio disponible en todos los comercios de la ejecución de referencia. |
+
+Los precios se convierten a número en COP; un precio ausente o igual a cero en el sitio queda como
+`NULL` (nunca 0). El precio extraído es el del vendedor principal del SKU; se marca como promoción
+cuando el precio de lista es mayor, y los textos de promociones condicionadas (p. ej. «2x1») se guardan
+aparte porque no modifican el precio extraído.
+
+## Ejemplos de estandarización
+
+```{python}
+#| echo: false
+ejemplos = consulta("""
+    SELECT c.nombre AS comercio, a.nombre_original, a.marca_original, a.marca_std, a.subcategoria_std,
+           a.contenido_unitario, a.n_unidades, a.contenido_total, a.unidad, a.concentracion, a.alerta_limpieza
+    FROM anuncios a JOIN comercios c ON c.comercio_id = a.comercio_id
+    WHERE a.incluido = 1 ORDER BY (a.n_unidades > 1) DESC, a.anuncio_id % 7, a.anuncio_id LIMIT 14""")
+display(tabla(ejemplos, dec_cols=["contenido_unitario", "contenido_total"]))
+```
+
+## Correspondencia de las presentaciones comparables
+
+La validez de todas las comparaciones depende de esta tabla: para cada presentación se muestra el texto
+original con el que aparece en cada comercio y el método con que se emparejó.
+
+```{python}
+#| echo: false
+corr = consulta("""
+    SELECT p.nombre_estandar AS presentacion, p.metodo_correspondencia AS metodo, c.nombre AS comercio,
+           a.nombre_original || ' [SKU ' || a.sku_comercio || ']' AS anuncio
+    FROM productos p JOIN anuncios a ON a.producto_id = p.producto_id AND a.comparable = 1
+    JOIN comercios c ON c.comercio_id = a.comercio_id
+    WHERE p.comparable = 1""")
+pivote = (corr.pivot_table(index=["presentacion", "metodo"], columns="comercio", values="anuncio",
+                           aggfunc=lambda s: " / ".join(s)).reset_index())
+display(tabla(pivote, max_filas=200))
+```
+
+```{python}
+#| echo: false
+#| output: asis
+metodos = comparables.metodo.value_counts()
+alertas = consulta("SELECT COUNT(*) AS n FROM productos WHERE comparable = 1 AND alerta IS NOT NULL").n[0]
+md(f"""
+De las {len(comparables)} presentaciones comparables, {", ".join(f"{v} se emparejaron por **{k}**" for k, v in metodos.items())}.
+El EAN (código de barras) identifica una presentación específica —marca, variante, contenido y número
+de unidades—, por lo que es el criterio más exacto; además se verificó que el contenido y las unidades
+extraídos del nombre coincidieran dentro de cada grupo. {alertas} presentación(es) comparable(s)
+tienen alguna alerta de correspondencia (consulta 7). Los casos que las reglas no resuelven se corrigen
+en `correspondencias_manuales.csv` sin modificar el código.
+""")
+```
+
+# Base de datos SQLite
+
+## Estructura
+
+La base `comparador_precios.sqlite` (estructura definida en `esquema.sql`) separa entidades y hechos:
+
+- `comercios` (1) → (n) `anuncios`: cada producto tal como aparece en un comercio, con su texto
+  original, URL, SKU y EAN, más los campos estandarizados.
+- `anuncios` (n) → (1) `productos`: identificador común (`producto_id`) de la misma presentación en
+  todos los comercios, con el indicador `comparable`.
+- `anuncios` (1) → (n) `observaciones`: precio, precio de lista, promoción, disponibilidad, URL de
+  extracción, fecha y hora de consulta (ISO 8601, hora de Colombia) y ejecución.
+- `ejecuciones`: una fila por corrida y comercio (inicio, registros, total reportado, estado);
+  `secciones` documenta las secciones recorridas; `familias` y `parametros` son auxiliares.
+- Restricciones: `UNIQUE(comercio_id, sku_comercio, fecha_hora_consulta)` y
+  `UNIQUE(ejecucion_id, comercio_id, sku_comercio)` evitan insertar dos veces la misma observación;
+  `CHECK` sobre el formato de fecha, precios positivos o `NULL` y estados válidos; llaves foráneas activas.
+
+```{python}
+#| code-fold: true
+#| code-summary: "Ver el esquema (DDL) almacenado en la base"
+for nombre, sql in con.execute("SELECT name, sql FROM sqlite_master WHERE type IN ('table','view') "
+                               "AND name NOT LIKE 'sqlite_%' ORDER BY type, name"):
+    print(sql, end=";\n\n")
+```
+
+## Validaciones
+
+```{python}
+#| code-fold: false
+validaciones = []
+# 1. Unicidad: reinsertar una observación existente debe fallar
+fila = con.execute("SELECT ejecucion_id, comercio_id, anuncio_id, sku_comercio, fecha_hora_consulta, "
+                   "precio, es_promocion, url_fuente FROM observaciones LIMIT 1").fetchone()
+try:
+    con.execute("INSERT INTO observaciones (ejecucion_id, comercio_id, anuncio_id, sku_comercio, "
+                "fecha_hora_consulta, precio, es_promocion, url_fuente) VALUES (?,?,?,?,?,?,?,?)", fila)
+    validaciones.append(("Observación duplicada rechazada", False))
+except sqlite3.IntegrityError:
+    validaciones.append(("Observación duplicada rechazada", True))
+con.rollback()
+# 2. Fecha y hora obligatoria y en ISO 8601 con -05:00
+validaciones.append(("Observaciones sin fecha/hora válida = 0", con.execute(
+    "SELECT COUNT(*) FROM observaciones WHERE fecha_hora_consulta NOT GLOB "
+    "'[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]-05:00'").fetchone()[0] == 0))
+# 3. Ningún precio igual a cero
+validaciones.append(("Precios iguales a 0 = 0", con.execute(
+    "SELECT COUNT(*) FROM observaciones WHERE precio = 0").fetchone()[0] == 0))
+# 4. Integridad referencial
+validaciones.append(("PRAGMA foreign_key_check sin errores", len(con.execute("PRAGMA foreign_key_check").fetchall()) == 0))
+# 5. Toda observación pertenece a una ejecución registrada
+validaciones.append(("Observaciones con ejecución registrada", con.execute(
+    "SELECT COUNT(*) FROM observaciones o LEFT JOIN ejecuciones e USING (ejecucion_id, comercio_id) "
+    "WHERE e.ejecucion_id IS NULL").fetchone()[0] == 0))
+pd.DataFrame(validaciones, columns=["validación", "cumple"])
+```
+
+# Consultas SQL
+
+Todas las comparaciones de precios usan la ejecución de referencia (`:ejec`) y, cuando un comercio tiene
+más de un anuncio de la misma presentación, el menor precio disponible.
+
+```{python}
+#| code-fold: false
+# Precios de las presentaciones comparables en la ejecución de referencia (base de varias consultas)
+CTE_PRECIOS = """
+WITH precios AS (
+    SELECT producto_id, nombre_estandar, comercio, MIN(precio) AS precio
+    FROM v_observaciones
+    WHERE ejecucion_id = :ejec AND comparable = 1 AND precio IS NOT NULL AND disponible = 1
+    GROUP BY producto_id, comercio
+)"""
+```
+
+## ¿Cuántos comercios, presentaciones y observaciones contiene la base?
+
+```{python}
+#| code-fold: false
+q1a = consulta("""
+SELECT (SELECT COUNT(DISTINCT comercio_id) FROM observaciones)               AS comercios,
+       (SELECT COUNT(DISTINCT ejecucion_id) FROM ejecuciones)                AS ejecuciones,
+       (SELECT COUNT(*) FROM anuncios WHERE incluido = 1)                    AS anuncios_categoria,
+       (SELECT COUNT(DISTINCT producto_id) FROM anuncios WHERE incluido = 1) AS productos_presentaciones,
+       (SELECT COUNT(*) FROM productos WHERE comparable = 1)                 AS presentaciones_comparables,
+       (SELECT COUNT(*) FROM observaciones)                                  AS observaciones,
+       (SELECT COUNT(*) FROM observaciones WHERE comparable = 1)             AS observaciones_comparables
+""")
+q1b = consulta("""
+SELECT c.nombre AS comercio,
+       COUNT(DISTINCT a.anuncio_id)                                         AS anuncios,
+       COUNT(DISTINCT a.producto_id)                                        AS presentaciones,
+       COUNT(DISTINCT CASE WHEN a.comparable = 1 THEN a.producto_id END)    AS comparables,
+       COUNT(o.observacion_id)                                              AS observaciones
+FROM anuncios a
+JOIN comercios c ON c.comercio_id = a.comercio_id
+LEFT JOIN observaciones o ON o.anuncio_id = a.anuncio_id
+WHERE a.incluido = 1
+GROUP BY c.nombre
+ORDER BY anuncios DESC
+""")
+display(tabla(q1a)); display(tabla(q1b))
+```
+
+```{python}
+#| echo: false
+#| output: asis
+r = q1a.iloc[0]; mayor = q1b.iloc[0]; menor = q1b.iloc[-1]
+md(f"""
+**Interpretación.** La base reúne {r.comercios} comercios, {r.ejecuciones} ejecuciones y
+{ent(r.observaciones)} observaciones de precio sobre {ent(r.productos_presentaciones)} presentaciones distintas de
+cuidado bucal ({ent(r.anuncios_categoria)} anuncios). {mayor.comercio} aporta la oferta más amplia
+({ent(mayor.anuncios)} anuncios) y {menor.comercio} la más reducida ({ent(menor.anuncios)}). Solo
+{r.presentaciones_comparables} presentaciones están en los {N_COM} comercios: la mayor parte de la
+oferta no es común, lo que confirma que comparar promedios de surtidos distintos no sería válido.
+""")
+```
+
+## ¿Hay al menos 24 observaciones comparables en una misma ejecución? ¿Hay registros repetidos?
+
+```{python}
+#| code-fold: false
+q2a = consulta("""
+WITH obs AS (
+    SELECT o.ejecucion_id, a.producto_id, o.comercio_id
+    FROM observaciones o JOIN anuncios a ON a.anuncio_id = o.anuncio_id
+    WHERE a.comparable = 1 AND o.precio IS NOT NULL AND o.disponible = 1
+    GROUP BY o.ejecucion_id, a.producto_id, o.comercio_id
+), cobertura AS (
+    SELECT ejecucion_id, producto_id, COUNT(*) AS n_comercios FROM obs GROUP BY ejecucion_id, producto_id
+)
+SELECT ejecucion_id,
+       SUM(n_comercios)                                              AS observaciones_comparables,
+       SUM(n_comercios = :n_com)                                     AS presentaciones_en_todos,
+       SUM(CASE WHEN n_comercios = :n_com THEN n_comercios END)      AS obs_con_cobertura_completa,
+       CASE WHEN SUM(n_comercios = :n_com) >= 8 THEN 'sí' ELSE 'no' END AS cumple_8_por_comercios
+FROM cobertura GROUP BY ejecucion_id ORDER BY ejecucion_id
+""", n_com=N_COM)
+q2b = consulta("""
+SELECT o.ejecucion_id, c.nombre AS comercio, p.nombre_estandar AS presentacion,
+       COUNT(*) AS registros, GROUP_CONCAT(o.sku_comercio, ', ') AS skus
+FROM observaciones o
+JOIN anuncios a  ON a.anuncio_id = o.anuncio_id
+JOIN productos p ON p.producto_id = a.producto_id
+JOIN comercios c ON c.comercio_id = o.comercio_id
+WHERE o.ejecucion_id = :ejec AND a.comparable = 1
+GROUP BY o.ejecucion_id, o.comercio_id, a.producto_id
+HAVING COUNT(*) > 1
+""", ejec=EJEC)
+q2c = consulta("""
+SELECT COUNT(*) AS skus_repetidos_en_una_ejecucion FROM (
+    SELECT ejecucion_id, comercio_id, sku_comercio FROM observaciones
+    GROUP BY ejecucion_id, comercio_id, sku_comercio HAVING COUNT(*) > 1)
+""")
+display(tabla(q2a)); display(tabla(q2b)); display(tabla(q2c))
+```
+
+```{python}
+#| echo: false
+#| output: asis
+r = q2a[q2a.ejecucion_id == EJEC].iloc[0].fillna(0)
+md(f"""
+**Interpretación.** En la ejecución de referencia hay **{ent(r.obs_con_cobertura_completa)} observaciones
+comparables con cobertura completa** ({ent(r.presentaciones_en_todos)} presentaciones × {N_COM} comercios), por lo que
+{'**sí** se cumple' if r.presentaciones_en_todos >= 8 else '**no** se cumple'} el mínimo de 8 × {N_COM} = {8 * N_COM}.
+No hay SKU repetidos dentro de una ejecución ({q2c.iloc[0, 0]}), lo que garantiza la restricción de unicidad.
+{f"Hay {len(q2b)} casos en que un comercio publica la misma presentación con dos SKU distintos; en las comparaciones se usa el menor precio disponible." if len(q2b) else "Ningún comercio publica la misma presentación comparable con dos SKU distintos."}
+""")
+```
+
+## Precio mínimo, máximo y promedio de cada presentación
+
+```{python}
+#| code-fold: false
+q3 = consulta(CTE_PRECIOS + """
+, resumen AS (
+    SELECT producto_id, MIN(precio) AS precio_min, MAX(precio) AS precio_max,
+           AVG(precio) AS precio_prom, COUNT(*) AS n_comercios
+    FROM precios GROUP BY producto_id
+)
+SELECT p.nombre_estandar AS presentacion, r.n_comercios, r.precio_min, r.precio_max,
+       ROUND(r.precio_prom) AS precio_promedio,
+       GROUP_CONCAT(CASE WHEN p.precio = r.precio_min THEN p.comercio END, ' = ') AS comercio_mas_barato,
+       SUM(p.precio = r.precio_min) AS comercios_con_minimo
+FROM precios p JOIN resumen r ON r.producto_id = p.producto_id
+GROUP BY p.producto_id
+ORDER BY p.nombre_estandar
+""", ejec=EJEC)
+display(tabla(q3, cop_cols=["precio_min", "precio_max", "precio_promedio"]))
+```
+
+```{python}
+#| echo: false
+#| output: asis
+gana = (q3[q3.comercios_con_minimo == 1].comercio_mas_barato.value_counts())
+empates = (q3.comercios_con_minimo > 1).sum()
+md(f"""
+**Interpretación.** {"; ".join(f"**{k}** ofrece el precio más bajo en {v} presentación(es)" for k, v in gana.items())}.
+{f"En {empates} presentación(es) hay **empate** en el mínimo y se listan todos los comercios empatados (separados por «=»)." if empates else "No hubo empates en el precio mínimo."}
+El promedio se reporta solo como referencia: para decidir dónde comprar importa el mínimo de cada
+presentación, no el promedio del comercio.
+""")
+```
+
+## Ahorro al elegir la oferta más económica
+
+```{python}
+#| code-fold: false
+q4 = consulta(CTE_PRECIOS + """
+, r AS (
+    SELECT producto_id, MIN(nombre_estandar) AS presentacion, MIN(precio) AS pmin, MAX(precio) AS pmax
+    FROM precios GROUP BY producto_id
+)
+SELECT presentacion, pmin AS precio_min, pmax AS precio_max,
+       pmax - pmin                                AS ahorro_cop,
+       ROUND(100.0 * (pmax - pmin) / pmax, 1)     AS ahorro_pct
+FROM r ORDER BY presentacion
+""", ejec=EJEC)
+display(tabla(q4, cop_cols=["precio_min", "precio_max", "ahorro_cop"], pct_cols=["ahorro_pct"]))
+```
+
+```{python}
+#| echo: false
+#| output: asis
+md(f"""
+**Interpretación.** Elegir la oferta más barata en lugar de la más cara ahorra en promedio
+{cop(q4.ahorro_cop.mean())} ({pct(q4.ahorro_pct.mean())}) por presentación, con una mediana de
+{pct(q4.ahorro_pct.median())}. El ahorro máximo en pesos es {cop(q4.ahorro_cop.max())}
+({q4.loc[q4.ahorro_cop.idxmax(), 'presentacion']}). Comprar una unidad de cada presentación comparable
+en su comercio más barato cuesta {cop(q4.precio_min.sum())}, frente a {cop(q4.precio_max.sum())} si se
+compra cada una en el más caro.
+""")
+```
+
+## Menor precio por unidad de contenido entre tamaños del mismo producto
+
+```{python}
+#| code-fold: false
+SQL_UNIDAD = """
+WITH base AS (
+    SELECT familia, unidad, producto_id, nombre_estandar, contenido_total, comercio, MIN(precio) AS precio
+    FROM v_observaciones
+    WHERE ejecucion_id = :ejec AND incluido = 1 AND precio IS NOT NULL AND disponible = 1
+      AND contenido_total > 0 AND unidad IS NOT NULL
+      AND familia IN (SELECT familia FROM productos WHERE comparable = 1)
+    GROUP BY producto_id, comercio
+), familias_validas AS (            -- mismo producto en al menos dos tamaños, misma unidad
+    SELECT familia, unidad FROM base GROUP BY familia, unidad HAVING COUNT(DISTINCT contenido_total) >= 2
+)
+SELECT f.nombre_familia AS producto, b.unidad, b.nombre_estandar AS presentacion, b.contenido_total,
+       b.comercio, b.precio, b.precio / b.contenido_total AS cop_por_unidad,
+       RANK() OVER (PARTITION BY b.familia, b.unidad ORDER BY b.precio / b.contenido_total) AS puesto
+FROM base b
+JOIN familias_validas v ON v.familia = b.familia AND v.unidad = b.unidad
+JOIN familias f ON f.familia = b.familia
+"""
+unidad_detalle = consulta(SQL_UNIDAD + " ORDER BY 1, 2, 7", ejec=EJEC)   # producto, unidad, COP por unidad
+q5 = consulta(f"SELECT * FROM ({SQL_UNIDAD}) WHERE puesto = 1 ORDER BY producto", ejec=EJEC)
+display(tabla(q5.drop(columns="puesto"), cop_cols=["precio"], dec_cols=["contenido_total", "cop_por_unidad"]))
+```
+
+```{python}
+#| echo: false
+#| output: asis
+if len(q5):
+    grande = 0
+    for (prod, u), g in unidad_detalle.groupby(["producto", "unidad"]):
+        g_mejor = g.loc[g.cop_por_unidad.idxmin()]
+        grande += g_mejor.contenido_total == g.contenido_total.max()
+    n_fam = unidad_detalle.groupby(["producto", "unidad"]).ngroups
+    md(f"""
+**Interpretación.** Hay {n_fam} producto(s) con al menos dos tamaños en la misma unidad. En
+**{grande} de {n_fam}** el menor precio por {", ".join(sorted(q5.unidad.unique()))} corresponde a la presentación más grande,
+aunque exige un desembolso mayor. Los precios por mL, g, m y unidad se calculan y ordenan por separado:
+no se mezclan unidades en un mismo ranking, y un paquete múltiple se compara por su contenido total
+(p. ej. 3 × 75 mL = 225 mL).
+""")
+else:
+    md("No se encontraron tamaños distintos del mismo producto con precio en la ejecución de referencia.")
+```
+
+## Mayores diferencias de precio entre comercios
+
+```{python}
+#| code-fold: false
+q6 = consulta(CTE_PRECIOS + """
+, r AS (
+    SELECT producto_id, MIN(precio) AS pmin, MAX(precio) AS pmax FROM precios GROUP BY producto_id
+)
+SELECT RANK() OVER (ORDER BY 100.0 * (r.pmax - r.pmin) / r.pmax DESC)                 AS puesto,
+       MIN(p.nombre_estandar)                                                          AS presentacion,
+       GROUP_CONCAT(CASE WHEN p.precio = r.pmin THEN p.comercio END, ' = ')            AS mas_barato,
+       GROUP_CONCAT(CASE WHEN p.precio = r.pmax THEN p.comercio END, ' = ')            AS mas_caro,
+       r.pmax - r.pmin                                                                 AS ahorro_cop,
+       ROUND(100.0 * (r.pmax - r.pmin) / r.pmax, 1)                                    AS ahorro_pct
+FROM precios p JOIN r ON r.producto_id = p.producto_id
+GROUP BY p.producto_id
+ORDER BY ahorro_pct DESC
+""", ejec=EJEC)
+canasta = consulta(CTE_PRECIOS + """
+, canasta AS (SELECT comercio, COUNT(*) AS presentaciones, SUM(precio) AS total FROM precios GROUP BY comercio)
+SELECT comercio, presentaciones, total, total - MIN(total) OVER () AS diferencia_vs_mas_barata
+FROM canasta ORDER BY total
+""", ejec=EJEC)
+display(tabla(q6, cop_cols=["ahorro_cop"], pct_cols=["ahorro_pct"]))
+display(tabla(canasta, cop_cols=["total", "diferencia_vs_mas_barata"]))
+```
+
+```{python}
+#| echo: false
+#| output: asis
+top = q6.head(3)
+optima = q4.precio_min.sum()
+md(f"""
+**Interpretación.** Las mayores diferencias porcentuales están en
+{"; ".join(f"{t.presentacion} ({pct(t.ahorro_pct)}, más barato en {t.mas_barato})" for t in top.itertuples())}.
+Para comparar comercios de forma global se usa una **canasta** con exactamente las mismas
+{N_COMPARABLES} presentaciones, una unidad de cada una y precios de la misma ejecución: la canasta más
+económica es la de **{canasta.iloc[0].comercio}** ({cop(canasta.iloc[0].total)}) y la más costosa la de
+{canasta.iloc[-1].comercio} ({cop(canasta.iloc[-1].total)}). Comprando cada presentación donde es más
+barata, la misma canasta costaría {cop(optima)}.
+""")
+```
+
+## Datos faltantes o inconsistentes
+
+```{python}
+#| code-fold: false
+q7 = consulta("""
+SELECT 'Observaciones sin precio (NULL)' AS problema, COUNT(*) AS n FROM observaciones WHERE precio IS NULL
+UNION ALL SELECT 'Observaciones de productos no disponibles', COUNT(*) FROM observaciones WHERE disponible = 0
+UNION ALL SELECT 'Observaciones sin indicador de disponibilidad', COUNT(*) FROM observaciones WHERE disponible IS NULL
+UNION ALL SELECT 'Precio de lista menor que el precio extraído', COUNT(*) FROM observaciones WHERE precio_lista < precio
+UNION ALL SELECT 'Observaciones comparables en promoción (ejecución de referencia)', COUNT(*)
+          FROM observaciones WHERE comparable = 1 AND es_promocion = 1 AND ejecucion_id = :ejec
+UNION ALL SELECT 'Anuncios excluidos de la categoría', COUNT(*) FROM anuncios WHERE incluido = 0
+UNION ALL SELECT 'Anuncios sin marca identificable', COUNT(*) FROM anuncios WHERE incluido = 1 AND marca_std IS NULL
+UNION ALL SELECT 'Anuncios sin contenido o unidad identificable', COUNT(*) FROM anuncios
+          WHERE incluido = 1 AND contenido_total IS NULL
+UNION ALL SELECT 'Anuncios sin descripción', COUNT(*) FROM anuncios
+          WHERE incluido = 1 AND (descripcion_original IS NULL OR TRIM(descripcion_original) = '')
+UNION ALL SELECT 'Anuncios sin EAN válido', COUNT(*) FROM anuncios WHERE incluido = 1 AND ean_valido IS NULL
+UNION ALL SELECT 'Anuncios con alerta de limpieza', COUNT(*) FROM anuncios
+          WHERE incluido = 1 AND alerta_limpieza IS NOT NULL
+UNION ALL SELECT 'Presentaciones con alerta de correspondencia', COUNT(*) FROM productos WHERE alerta IS NOT NULL
+UNION ALL SELECT 'Presentaciones comparables con alerta de correspondencia', COUNT(*) FROM productos
+          WHERE comparable = 1 AND alerta IS NOT NULL
+UNION ALL SELECT 'Ejecuciones por comercio no completas', COUNT(*) FROM ejecuciones WHERE estado <> 'completa'
+""", ejec=EJEC)
+display(tabla(q7))
+```
+
+```{python}
+#| echo: false
+#| output: asis
+d7 = dict(zip(q7.problema, q7.n))
+md(f"""
+**Interpretación.** Los faltantes que afectan directamente la comparación son los precios ausentes
+({d7['Observaciones sin precio (NULL)']}) y los productos no disponibles ({d7['Observaciones de productos no disponibles']}): se
+excluyen de las consultas de precio en lugar de imputarse. Los anuncios sin contenido identificable
+({d7['Anuncios sin contenido o unidad identificable']}) no entran al cálculo de precio por unidad, y los anuncios sin EAN válido
+({d7['Anuncios sin EAN válido']}) solo pueden emparejarse por clave normalizada, que es menos segura. Las
+{d7['Observaciones comparables en promoción (ejecución de referencia)']} observaciones comparables en promoción indican que parte de las
+diferencias se explica por descuentos temporales.
+""")
+```
+
+## Productos de la categoría por comercio y ejecución
+
+```{python}
+#| code-fold: false
+q8 = consulta("""
+WITH cat AS (
+    SELECT o.ejecucion_id, o.comercio_id, a.anuncio_id, a.descripcion_original, a.marca_std, a.contenido_total
+    FROM observaciones o JOIN anuncios a ON a.anuncio_id = o.anuncio_id
+    WHERE a.incluido = 1
+)
+SELECT e.ejecucion_id, c.nombre AS comercio, e.estado,
+       e.total_reportado_sitio, e.n_productos AS productos_obtenidos,
+       COUNT(cat.anuncio_id) AS skus_en_categoria,
+       ROUND(100.0 * AVG(cat.descripcion_original IS NOT NULL AND TRIM(cat.descripcion_original) <> ''), 1)
+                                                         AS pct_con_descripcion,
+       ROUND(100.0 * AVG(cat.marca_std IS NOT NULL), 1)       AS pct_con_marca,
+       ROUND(100.0 * AVG(cat.contenido_total IS NOT NULL), 1) AS pct_con_contenido
+FROM ejecuciones e
+JOIN comercios c ON c.comercio_id = e.comercio_id
+LEFT JOIN cat ON cat.ejecucion_id = e.ejecucion_id AND cat.comercio_id = e.comercio_id
+GROUP BY e.ejecucion_id, e.comercio_id
+ORDER BY e.ejecucion_id, skus_en_categoria DESC
+""")
+oferta = consulta("""
+SELECT c.nombre AS comercio, a.subcategoria_std AS subcategoria, COUNT(*) AS skus
+FROM observaciones o JOIN anuncios a ON a.anuncio_id = o.anuncio_id
+JOIN comercios c ON c.comercio_id = o.comercio_id
+WHERE o.ejecucion_id = :ejec AND a.incluido = 1
+GROUP BY c.nombre, a.subcategoria_std
+""", ejec=EJEC)
+display(tabla(q8, pct_cols=["pct_con_descripcion", "pct_con_marca", "pct_con_contenido"]))
+display(tabla(oferta.pivot_table(index="subcategoria", columns="comercio", values="skus", fill_value=0)
+              .reset_index()))
+```
+
+```{python}
+#| echo: false
+#| output: asis
+r8 = q8[q8.ejecucion_id == EJEC].sort_values("skus_en_categoria", ascending=False)
+md(f"""
+**Interpretación.** En la ejecución de referencia, {r8.iloc[0].comercio} tiene la oferta más grande
+({r8.iloc[0].skus_en_categoria} SKU de cuidado bucal) y {r8.iloc[-1].comercio} la más pequeña
+({r8.iloc[-1].skus_en_categoria}). La calidad de la información varía: el porcentaje de anuncios con
+contenido identificable va de {pct(r8.pct_con_contenido.min())} a {pct(r8.pct_con_contenido.max())} y el de
+anuncios con descripción de {pct(r8.pct_con_descripcion.min())} a {pct(r8.pct_con_descripcion.max())}.
+La tabla de subcategorías muestra cómo se reparte la oferta de cada comercio.
+""")
+```
+
+# Visualizaciones
+
+## Precio de las mismas presentaciones entre comercios
+
+```{python}
+#| label: fig-precios
+#| fig-cap: "Precio del empaque (COP) de cada presentación comparable, por comercio (ejecución de referencia). La línea gris va del precio mínimo al máximo."
+precios = consulta(CTE_PRECIOS + " SELECT * FROM precios", ejec=EJEC)
+orden = (precios.groupby("nombre_estandar").precio.max().sort_values().index.tolist())
+if len(orden) > 35:   # para legibilidad: las 35 con mayor diferencia porcentual
+    orden = [p for p in orden if p in set(q6.head(35).presentacion)]
+y = {p: i for i, p in enumerate(orden)}
+fig, ax = plt.subplots(figsize=(9, 0.36 * len(orden) + 1.6))
+for p in orden:
+    g = precios[precios.nombre_estandar == p]
+    ax.hlines(y[p], g.precio.min(), g.precio.max(), color="#c8c8c8", lw=3, zorder=1)
+for com, g in precios[precios.nombre_estandar.isin(orden)].groupby("comercio"):
+    ax.scatter(g.precio, g.nombre_estandar.map(y), s=50, color=COLORES[com], label=com, zorder=3,
+               edgecolor="white", linewidth=0.6)
+ax.set_yticks(range(len(orden)), [textwrap.shorten(p, 58, placeholder="…") for p in orden], fontsize=8)
+ax.xaxis.set_major_formatter(FMT_COP)
+ax.set_xlabel("Precio del empaque (COP)")
+ax.grid(axis="x", alpha=0.3)
+ax.legend(title="Comercio", loc="lower right", frameon=False)
+ax.set_title(f"Precio por presentación y comercio · ejecución {EJEC}")
+plt.tight_layout(); plt.show()
+```
+
+```{python}
+#| echo: false
+#| output: asis
+md(f"""
+Cada fila es una presentación idéntica (mismo `producto_id`) y cada punto el precio del empaque en un
+comercio. Cuanto más larga la línea gris, mayor la diferencia entre comercios. El eje está en pesos
+corrientes del día de captura; por eso se comparan precios dentro de una misma fila y no entre filas,
+que corresponden a productos y tamaños distintos.
+""")
+```
+
+## Precio por unidad de contenido entre tamaños
+
+```{python}
+#| label: fig-unidad
+#| fig-cap: "Precio por unidad de contenido (COP por mL, g, m o unidad) de los productos disponibles en varios tamaños. Cada panel usa una sola unidad."
+if len(unidad_detalle):
+    grupos = list(unidad_detalle.groupby(["producto", "unidad"]))[:6]
+    n = len(grupos); cols = 2 if n > 1 else 1; filas = int(np.ceil(n / cols))
+    fig, axes = plt.subplots(filas, cols, figsize=(9, 3.1 * filas), squeeze=False)
+    for ax, ((prod, u), g) in zip(axes.flat, grupos):
+        tam = sorted(g.contenido_total.unique())
+        etiquetas = {t: g[g.contenido_total == t].presentacion.iloc[0].split(" — ")[-1] for t in tam}
+        comercios_g = sorted(g.comercio.unique()); ancho = 0.8 / len(comercios_g)
+        for j, com in enumerate(comercios_g):
+            gg = g[g.comercio == com]
+            xs = [tam.index(t) + (j - (len(comercios_g) - 1) / 2) * ancho for t in gg.contenido_total]
+            ax.bar(xs, gg.cop_por_unidad, width=ancho * 0.95, color=COLORES[com], label=com)
+        ax.set_xticks(range(len(tam)), [etiquetas[t] for t in tam], fontsize=8)
+        ax.set_title(textwrap.shorten(prod, 45, placeholder="…"), fontsize=9)
+        ax.set_ylabel(f"COP por {u}", fontsize=8)
+        ax.grid(axis="y", alpha=0.3)
+    for ax in list(axes.flat)[n:]:
+        ax.axis("off")
+    fig.legend([plt.Rectangle((0, 0), 1, 1, color=COLORES[c]) for c in sorted(COLORES) if c in set(unidad_detalle.comercio)],
+               [c for c in sorted(COLORES) if c in set(unidad_detalle.comercio)], loc="lower center",
+               ncol=4, frameon=False, bbox_to_anchor=(0.5, -0.02))
+    plt.tight_layout(rect=(0, 0.04, 1, 1)); plt.show()
+else:
+    print("Sin productos con varios tamaños comparables.")
+```
+
+```{python}
+#| echo: false
+#| output: asis
+md("""
+Cada panel corresponde a un mismo producto y formulación en distintos tamaños; las barras comparan el
+precio por unidad de contenido. Una barra más baja en un tamaño mayor indica que el empaque grande
+rinde más por peso pagado, aunque implique un desembolso total mayor. Se muestran hasta seis productos;
+la tabla de la consulta 5 contiene todos.
+""")
+```
+
+## Oportunidades de ahorro
+
+```{python}
+#| label: fig-ahorro
+#| fig-cap: "Ahorro porcentual al comprar cada presentación en el comercio más barato frente al más caro. El color indica el comercio más barato (gris: empate)."
+a = q6.head(25).iloc[::-1]
+colores = [COLORES.get(m, "#9e9e9e") if "=" not in m else "#9e9e9e" for m in a.mas_barato]
+fig, ax = plt.subplots(figsize=(9, 0.34 * len(a) + 1.5))
+ax.barh(range(len(a)), a.ahorro_pct, color=colores)
+for i, (p, c) in enumerate(zip(a.ahorro_pct, a.ahorro_cop)):
+    ax.text(p + 0.3, i, cop(c), va="center", fontsize=7.5, color="#444")
+ax.set_yticks(range(len(a)), [textwrap.shorten(p, 58, placeholder="…") for p in a.presentacion], fontsize=8)
+ax.set_xlabel("Ahorro (%) = 100 · (Pmáx − Pmín) / Pmáx")
+ax.set_xlim(0, max(a.ahorro_pct.max() * 1.25, 1))
+ax.legend([plt.Rectangle((0, 0), 1, 1, color=COLORES[c]) for c in sorted(COLORES) if c in set(precios.comercio)]
+          + [plt.Rectangle((0, 0), 1, 1, color="#9e9e9e")],
+          [c for c in sorted(COLORES) if c in set(precios.comercio)] + ["Empate"],
+          title="Más barato en", loc="lower right", frameon=False)
+ax.set_title("Mayores oportunidades de ahorro entre comercios")
+plt.tight_layout(); plt.show()
+```
+
+```{python}
+#| label: fig-canasta
+#| fig-cap: "Izquierda: número de presentaciones en las que cada comercio tiene el menor precio (los empates cuentan para todos los empatados). Derecha: costo de la canasta de presentaciones comparables (una unidad de cada una)."
+victorias = {c: 0 for c in canasta.comercio}
+for m in q3.comercio_mas_barato:
+    for c in m.split(" = "):
+        victorias[c] = victorias.get(c, 0) + 1
+fig, (a1, a2) = plt.subplots(1, 2, figsize=(9, 3.4))
+a1.bar(list(victorias), list(victorias.values()), color=[COLORES[c] for c in victorias])
+a1.set_ylabel("Presentaciones con el menor precio"); a1.set_title("¿Dónde está el mínimo?")
+a2.bar(canasta.comercio, canasta.total, color=[COLORES[c] for c in canasta.comercio])
+a2.axhline(optima, ls="--", color="#333", lw=1)
+a2.annotate("canasta óptima", (-0.4, optima), xytext=(0, 3), textcoords="offset points", fontsize=8)
+a2.yaxis.set_major_formatter(FMT_COP); a2.set_title("Canasta comparable (COP)")
+for ax in (a1, a2):
+    ax.tick_params(axis="x", labelsize=8); ax.grid(axis="y", alpha=0.3)
+plt.tight_layout(); plt.show()
+```
+
+```{python}
+#| echo: false
+#| output: asis
+md(f"""
+El gráfico de ahorro ordena las presentaciones por diferencia porcentual; la etiqueta indica el ahorro
+en pesos. Un porcentaje alto en un producto barato puede significar pocos pesos, por eso se reportan
+ambas medidas. La canasta compara comercios con las mismas {N_COMPARABLES} presentaciones y cantidades,
+de modo que la diferencia no se debe a surtidos distintos; la línea punteada es el costo de comprar
+cada presentación donde es más barata, que puede requerir varios pedidos (y varios costos de envío).
+""")
+```
+
+## Oferta de la categoría por comercio
+
+```{python}
+#| label: fig-oferta
+#| fig-cap: "Número de SKU de cuidado bucal por subcategoría y comercio (ejecución de referencia)."
+piv = oferta.pivot_table(index="subcategoria", columns="comercio", values="skus", fill_value=0)
+piv = piv.loc[piv.sum(axis=1).sort_values().index]
+fig, ax = plt.subplots(figsize=(9, 0.42 * len(piv) + 1.5))
+alto = 0.8 / len(piv.columns)
+for j, com in enumerate(piv.columns):
+    ax.barh(np.arange(len(piv)) + (j - (len(piv.columns) - 1) / 2) * alto, piv[com], height=alto,
+            color=COLORES[com], label=com)
+ax.set_yticks(range(len(piv)), piv.index, fontsize=8)
+ax.set_xlabel("SKU en la categoría"); ax.grid(axis="x", alpha=0.3)
+ax.legend(frameon=False, loc="lower right"); ax.set_title("Tamaño y composición de la oferta")
+plt.tight_layout(); plt.show()
+```
+
+## Cambios de precio entre ejecuciones
+
+Variación porcentual del precio de las presentaciones comparables entre la primera y la última
+ejecución, por comercio (solo si hay al menos dos ejecuciones con precios comparables).
+
+```{python}
+cambios = consulta("""
+WITH p AS (
+    SELECT producto_id, nombre_estandar, comercio, ejecucion_id, MIN(precio) AS precio
+    FROM v_observaciones WHERE comparable = 1 AND precio IS NOT NULL AND disponible = 1
+    GROUP BY producto_id, comercio, ejecucion_id
+), extremos AS (
+    SELECT producto_id, comercio, MIN(ejecucion_id) AS primera, MAX(ejecucion_id) AS ultima
+    FROM p GROUP BY producto_id, comercio HAVING COUNT(*) >= 2
+)
+SELECT a.nombre_estandar, a.comercio, e.primera, e.ultima, a.precio AS precio_inicial, b.precio AS precio_final,
+       ROUND(100.0 * (b.precio - a.precio) / a.precio, 1) AS cambio_pct
+FROM extremos e
+JOIN p a ON a.producto_id = e.producto_id AND a.comercio = e.comercio AND a.ejecucion_id = e.primera
+JOIN p b ON b.producto_id = e.producto_id AND b.comercio = e.comercio AND b.ejecucion_id = e.ultima
+""")
+if len(cambios):
+    piv = cambios.pivot_table(index="nombre_estandar", columns="comercio", values="cambio_pct")
+    piv = piv.loc[piv.abs().max(axis=1).sort_values().index].tail(25)
+    fig, ax = plt.subplots(figsize=(9, 0.34 * len(piv) + 1.5))
+    for com in piv.columns:
+        ax.scatter(piv[com], range(len(piv)), color=COLORES[com], label=com, s=40, zorder=3)
+    ax.axvline(0, color="#555", lw=0.8)
+    ax.set_yticks(range(len(piv)), [textwrap.shorten(p, 58, placeholder="…") for p in piv.index], fontsize=8)
+    ax.set_xlabel("Cambio de precio (%)"); ax.grid(axis="x", alpha=0.3)
+    ax.legend(frameon=False); ax.set_title(f"Cambio entre {cambios.primera.min()} y {cambios.ultima.max()}")
+    plt.tight_layout(); plt.show()
+    print(f"Pares presentación-comercio con cambio: {(cambios.cambio_pct != 0).sum()} de {len(cambios)}; "
+          f"cambio mediano {pct(cambios.cambio_pct.median())}.")
+else:
+    print("Solo hay una ejecución con precios comparables; se recomienda una segunda ejecución en otra fecha.")
+```
+
+# Limitaciones y conclusiones
+
+## Conclusión para el consumidor
+
+```{python}
+#| echo: false
+guia = q3.merge(q4[["presentacion", "ahorro_cop", "ahorro_pct"]], on="presentacion")
+guia = guia[["presentacion", "comercio_mas_barato", "precio_min", "ahorro_cop", "ahorro_pct"]]
+display(tabla(guia.rename(columns={"comercio_mas_barato": "dónde comprar", "precio_min": "precio",
+                                   "ahorro_cop": "ahorro vs. más caro", "ahorro_pct": "ahorro %"}),
+              cop_cols=["precio", "ahorro vs. más caro"], pct_cols=["ahorro %"]))
+```
+
+```{python}
+#| echo: false
+#| output: asis
+mejor_canasta = canasta.iloc[0]
+texto_unidad = ""
+if len(q5):
+    ejemplos_u = q5.head(3)
+    texto_unidad = ("Entre tamaños del mismo producto, el menor precio por unidad se encontró en " +
+        "; ".join(f"{r.presentacion} en {r.comercio} ({num(r.cop_por_unidad)} COP/{r.unidad})" for r in ejemplos_u.itertuples()) + ".")
+md(f"""
+- **Dónde comprar cada producto.** La tabla anterior indica, para cada presentación, el comercio con el
+  menor precio observado el día de captura y el ahorro frente al más caro. Ningún comercio es el más
+  barato en todo: {", ".join(f"{k} lidera en {v}" for k, v in victorias.items())} presentaciones.
+- **Si se compra todo en un solo lugar**, la canasta comparable es más económica en
+  **{mejor_canasta.comercio}** ({cop(mejor_canasta.total)}); repartir la compra entre comercios bajaría el
+  total a {cop(optima)}, pero puede implicar varios envíos o desplazamientos.
+- **Ahorro unitario vs. desembolso total.** {texto_unidad} Un empaque más grande o un paquete múltiple
+  puede costar menos por mL, g o unidad y, aun así, exigir un pago mayor; conviene solo si el producto
+  se va a usar antes de su vencimiento.
+- **Condiciones de compra.** Los precios corresponden al vendedor principal de cada sitio, sin costos de
+  envío, y {d7['Observaciones comparables en promoción (ejecución de referencia)']} de las observaciones comparables de la ejecución de
+  referencia estaban en promoción; los descuentos condicionados (por ejemplo «lleve 2», precio con
+  tarjeta de la marca) no se reflejan en el precio extraído.
+""")
+```
+
+## Limitaciones
+
+- **Momento de captura.** Los precios representan el momento y las condiciones de cada ejecución; no
+  son permanentes. Las promociones cambian a diario y algunos precios pueden depender de la ciudad o
+  del canal de venta configurado por defecto en el sitio.
+- **Cobertura de la API.** El total de referencia es el que reporta la API del sitio; la página web puede
+  mostrar un número ligeramente distinto si oculta productos agotados o de vendedores externos.
+- **Correspondencia.** El EAN es muy confiable, pero algunos comercios usan códigos internos o el EAN
+  unitario en paquetes; esos casos se separan por número de unidades o se resuelven con la clave
+  normalizada y el archivo de correspondencias manuales.
+- **Contenido.** Se extrae del nombre o de la ficha técnica con reglas; nombres incompletos impiden
+  calcular el precio por unidad (consulta 7). Los precios por mL, g, m y unidad no se mezclan.
+- **No es una recomendación de sustitución.** Productos con principio activo (por ejemplo, enjuagues con
+  clorhexidina o cremas para sensibilidad) se comparan solo dentro de la misma formulación y
+  concentración; un menor precio no implica que un producto reemplace a otro.
+
+## Verificación del modo sin conexión
+
+```{python}
+#| code-fold: false
+if VERIFICAR_SIN_CONEXION:
+    with tempfile.TemporaryDirectory() as tmp:
+        prueba_db = Path(tmp) / "reproceso.sqlite"
+        scraper.reprocesar_sin_conexion(prueba_db, scraper.RAW_DIR, verbose=False)
+        off = sqlite3.connect(prueba_db)
+        sql_v = ("SELECT ejecucion_id, comercio_id, sku_comercio, fecha_hora_consulta, precio, precio_lista, "
+                 "es_promocion, disponible FROM observaciones ORDER BY 1, 2, 3")
+        original, reproceso = pd.read_sql(sql_v, con), pd.read_sql(sql_v, off)
+        resumen_v = pd.DataFrame({
+            "tabla": ["observaciones", "anuncios", "productos comparables"],
+            "base entregada": [len(original), con.execute("SELECT COUNT(*) FROM anuncios").fetchone()[0],
+                               N_COMPARABLES],
+            "reproceso desde raw/": [len(reproceso), off.execute("SELECT COUNT(*) FROM anuncios").fetchone()[0],
+                                     off.execute("SELECT COUNT(*) FROM productos WHERE comparable=1").fetchone()[0]],
+        })
+        identicas = original.equals(reproceso)
+        off.close()
+    display(tabla(resumen_v))
+    print(f"Observaciones idénticas (precio, fecha y hora, promoción, disponibilidad): {identicas}")
+```
+
+El modo sin conexión vuelve a procesar las respuestas guardadas en `raw/` sin consultar ningún sitio
+(`python scraper.py --sin-conexion`). Si un sitio cambia su estructura o bloquea el acceso después de
+la entrega, la extracción se verifica a partir de esas copias.
+
+# Anexo: entorno de ejecución
+
+```{python}
+#| echo: false
+import requests
+pd.DataFrame({"componente": ["Python", "pandas", "numpy", "matplotlib", "requests", "SQLite", "Sistema"],
+              "versión": [sys.version.split()[0], pd.__version__, np.__version__, matplotlib.__version__,
+                          requests.__version__, sqlite3.sqlite_version, platform.platform()]})
+```
+
+```{python}
+#| echo: false
+con.close()
+```

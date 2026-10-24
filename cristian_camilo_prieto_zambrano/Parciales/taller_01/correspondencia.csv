@@ -1,0 +1,31 @@
+id_producto,nombre_std,marca_std,subcategoria_std,variante,contenido,unidad,n_unidades,id_comercio,sku
+P01,Ensure Advance polvo,Ensure,Fórmula completa adulto,Vainilla,400,g,1,locatel,15544
+P01,Ensure Advance polvo,Ensure,Fórmula completa adulto,Vainilla,400,g,1,cruzverde,COCV_111380
+P01,Ensure Advance polvo,Ensure,Fórmula completa adulto,Vainilla,400,g,1,farmatodo,1043564
+P02,Ensure Advance líquido,Ensure,Fórmula completa adulto,Vainilla,220,mL,1,locatel,35669
+P02,Ensure Advance líquido,Ensure,Fórmula completa adulto,Vainilla,220,mL,1,cruzverde,COCV_402006
+P02,Ensure Advance líquido,Ensure,Fórmula completa adulto,Vainilla,220,mL,1,farmatodo,232300088
+P03,Glucerna polvo,Glucerna,Fórmula para diabetes,Vainilla,400,g,1,locatel,15541
+P03,Glucerna polvo,Glucerna,Fórmula para diabetes,Vainilla,400,g,1,cruzverde,COCV_142214
+P03,Glucerna polvo,Glucerna,Fórmula para diabetes,Vainilla,400,g,1,farmatodo,1026565
+P04,Glucerna líquido,Glucerna,Fórmula para diabetes,Vainilla,237,mL,1,locatel,19624
+P04,Glucerna líquido,Glucerna,Fórmula para diabetes,Vainilla,237,mL,1,cruzverde,COCV_128687
+P04,Glucerna líquido,Glucerna,Fórmula para diabetes,Vainilla,237,mL,1,farmatodo,1050402
+P05,ProWhey DM polvo,ProWhey,Fórmula para diabetes,Vainilla,400,g,1,locatel,18594
+P05,ProWhey DM polvo,ProWhey,Fórmula para diabetes,Vainilla,400,g,1,cruzverde,COCV_125728
+P05,ProWhey DM polvo,ProWhey,Fórmula para diabetes,Vainilla,400,g,1,farmatodo,106811741
+P06,ProWhey DM líquido,ProWhey,Fórmula para diabetes,Vainilla,200,mL,1,locatel,61184
+P06,ProWhey DM líquido,ProWhey,Fórmula para diabetes,Vainilla,200,mL,1,cruzverde,COCV_575793
+P06,ProWhey DM líquido,ProWhey,Fórmula para diabetes,Vainilla,200,mL,1,farmatodo,241300207
+P07,Diben Drink,Diben,Fórmula para diabetes,Vainilla,200,mL,1,locatel,23574
+P07,Diben Drink,Diben,Fórmula para diabetes,Vainilla,200,mL,1,cruzverde,COCV_155958
+P07,Diben Drink,Diben,Fórmula para diabetes,Vainilla,200,mL,1,farmatodo,108112207
+P08,Ensure Advance polvo,Ensure,Fórmula completa adulto,Vainilla,850,g,1,locatel,19359
+P08,Ensure Advance polvo,Ensure,Fórmula completa adulto,Vainilla,850,g,1,cruzverde,COCV_129816
+P08,Ensure Advance polvo,Ensure,Fórmula completa adulto,Vainilla,850,g,1,farmatodo,1050596
+P09,ProWhey Net polvo,ProWhey,Módulo de proteína,Vainilla,434,g,1,locatel,20808
+P09,ProWhey Net polvo,ProWhey,Módulo de proteína,Vainilla,434,g,1,cruzverde,COCV_134562
+P09,ProWhey Net polvo,ProWhey,Módulo de proteína,Vainilla,434,g,1,farmatodo,106811821
+P10,ProWhey DM polvo,ProWhey,Fórmula para diabetes,Vainilla,850,g,1,locatel,26616
+P10,ProWhey DM polvo,ProWhey,Fórmula para diabetes,Vainilla,850,g,1,cruzverde,COCV_164643
+P10,ProWhey DM polvo,ProWhey,Fórmula para diabetes,Vainilla,850,g,1,farmatodo,204700084

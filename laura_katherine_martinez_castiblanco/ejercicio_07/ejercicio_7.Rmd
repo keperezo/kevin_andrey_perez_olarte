@@ -1,0 +1,43 @@
+---
+title: "Ejercicio 7 - Clase 10: Medidas Estadísticas y Comunicación de Resultados"
+author: "Laura Katherine Martinez Castiblanco"
+output:
+  html_document:
+    theme: flatly
+    toc: false
+    self_contained: true
+    code_folding: hide
+    mathjax: default
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+
+```{r librerias_y_configuracion}
+# 1. Instalación y carga de paquetes necesarios
+paquetes   <- c("tidyverse", "readr", "dplyr", "tidyr", "stringr", "purrr", "knitr", "kableExtra", "ggplot2")
+instalados <- rownames(installed.packages())
+pendientes <- setdiff(paquetes, instalados)
+if (length(pendientes) > 0) install.packages(pendientes)
+
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+
+
+# Función auxiliar para renderizado elegante de tablas HTML
+mostrar_tabla <- function(df, caption = "", n = 10) {
+  kable(
+    head(df, n),
+    format = "html",
+    caption = caption,
+    table.attr = 'class="table table-striped table-hover table-bordered table-condensed"'
+  )
+}
+
+```

@@ -1,0 +1,48 @@
+P1. Más barata por precio total (producto más económico disponible):
+> p1_ganador %>%
++   group_by(marca) %>%
++   summarise(txt = paste0("  - ", first(marca), ": ", paste(supermercado, collapse = " / "),
++                          " (", pesos(first(precio_min)), ")"), .groups = "drop") %>%
++   pull(txt) %>% cat(sep = "\n")
+  - Club Colombia: Jumbo ($3.690)
+  - Michelob: Carulla ($3.000)
+  - Stella Artois: Carulla / Éxito ($3.800)
+> 
+> cat("\nP2. Precio promedio por ml por supermercado:\n")
+
+P2. Precio promedio por ml por supermercado:
+> cat(paste0("  - ", p2$supermercado, ": ", pesos(p2$precio_ml_promedio, 2), " por ml (",
++            p2$n_productos, " productos)"), sep = "\n")
+  - Carulla: $12,07 por ml (21 productos)
+  - Jumbo: $12,72 por ml (14 productos)
+  - Éxito: $13,85 por ml (17 productos)
+> cat("  → Más conveniente en general:", p2$supermercado[1], "\n")
+  → Más conveniente en general: Carulla 
+> cat("  → Con promedio balanceado por marca:", p2_balanceado$supermercado[1], "\n")
+  → Con promedio balanceado por marca: Carulla 
+> 
+> cat("\nP3. Supermercado más barato por ml en cada marca:\n")
+
+P3. Supermercado más barato por ml en cada marca:
+> cat(paste0("  - ", p3_ganador$marca, ": ", p3_ganador$supermercado), sep = "\n")
+  - Club Colombia: Jumbo
+  - Michelob: Carulla
+  - Stella Artois: Éxito
+> cat(if (consistente) {
++   paste0("  → ", p3_ganador$supermercado[1], " es consistentemente el más económico.\n")
++ } else {
++   "  → El ganador cambia según la marca.\n"
++ })
+  → El ganador cambia según la marca.
+> 
+> cat("\nP4. Presentación equivalente (unidad individual más pequeña común):\n")
+
+P4. Presentación equivalente (unidad individual más pequeña común):
+> p4_ganador %>%
++   mutate(txt = paste0("  - ", marca, " ", envase, " ", ml_unidad, " ml: ",
++                       supermercado, " (", pesos(precio), ")")) %>%
++   pull(txt) %>% cat(sep = "\n")
+  - Club Colombia botella 330 ml: Jumbo ($4.090)
+  - Michelob sin dato 269 ml: Carulla ($3.000)
+  - Stella Artois lata 269 ml: Carulla ($3.800)
+  - Stella Artois lata 269 ml: Éxito ($3.800)

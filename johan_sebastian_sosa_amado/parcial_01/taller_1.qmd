@@ -1,0 +1,885 @@
+---
+title: "Taller 1 · Comparador de precios: incontinencia y cuidado del adulto"
+subtitle: "Minería de Datos (2016325) · Universidad Nacional de Colombia, sede Bogotá"
+author: "Johan Sebastian Sosa Amado"
+date: "2026-10-10"
+lang: es
+format:
+  html:
+    toc: true
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+---
+
+```{python}
+#| label: preparacion
+#| echo: false
+# Conexión a la base y funciones del módulo de extracción (no se duplica su código).
+import sqlite3
+
+import pandas as pd
+import plotly.express as px
+from IPython.display import HTML, display
+
+from scraper import TIENDAS, FUNCIONES, conectar_base, limpiar_y_emparejar
+
+con = conectar_base("comparador_precios.sqlite")
+
+# Un color fijo por comercio en todos los gráficos (paleta Okabe-Ito, clase 9).
+COLORES = {"Exito": "#E69F00", "La Rebaja": "#0072B2", "Olimpica": "#009E73"}
+
+
+def cop(x):
+    """12345.0 -> '12.345' (pesos colombianos sin decimales)."""
+    return f"{x:,.0f}".replace(",", ".")
+
+
+def pct(x):
+    """32.81 -> '32,8 %'."""
+    return f"{x:.1f}".replace(".", ",") + " %"
+
+
+# plotly.js va una sola vez en el HTML, aquí; con fig.show() cada gráfico traía su propia copia.
+# Va solo, sin un gráfico al lado, porque Quarto 1.10 pasa este bloque al encabezado del HTML.
+from plotly.offline import get_plotlyjs
+
+display(HTML("<script type=\"text/javascript\">window.PlotlyConfig = {MathJaxConfig: 'local'};</script>\n"
+             "<script type=\"text/javascript\">" + get_plotlyjs() + "</script>"))
+
+
+def mostrar(fig):
+    """Muestra un gráfico de plotly sin volver a incrustar plotly.js."""
+    display(HTML(fig.to_html(full_html=False, include_plotlyjs=False)))
+
+
+def tabla(df, decimales=0):
+    """Tabla con separador de miles, como .style.format() en la clase 9."""
+    return df.style.format(precision=decimales, thousands=".", decimal=",",
+                           na_rep="NULL").hide(axis="index")
+
+
+# Recolecciones guardadas en la base (para citarlas en el texto).
+recolecciones = pd.read_sql_query("""
+    SELECT   recoleccion_id, MIN(fecha_hora_inicio) AS inicio
+    FROM     ejecuciones
+    WHERE    estado = 'completa'
+    GROUP BY recoleccion_id
+    HAVING   COUNT(DISTINCT comercio_id) = 3
+    ORDER BY recoleccion_id;
+""", con)
+ultima_recoleccion = recolecciones["recoleccion_id"].iloc[-1]
+fecha_ultima = recolecciones["inicio"].iloc[-1]
+n_recolecciones = len(recolecciones)
+```
+
+## 1. Introducción
+
+Este trabajo compara los precios de productos de **incontinencia y cuidado del adulto** en tres tiendas en línea colombianas: **Éxito**, **La Rebaja** y **Olímpica**. La categoría incluye pañales para adultos, ropa interior absorbente, toallas y protectores para incontinencia, protectores de cama, toallitas húmedas y otros productos de higiene para personas dependientes.
+
+El objetivo es responder, con datos extraídos automáticamente, dónde conviene comprar cada producto y cuánto se ahorra. Para eso:
+
+1. se extrae la categoría completa de cada tienda (web scraping);
+2. se identifican los productos que venden las tres tiendas con exactamente la misma presentación;
+3. se guarda todo en SQLite y se responden las preguntas del enunciado con SQL;
+4. se presentan gráficos y conclusiones para el consumidor.
+
+```{python}
+#| label: productos-seleccionados
+productos = pd.read_sql_query("""
+    SELECT producto_id, descripcion, marca, subcategoria, talla, contenido, unidad, ean
+    FROM   productos
+    ORDER BY producto_id;
+""", con)
+tabla(productos)
+```
+
+Se compararon **`{python} len(productos)` productos** (se piden al menos 8), todos con el mismo código de barras (EAN) en las tres tiendas. La base tiene `{python} n_recolecciones` recolecciones completas; los precios de las secciones 5 a 7 son los de la más reciente (`{python} fecha_ultima`, hora de Colombia).
+
+## 2. Fuentes y scraping
+
+### Comercios y secciones
+
+Las tres tiendas usan la plataforma VTEX. Antes de programar se revisó en el navegador, con las herramientas de desarrollador (pestaña Network, peticiones XHR), de dónde salen los precios. Las páginas se arman con JavaScript a partir de respuestas JSON del propio sitio. El enunciado (3.1) acepta leer esos servicios internos y recomienda peticiones HTTP directas en vez de automatizar el navegador, así que el scraper pide el JSON con `requests`, igual que la clase 3 pide el HTML con `user-agent` y pausas.
+
+En la clase 3 (ejercicio 7.2, con Éxito, Carulla y Jumbo) estas páginas se leyeron con Chrome mediante `read_html_live()`, porque el HTML descargado con `read_html()` solo trae bloques vacíos de "carga". Aquí no hace falta abrir el navegador: se pide directamente el JSON con el que la página llena esos bloques.
+
+```{python}
+#| label: fuentes
+fuentes = pd.read_sql_query("""
+    SELECT   c.nombre AS comercio, c.seccion, c.url_web,
+             e.fecha_hora_inicio, e.total_servicio, e.registros, e.estado, e.cargada_desde
+    FROM     ejecuciones AS e
+    JOIN     comercios   AS c ON c.comercio_id = e.comercio_id
+    ORDER BY e.fecha_hora_inicio;
+""", con)
+tabla(fuentes)
+```
+
+| Comercio | Servicio usado | Paginación |
+|---|---|---|
+| Éxito | `/api/catalog_system/pub/products/search?fq=C:/34185083/34185115/34185397/` | `_from`/`_to`, 50 por página; total en el encabezado `resources` |
+| La Rebaja | `/api/catalog_system/pub/products/search?fq=C:/5/33/` | igual que Éxito |
+| Olímpica | `/api/io/_v/api/intelligent-search/product_search/category-1/supermercado/...` | `?page=N`, 24 por página; total en `recordsFiltered` |
+
+### Campos que se leen del JSON
+
+En una página HTML se usarían selectores CSS; aquí cumplen ese papel los campos del JSON. Cada producto trae una lista `items` con sus presentaciones (SKU), y cada SKU genera una fila:
+
+| Dato | Columna en la base | Campo del JSON |
+|---|---|---|
+| Lista de productos | | la respuesta completa (Éxito, La Rebaja) o `products` (Olímpica) |
+| Producto y presentación | `product_id`, `sku`, `ean` | `productId`, `items[].itemId`, `items[].ean` |
+| Texto original | `nombre_original`, `descripcion_original` | `items[].nameComplete` (o `productName`), `description` |
+| Ficha técnica | `presentacion_original` | `Presentacionunidadmedida` (solo cuando la tienda la publica) |
+| Marca y subcategoría | `marca`, `subcategoria` | `brand`, `categories[0]` |
+| Vendedor | `vendedor` | el de `items[].sellers[]` con `sellerDefault`, campo `sellerName` |
+| Precio (COP) | `precio` | `commertialOffer.Price` de ese vendedor |
+| Precio antes del descuento | `precio_antes` | `commertialOffer.ListPrice` |
+| Promoción | `promocion` | 1 si `ListPrice` es mayor que `Price` |
+| Disponibilidad | `disponible` | `commertialOffer.IsAvailable` |
+| URL | `url` | `link`, unido a la dirección de la tienda |
+| Fecha y hora de consulta | `fecha_hora_consulta` | reloj del computador al hacer la petición, hora de Colombia |
+
+**Librerías:** `requests` (peticiones HTTP), `json` y `gzip` (copias crudas), `pandas` y `numpy` (tablas y limpieza), `re` (expresiones regulares), `sqlite3` (base de datos) y `plotly` (gráficos).
+
+### Estrategia de extracción
+
+El módulo `scraper.py` sigue la estructura de los cuadernos de clase (partes 1 y 2 de web scraping):
+
+- **Una función por comercio** (`scrapear_exito()`, `scrapear_larebaja()`, `scrapear_olimpica()`). Todas devuelven un `DataFrame` con las mismas columnas. Si una página falla, devuelven una tabla vacía con la misma estructura (`tabla_productos_vacia()`, como en la clase) y `scrapear_pagina_segura()` hace el papel de `possibly()`.
+- **Paginación**: se pide la página 1, se lee el total que informa el servicio y se recorren las páginas que faltan, con **2 segundos de pausa** entre peticiones, `user-agent` de navegador, `accept-language` y `timeout=30`.
+- **Categoría completa**: se descarga toda la sección y cada fila queda marcada con `en_categoria` y `motivo_exclusion` mediante la función `clasificar()`, con la misma regla para las tres tiendas.
+- **Copias crudas**: cada respuesta se guarda comprimida en `raw/<tienda>/<fecha y hora>/`, con su URL, código HTTP y fecha y hora de consulta (ISO 8601, hora de Colombia).
+- **Función general**: `ejecutar_recoleccion()` ejecuta todo, registra cada ejecución en SQLite e inserta sin sobrescribir lo anterior (enunciado 3.2).
+
+```{python}
+#| label: recoleccion
+#| eval: false
+from scraper import ejecutar_recoleccion
+
+ejecutar_recoleccion()                    # en línea: descarga, guarda raw/, SQLite y limpieza
+ejecutar_recoleccion(sin_conexion=True)   # sin conexión: reprocesa la última copia de raw/
+ejecutar_recoleccion(sin_conexion=True, fecha="2026-10-09")   # o la copia de un día
+```
+
+El modo sin conexión vuelve a extraer los productos a partir de las copias guardadas, sin consultar los sitios. Así se verifica que las copias de `raw/` reproducen la extracción:
+
+```{python}
+#| label: extraccion-sin-conexion
+tablas = {clave: FUNCIONES[clave](sin_conexion=True) for clave in TIENDAS}
+resumen_extraccion = pd.DataFrame([{
+    "comercio":         TIENDAS[clave]["comercio"],
+    "copia":            t.attrs["carpeta"].name,
+    "total_servicio":   t.attrs["total"],
+    "filas":            len(t),
+    "productos_unicos": t["product_id"].nunique(),
+    "sku_duplicados":   int(t["sku"].duplicated().sum()),
+    "de_la_categoria":  int(t["en_categoria"].sum()),
+} for clave, t in tablas.items()])
+tabla(resumen_extraccion)
+```
+
+**¿Se extrajo la categoría completa?** En las tres tiendas el número de productos extraídos es igual al total que informa el propio servicio. También se comparó con lo que muestra cada sitio web (capturas del 9 y 10 de octubre):
+
+- **La Rebaja** muestra "74 Productos Encontrados", igual que el scraper.
+- **Éxito** muestra solo los productos disponibles (55 el 9 de octubre) y oculta los agotados. Los 55 coinciden con los disponibles que trajo el scraper; los agotados se guardan sin precio (NULL).
+- **Olímpica** muestra "114 productos" con la ciudad Barranquilla seleccionada, y el servicio sin ciudad informa 162. La diferencia son productos que no se ofrecen en esa ciudad: la web regionaliza el catálogo.
+
+Las secciones de Éxito y La Rebaja corresponden casi exactamente a la categoría. La de Olímpica es más amplia (incluye higiene femenina), por eso de 162 productos solo 33 son de la categoría.
+
+### Condiciones de uso y buenas prácticas
+
+- **robots.txt**: el scraper lo descarga en cada ejecución y revisa cada URL antes de pedirla. Usa código propio, porque `urllib.robotparser` no entiende los comodines `*` y `$`.
+- **Olímpica** prohíbe las direcciones con `&` o `%` (`Disallow: /*&`, `Disallow: /*%`). Por eso se usa su buscador con un único parámetro (`?page=N`) en vez del buscador de catálogo.
+- **Éxito** incluye `Disallow: /api/`, pero escrito dentro del grupo de `Applebot-Extended`. Según la norma de robots.txt, ese grupo no aplica al agente `*`. Se decidió seguir con la API porque es un trabajo académico de pocas peticiones (4 por ejecución) con pausa. Su línea `Content-Signal: search=yes, ai-train=no` no prohíbe este uso.
+- Se hacen pocas peticiones (13 por recolección completa), con pausa, sin iniciar sesión y sin datos personales.
+- **Prueba fuera del computador personal**: el 10 de octubre (3:41 a. m.) el scraper se ejecutó en Google Colab y descargó las tres tiendas completas sin bloqueos: Éxito 167 de 167, La Rebaja 74 de 74 y Olímpica 162 de 162.
+
+## 3. Preparación de los datos
+
+### Qué queda dentro de la categoría
+
+```{python}
+#| label: exclusiones
+excluidos = pd.read_sql_query("""
+    SELECT   c.nombre AS comercio, a.motivo_exclusion, COUNT(*) AS anuncios
+    FROM     anuncios  AS a
+    JOIN     comercios AS c ON c.comercio_id = a.comercio_id
+    WHERE    a.en_categoria = 0
+    GROUP BY c.nombre, a.motivo_exclusion
+    ORDER BY c.nombre, anuncios DESC;
+""", con)
+tabla(excluidos)
+```
+
+Se excluyen los productos de la sección que no son de la categoría: aparatos (electroestimuladores TENSCare, orinales), lubricantes, suplementos, protectores de lactancia y, en Olímpica, la higiene femenina. En cambio, se incluyen los pañales de adulto que Éxito vende por medio de vendedores externos (por ejemplo, "Mundo Bebé").
+
+### Limpieza y estandarización
+
+`limpiar_y_emparejar()` aplica lo visto en la clase 7. **El texto original nunca se modifica**: lo estandarizado se guarda en columnas propias de `anuncios`.
+
+- **Texto**: se pasa a minúsculas, sin tildes y sin espacios repetidos.
+- **Marca** (`marca_estandar`): se busca una marca conocida en la marca de la tienda o en el nombre. Así "Tena", "TENA" y "Lights Tena" quedan como TENA, y "MUNDO BEBE", que es un vendedor, se reemplaza por la marca que aparece en el nombre.
+- **Subcategoría** (`subcategoria_estandar`): se asigna con `np.select()`, el equivalente de `case_when` en la clase.
+- **Talla** y **contenido** (`talla`, `contenido`, `unidad`): se extraen con expresiones regulares (`str.extract`) de textos como "(8  und)", "X20 Unds", "Lx32" o "100 ml". Los nombres de La Rebaja no dicen el número de unidades, pero su ficha técnica sí ("PAQUETE X 21 UND"). El scraper la guarda en `presentacion_original`.
+- **Precios**: llegan como números desde el JSON. Cuando la tienda no tiene existencias, VTEX informa el precio como 0; ese 0 se guarda como **NULL** y no se imputa (clase 8).
+
+### Correspondencia de productos
+
+La llave común es el **EAN** (código de barras), que identifica un empaque exacto: marca, variante, talla y número de unidades (clase 8, integración de fuentes). Los nombres no sirven como llave. La Rebaja llama igual "PAÑAL ADULTO TENA SLIP COMFORT L" al paquete de 9 y al de 21, y llama "pants comfort" a lo que Éxito y Olímpica llaman "pants clásicos".
+
+Regla documentada. Un producto es comparable si:
+
+1. es de la categoría y tiene EAN;
+2. el mismo EAN aparece en las tres tiendas;
+3. tiene precio en las tres tiendas en una misma recolección;
+4. la talla y el contenido que se leen en el texto de las tres tiendas no se contradicen.
+
+```{python}
+#| label: emparejamiento
+limpio, productos_comparables, descartados = limpiar_y_emparejar(con)
+
+correspondencia = pd.read_sql_query("""
+    SELECT a.producto_id, c.nombre AS comercio,
+           a.nombre_original || CASE WHEN a.presentacion_original <> ''
+                                     THEN ' [' || a.presentacion_original || ']'
+                                     ELSE '' END AS texto_en_la_tienda
+    FROM   anuncios  AS a
+    JOIN   comercios AS c ON c.comercio_id = a.comercio_id
+    WHERE  a.comparable = 1;
+""", con)
+# Una columna por tienda (pivot_wider de la clase 7)
+tabla(correspondencia.pivot(index="producto_id", columns="comercio",
+                            values="texto_en_la_tienda").reset_index())
+```
+
+La tabla muestra el texto original de cada tienda para los `{python} len(productos_comparables)` productos. Con la misma presentación, los nombres son muy distintos, lo que confirma que la llave debe ser el EAN.
+
+Hay `{python} len(descartados)` EAN que están en las tres tiendas pero se descartaron:
+
+```{python}
+#| label: descartados
+tabla(descartados)
+```
+
+No se pudo emparejar ningún producto de CONTENT ni de NATEEN: La Rebaja no publica su EAN, y su nombre no permite saber con certeza de qué paquete se trata.
+
+## 4. Base de datos SQLite
+
+`comparador_precios.sqlite` tiene cinco tablas, con la estructura que sugiere el enunciado:
+
+| Tabla | Una fila por | Llaves |
+|---|---|---|
+| `comercios` | tienda | `comercio_id` |
+| `productos` | producto comparable (identificador común P01, P02…) | `producto_id`; EAN |
+| `anuncios` | presentación tal como la publica una tienda (SKU), con su texto original y sus columnas estandarizadas | `anuncio_id`; única por (`comercio_id`, `sku`); `producto_id` → `productos` (NULL si no es comparable); `comparable` = 1 o 0 |
+| `observaciones` | precio de un anuncio en un momento dado | `observacion_id`; única por (`anuncio_id`, `fecha_hora_consulta`); `ejecucion_id` → `ejecuciones` |
+| `ejecuciones` | tienda en cada corrida del scraper | `ejecucion_id`; `recoleccion_id` agrupa las tres tiendas de una misma corrida |
+
+La restricción `UNIQUE (anuncio_id, fecha_hora_consulta)` corresponde a la recomendada por el enunciado: comercio, producto del comercio y fecha y hora. Con `INSERT OR IGNORE`, volver a cargar una copia no duplica nada. La columna `comparable` de `anuncios` es el indicador que pide el enunciado (2.4): vale 1 en los anuncios de los productos comparables y 0 en el resto. La llena `limpiar_y_emparejar()`, y vale 1 justo cuando el anuncio tiene `producto_id`.
+
+Columnas de cada tabla, con `PRAGMA table_info` como en la clase 4:
+
+```{python}
+#| label: estructura
+estructura = pd.concat([
+    pd.read_sql_query(f"PRAGMA table_info({t});", con).assign(tabla=t)
+    for t in ["comercios", "productos", "anuncios", "observaciones", "ejecuciones"]
+])
+tabla(estructura.groupby("tabla", sort=False)
+      .agg(columnas=("name", lambda c: ", ".join(c)))
+      .reset_index())
+```
+
+Validaciones:
+
+```{python}
+#| label: validaciones
+validaciones = pd.read_sql_query("""
+    SELECT 'Observaciones sin fecha y hora de consulta' AS validacion, COUNT(*) AS casos
+    FROM   observaciones WHERE fecha_hora_consulta IS NULL
+    UNION ALL
+    SELECT 'Fechas que no están en hora de Colombia (-05:00)', COUNT(*)
+    FROM   observaciones WHERE fecha_hora_consulta NOT LIKE '%-05:00'
+    UNION ALL
+    SELECT 'Observaciones repetidas (mismo anuncio y fecha y hora)', COUNT(*)
+    FROM   (SELECT anuncio_id, fecha_hora_consulta FROM observaciones
+            GROUP BY anuncio_id, fecha_hora_consulta HAVING COUNT(*) > 1)
+    UNION ALL
+    SELECT 'Observaciones sin ejecución registrada', COUNT(*)
+    FROM   observaciones AS o LEFT JOIN ejecuciones AS e ON e.ejecucion_id = o.ejecucion_id
+    WHERE  e.ejecucion_id IS NULL
+    UNION ALL
+    SELECT 'Precios iguales a cero (deben ser NULL)', COUNT(*)
+    FROM   observaciones WHERE precio = 0;
+""", con)
+tabla(validaciones)
+```
+
+## 5. Consultas SQL
+
+Todas las consultas se leen con `pd.read_sql_query(consulta, con)`, como en las clases 4 y 5. Las preguntas 3 a 6 usan la recolección completa más reciente (las tres tiendas en estado `completa`) y solo los productos con precio en las tres tiendas en esa recolección (`HAVING COUNT(DISTINCT comercio) = 3`). Así nunca se comparan dos tiendas sin avisar, aunque en una corrida nueva falle una tienda o se agote un producto. El precio es el que mostraba la tienda en ese momento, con la promoción incluida si la había. `RANK()` resuelve los empates de la pregunta 3: dos tiendas con el mismo precio mínimo quedan ambas en el puesto 1. `GROUP_CONCAT` (función de SQLite que no se vio en clase) junta en una celda los nombres de las tiendas empatadas.
+
+```{python}
+#| label: cte-comun
+# Observaciones de los productos comparables. Se usa como CTE (WITH) en varias consultas.
+COMPARABLES = """
+    comparables AS (
+        SELECT p.producto_id, p.descripcion, p.contenido, p.unidad,
+               c.nombre AS comercio, e.recoleccion_id,
+               o.precio, o.precio_antes, o.promocion, o.fecha_hora_consulta
+        FROM   observaciones AS o
+        JOIN   anuncios      AS a ON a.anuncio_id   = o.anuncio_id
+        JOIN   productos     AS p ON p.producto_id  = a.producto_id
+        JOIN   comercios     AS c ON c.comercio_id  = a.comercio_id
+        JOIN   ejecuciones   AS e ON e.ejecucion_id = o.ejecucion_id
+    ),
+    completas AS (     -- recolecciones con las 3 tiendas en estado completa
+        SELECT   recoleccion_id
+        FROM     ejecuciones
+        WHERE    estado = 'completa'
+        GROUP BY recoleccion_id
+        HAVING   COUNT(DISTINCT comercio_id) = 3
+    ),
+    con_precio AS (    -- precios de la recolección completa más reciente
+        SELECT *
+        FROM   comparables
+        WHERE  recoleccion_id = (SELECT MAX(recoleccion_id) FROM completas)
+          AND  precio IS NOT NULL
+    ),
+    ultima AS (        -- solo los productos con precio en las 3 tiendas
+        SELECT *
+        FROM   con_precio
+        WHERE  producto_id IN (SELECT   producto_id
+                               FROM     con_precio
+                               GROUP BY producto_id
+                               HAVING   COUNT(DISTINCT comercio) = 3)
+    )"""
+```
+
+### Pregunta 1. ¿Cuántos comercios, productos y observaciones hay? ¿Cuántos productos aporta cada comercio?
+
+```{python}
+#| label: p1
+p1a = pd.read_sql_query("""
+SELECT (SELECT COUNT(*) FROM comercios)                       AS comercios,
+       (SELECT COUNT(*) FROM anuncios)                        AS presentaciones_extraidas,
+       (SELECT COUNT(*) FROM anuncios WHERE en_categoria = 1) AS presentaciones_categoria,
+       (SELECT COUNT(*) FROM productos)                       AS productos_comparables,
+       (SELECT COUNT(*) FROM observaciones)                   AS observaciones,
+       (SELECT COUNT(*) FROM ejecuciones)                     AS ejecuciones;
+""", con)
+tabla(p1a)
+```
+
+```{python}
+#| label: p1b
+p1b = pd.read_sql_query("""
+SELECT   c.nombre                                AS comercio,
+         COUNT(*)                                AS presentaciones_extraidas,
+         SUM(a.en_categoria)                     AS de_la_categoria,
+         SUM(a.comparable)                       AS comparables,
+         (SELECT COUNT(*)
+          FROM   observaciones AS o
+          JOIN   anuncios      AS a2 ON a2.anuncio_id = o.anuncio_id
+          WHERE  a2.comercio_id = c.comercio_id) AS observaciones
+FROM     anuncios  AS a
+JOIN     comercios AS c ON c.comercio_id = a.comercio_id
+GROUP BY c.comercio_id
+ORDER BY de_la_categoria DESC;
+""", con)
+tabla(p1b)
+```
+
+**Interpretación.**
+
+- La base tiene `{python} int(p1a.loc[0, "comercios"])` comercios, `{python} int(p1a.loc[0, "presentaciones_extraidas"])` presentaciones extraídas (`{python} int(p1a.loc[0, "presentaciones_categoria"])` de la categoría), `{python} int(p1a.loc[0, "productos_comparables"])` productos comparables y `{python} cop(p1a.loc[0, "observaciones"])` observaciones de precio.
+- `{python} p1b.loc[0, "comercio"]` es la tienda que más productos de la categoría aporta (`{python} int(p1b.loc[0, "de_la_categoria"])`).
+- Olímpica aporta muchas presentaciones extraídas pero pocas de la categoría, porque su sección incluye higiene femenina.
+
+### Pregunta 2. ¿Hay al menos 24 observaciones comparables en una misma ejecución? ¿Hay repetidos?
+
+```{python}
+#| label: p2
+p2a = pd.read_sql_query(f"""
+WITH {COMPARABLES}
+SELECT   recoleccion_id,
+         COUNT(precio)               AS observaciones_con_precio,
+         COUNT(DISTINCT producto_id) AS productos,
+         COUNT(DISTINCT comercio)    AS comercios,
+         CASE WHEN COUNT(precio) >= 24 THEN 'sí' ELSE 'no' END AS cumple_24
+FROM     comparables
+GROUP BY recoleccion_id
+ORDER BY recoleccion_id;
+""", con)
+tabla(p2a)
+```
+
+```{python}
+#| label: p2b
+p2b = pd.read_sql_query(f"""
+WITH {COMPARABLES}
+SELECT   recoleccion_id, producto_id, comercio, COUNT(*) AS veces
+FROM     comparables
+GROUP BY recoleccion_id, producto_id, comercio
+HAVING   COUNT(*) > 1;
+""", con)
+print(f"Registros repetidos del mismo producto y comercio en una ejecución: {len(p2b)}")
+```
+
+**Interpretación.**
+
+- Las `{python} len(p2a)` recolecciones tienen al menos 24 observaciones comparables con precio: `{python} int(p2a["observaciones_con_precio"].min())` como mínimo, es decir, `{python} len(productos)` productos × 3 comercios.
+- No hay registros repetidos del mismo producto y comercio dentro de una ejecución (`{python} len(p2b)` casos).
+
+### Pregunta 3. Precio mínimo, máximo y promedio de cada presentación, y comercio más barato (con empates)
+
+```{python}
+#| label: p3
+p3 = pd.read_sql_query(f"""
+WITH {COMPARABLES},
+puestos AS (
+    SELECT producto_id, descripcion, comercio, precio, promocion,
+           RANK() OVER (PARTITION BY producto_id ORDER BY precio) AS puesto
+    FROM   ultima
+)
+SELECT   producto_id, descripcion,
+         MIN(precio)           AS precio_min,
+         MAX(precio)           AS precio_max,
+         ROUND(AVG(precio), 0) AS precio_promedio,
+         GROUP_CONCAT(CASE WHEN puesto = 1 THEN comercio END, ' y ') AS mas_barato,
+         SUM(puesto = 1)       AS tiendas_empatadas,
+         MAX(CASE WHEN puesto = 1 THEN promocion END) AS mas_barato_en_promocion
+FROM     puestos
+GROUP BY producto_id
+ORDER BY producto_id;
+""", con)
+tabla(p3)
+```
+
+```{python}
+#| echo: false
+ganadas = p3["mas_barato"].value_counts()
+empates = int((p3["tiendas_empatadas"] > 1).sum())
+texto_ganadas = "; ".join(f"{tienda}, {n}" for tienda, n in ganadas.items())
+```
+
+**Interpretación.**
+
+- Número de productos en que cada tienda ofrece el menor precio: `{python} texto_ganadas`.
+- Hay `{python} empates` productos con empate en el precio mínimo.
+- Ninguna tienda es la más barata en todo, así que conviene comparar producto por producto.
+- `{python} int(p3["mas_barato_en_promocion"].sum())` de los `{python} len(p3)` precios más bajos son promociones (`mas_barato_en_promocion` = 1). La tienda más barata depende mucho de la promoción vigente el día de la consulta.
+- Entran `{python} len(p3)` de los `{python} len(productos)` productos comparables: los que tienen precio en las tres tiendas en la recolección completa más reciente.
+
+### Pregunta 4. Ahorro en COP y en % al elegir la oferta más económica
+
+Se calcula frente a la tienda más cara y frente al promedio de las tres.
+
+```{python}
+#| label: p4
+p4 = pd.read_sql_query(f"""
+WITH {COMPARABLES},
+resumen AS (
+    SELECT   producto_id, descripcion,
+             MIN(precio) AS precio_min, MAX(precio) AS precio_max, AVG(precio) AS precio_promedio
+    FROM     ultima
+    GROUP BY producto_id
+)
+SELECT   producto_id, descripcion, precio_min, precio_max,
+         precio_max - precio_min                                  AS ahorro_vs_mas_cara_cop,
+         ROUND(100.0 * (precio_max - precio_min) / precio_max, 1) AS ahorro_vs_mas_cara_pct,
+         ROUND(precio_promedio - precio_min, 0)                   AS ahorro_vs_promedio_cop,
+         ROUND(100.0 * (precio_promedio - precio_min) / precio_promedio, 1) AS ahorro_vs_promedio_pct
+FROM     resumen
+ORDER BY producto_id;
+""", con)
+tabla(p4, decimales=1)
+```
+
+**Interpretación.**
+
+- Frente a la tienda más cara, elegir la más barata ahorra entre `{python} cop(p4["ahorro_vs_mas_cara_cop"].min())` y `{python} cop(p4["ahorro_vs_mas_cara_cop"].max())` COP por paquete, es decir, entre `{python} pct(p4["ahorro_vs_mas_cara_pct"].min())` y `{python} pct(p4["ahorro_vs_mas_cara_pct"].max())`.
+- Frente al promedio de las tres tiendas, el ahorro mediano es de `{python} pct(p4["ahorro_vs_promedio_pct"].median())`.
+- Se reporta la mediana y no la media porque con 13 productos unos pocos valores extremos mueven la media (clase 10).
+
+### Pregunta 5. Menor precio por unidad entre tamaños comparables
+
+Dos presentaciones son del mismo producto y de distinto tamaño cuando su descripción coincide salvo por el número de unidades.
+
+```{python}
+#| label: p5
+p5 = pd.read_sql_query(f"""
+WITH {COMPARABLES},
+por_unidad AS (
+    SELECT CASE WHEN instr(descripcion, ' (') > 0
+                THEN substr(descripcion, 1, instr(descripcion, ' (') - 1)
+                ELSE descripcion END    AS producto_base,
+           producto_id, descripcion, contenido, unidad, comercio, precio,
+           ROUND(precio / contenido, 0) AS precio_por_unidad
+    FROM   ultima
+),
+con_varios_tamanos AS (
+    SELECT   producto_base
+    FROM     por_unidad
+    GROUP BY producto_base
+    HAVING   COUNT(DISTINCT contenido) > 1
+)
+SELECT   producto_base, producto_id, contenido, unidad, comercio, precio, precio_por_unidad,
+         RANK() OVER (PARTITION BY producto_base ORDER BY precio_por_unidad) AS puesto
+FROM     por_unidad
+WHERE    producto_base IN (SELECT producto_base FROM con_varios_tamanos)
+ORDER BY producto_base, puesto;
+""", con)
+tabla(p5)
+```
+
+```{python}
+#| echo: false
+# Textos de la pregunta 5, del gráfico 2 y de las conclusiones (cambian si no hay dos tamaños comparables)
+if len(p5):
+    mejor_unidad = p5.iloc[0]
+    producto_tamanos = p5["producto_base"].iloc[0]
+    texto_mejor_unidad = (f"El menor precio por unidad es el paquete de {int(mejor_unidad['contenido'])} "
+                          f"unidades en {mejor_unidad['comercio']}, a "
+                          f"{cop(mejor_unidad['precio_por_unidad'])} COP por unidad.")
+    texto_tamanos = (f"Solo hay una comparación posible en los datos: {producto_tamanos}. "
+                     f"Ahí el menor precio por unidad lo tiene el paquete de {int(mejor_unidad['contenido'])} "
+                     f"en {mejor_unidad['comercio']} ({cop(mejor_unidad['precio_por_unidad'])} COP/und).")
+    texto_grafico2 = (f"Para {producto_tamanos}, el precio por unidad depende más de la tienda "
+                      "y de la promoción vigente que del tamaño del paquete.")
+    # Cuántas veces cuesta el paquete grande frente al pequeño, en cada tienda
+    tamanos = p5[p5["producto_base"] == producto_tamanos].pivot(
+        index="comercio", columns="contenido", values="precio")
+    razon = tamanos[tamanos.columns.max()] / tamanos[tamanos.columns.min()]
+    texto_desembolso = (f"según la tienda, el paquete de {int(tamanos.columns.max())} cuesta entre "
+                        f"{razon.min():.1f} y {razon.max():.1f} veces lo que cuesta el de "
+                        f"{int(tamanos.columns.min())}").replace(".", ",")
+else:
+    texto_mejor_unidad = ("El menor precio por unidad no se puede calcular: ningún producto tiene "
+                          "dos tamaños con precio en las tres tiendas.")
+    texto_tamanos = "En la recolección más reciente ningún producto tiene dos tamaños con precio en las tres tiendas."
+    texto_grafico2 = "En esta recolección no hay un producto con dos tamaños y precio en las tres tiendas."
+    texto_desembolso = "un paquete más grande cuesta más en el momento de la compra"
+```
+
+**Interpretación.**
+
+- Entre los comparables, solo `{python} p5["producto_base"].nunique()` producto se vende en dos tamaños en las tres tiendas: `{python} p5["producto_base"].iloc[0] if len(p5) else "ninguno"`.
+- `{python} texto_mejor_unidad`
+- El paquete grande no siempre es el más barato por unidad: una promoción en un paquete pequeño puede igualarlo o superarlo (ver la tabla y el gráfico 2).
+
+### Pregunta 6. Mayores diferencias de precio entre comercios, ordenadas por ahorro porcentual
+
+```{python}
+#| label: p6
+p6 = pd.read_sql_query(f"""
+WITH {COMPARABLES},
+extremos AS (
+    SELECT producto_id, descripcion, comercio, precio,
+           RANK() OVER (PARTITION BY producto_id ORDER BY precio)      AS puesto_barato,
+           RANK() OVER (PARTITION BY producto_id ORDER BY precio DESC) AS puesto_caro
+    FROM   ultima
+)
+SELECT   producto_id, descripcion,
+         GROUP_CONCAT(CASE WHEN puesto_barato = 1 THEN comercio END, ' y ') AS mas_barato,
+         MIN(precio)                                                    AS precio_min,
+         GROUP_CONCAT(CASE WHEN puesto_caro = 1 THEN comercio END, ' y ')   AS mas_caro,
+         MAX(precio)                                                    AS precio_max,
+         MAX(precio) - MIN(precio)                                      AS diferencia_cop,
+         ROUND(100.0 * (MAX(precio) - MIN(precio)) / MAX(precio), 1)     AS ahorro_pct
+FROM     extremos
+GROUP BY producto_id
+ORDER BY ahorro_pct DESC;
+""", con)
+tabla(p6, decimales=1)
+```
+
+Como hay dos recolecciones, `LAG()` (clase 5) muestra qué precios cambiaron de una a otra:
+
+```{python}
+#| label: p6b
+p6b = pd.read_sql_query(f"""
+WITH {COMPARABLES},
+serie AS (
+    SELECT producto_id, comercio, recoleccion_id, precio,
+           LAG(precio, 1) OVER (PARTITION BY producto_id, comercio
+                                ORDER BY recoleccion_id) AS precio_anterior
+    FROM   comparables
+)
+SELECT   producto_id, comercio, precio_anterior, precio,
+         precio - precio_anterior                                       AS cambio_cop,
+         ROUND(100.0 * (precio - precio_anterior) / precio_anterior, 1) AS cambio_pct
+FROM     serie
+WHERE    precio_anterior IS NOT NULL
+  AND    precio <> precio_anterior
+ORDER BY cambio_pct;
+""", con)
+tabla(p6b, decimales=1)
+```
+
+**Interpretación.**
+
+- La mayor diferencia es la de `{python} p6.loc[0, "descripcion"]`: cuesta `{python} cop(p6.loc[0, "precio_min"])` en `{python} p6.loc[0, "mas_barato"]` y `{python} cop(p6.loc[0, "precio_max"])` en `{python} p6.loc[0, "mas_caro"]`, un ahorro de `{python} pct(p6.loc[0, "ahorro_pct"])`.
+- La menor es la de `{python} p6.iloc[-1]["descripcion"]`, con `{python} pct(p6.iloc[-1]["ahorro_pct"])`.
+- Entre recolecciones cambiaron `{python} len(p6b)` precios comparables: `{python} int((p6b["cambio_pct"] < 0).sum())` bajaron y `{python} int((p6b["cambio_pct"] > 0).sum())` subieron. La mayoría de los cambios son promociones que empiezan o terminan, así que la tienda más barata de hoy puede no serlo mañana.
+
+### Pregunta 7. Datos faltantes o inconsistentes
+
+```{python}
+#| label: p7
+p7 = pd.read_sql_query("""
+SELECT 'Observaciones sin precio (agotado), de la categoría' AS problema, COUNT(*) AS cantidad
+FROM   observaciones AS o JOIN anuncios AS a ON a.anuncio_id = o.anuncio_id
+WHERE  a.en_categoria = 1 AND o.precio IS NULL
+UNION ALL
+SELECT 'Observaciones de productos comparables sin precio', COUNT(*)
+FROM   observaciones AS o JOIN anuncios AS a ON a.anuncio_id = o.anuncio_id
+WHERE  a.comparable = 1 AND o.precio IS NULL
+UNION ALL
+SELECT 'Anuncios de la categoría sin EAN (no se pueden emparejar por llave)', COUNT(*)
+FROM   anuncios WHERE en_categoria = 1 AND (ean IS NULL OR ean = '')
+UNION ALL
+SELECT 'Anuncios de la categoría sin contenido identificable', COUNT(*)
+FROM   anuncios WHERE en_categoria = 1 AND contenido IS NULL
+UNION ALL
+SELECT 'Pañales y ropa interior sin talla identificable', COUNT(*)
+FROM   anuncios
+WHERE  en_categoria = 1 AND talla IS NULL
+  AND  subcategoria_estandar IN ('Pañal', 'Ropa interior absorbente')
+UNION ALL
+SELECT 'Mismo EAN publicado con nombres distintos', COUNT(*)
+FROM   (SELECT ean FROM anuncios WHERE ean <> '' AND en_categoria = 1
+        GROUP BY ean HAVING COUNT(DISTINCT nombre_original) > 1)
+UNION ALL
+SELECT 'Mismo EAN repetido dentro de una tienda (anuncios de la categoría)', COUNT(*)
+FROM   (SELECT comercio_id, ean FROM anuncios WHERE ean <> '' AND en_categoria = 1
+        GROUP BY comercio_id, ean HAVING COUNT(*) > 1)
+UNION ALL
+SELECT 'Marcas escritas de varias formas (marcas estándar afectadas)', COUNT(*)
+FROM   (SELECT marca_estandar FROM anuncios WHERE en_categoria = 1
+        GROUP BY marca_estandar HAVING COUNT(DISTINCT marca) > 1)
+UNION ALL
+SELECT 'Precio antes del descuento menor que el precio', COUNT(*)
+FROM   observaciones WHERE precio_antes < precio
+UNION ALL
+SELECT 'Anuncios fuera de la categoría (excluidos)', COUNT(*)
+FROM   anuncios WHERE en_categoria = 0;
+""", con)
+tabla(p7)
+```
+
+```{python}
+#| label: p7b
+p7b = pd.read_sql_query("""
+SELECT   c.nombre AS comercio, e.recoleccion_id,
+         COUNT(*)                                           AS observaciones_categoria,
+         SUM(o.precio IS NULL)                              AS sin_precio,
+         ROUND(100.0 * SUM(o.precio IS NULL) / COUNT(*), 1) AS pct_sin_precio
+FROM     observaciones AS o
+JOIN     anuncios      AS a ON a.anuncio_id   = o.anuncio_id
+JOIN     comercios     AS c ON c.comercio_id  = a.comercio_id
+JOIN     ejecuciones   AS e ON e.ejecucion_id = o.ejecucion_id
+WHERE    a.en_categoria = 1
+GROUP BY c.nombre, e.recoleccion_id
+ORDER BY c.nombre, e.recoleccion_id;
+""", con)
+tabla(p7b, decimales=1)
+```
+
+```{python}
+#| label: p7c
+# EAN repetido dentro de una misma tienda (dos SKU para el mismo empaque)
+p7c = pd.read_sql_query("""
+SELECT   c.nombre AS comercio, a.ean, MIN(a.nombre_original) AS nombre_original,
+         COUNT(*) AS anuncios, MAX(a.comparable) AS comparable
+FROM     anuncios  AS a
+JOIN     comercios AS c ON c.comercio_id = a.comercio_id
+WHERE    a.en_categoria = 1 AND a.ean <> ''
+GROUP BY c.nombre, a.ean
+HAVING   COUNT(*) > 1;
+""", con)
+tabla(p7c)
+```
+
+**Interpretación.**
+
+- **Precios faltantes.** El faltante principal es el precio de los productos agotados (`{python} cop(p7.loc[0, "cantidad"])` observaciones). Se dejan como NULL, sin imputar. No son al azar (MNAR, clase 8): faltan justo cuando la tienda no tiene el producto.
+- **Por tienda.** Éxito tiene la mayor proporción de agotados. Olímpica no tiene ninguno porque su buscador solo devuelve los productos disponibles.
+- **Comparables.** Ningún producto comparable quedó sin precio, así que los faltantes no afectan las preguntas 3 a 6.
+- **Duplicados dentro de una tienda.** `{python} len(p7c)` EAN de la categoría aparece en más de un SKU de la misma tienda (última tabla). `{python} "Ninguno es de un producto comparable, así que no afecta las preguntas 3 a 6" if p7c["comparable"].sum() == 0 else "Alguno es de un producto comparable y conviene revisarlo"`.
+- **Inconsistencias.** Las más importantes son de texto: el mismo EAN con nombres distintos y marcas escritas de varias formas. Se resolvieron con la llave EAN y con las columnas estandarizadas.
+
+### Pregunta 8. Productos de la categoría por comercio y ejecución, y calidad de la información
+
+```{python}
+#| label: p8
+p8 = pd.read_sql_query("""
+SELECT   c.nombre AS comercio, e.recoleccion_id,
+         COUNT(*)                                                       AS productos_categoria,
+         SUM(o.disponible)                                              AS disponibles,
+         ROUND(100.0 * SUM(a.descripcion_original <> ''
+                           OR a.presentacion_original <> '') / COUNT(*), 1) AS pct_con_descripcion,
+         ROUND(100.0 * SUM(a.marca_estandar IS NOT NULL) / COUNT(*), 1) AS pct_con_marca,
+         ROUND(100.0 * SUM(a.contenido IS NOT NULL) / COUNT(*), 1)      AS pct_con_contenido
+FROM     observaciones AS o
+JOIN     anuncios      AS a ON a.anuncio_id   = o.anuncio_id
+JOIN     comercios     AS c ON c.comercio_id  = a.comercio_id
+JOIN     ejecuciones   AS e ON e.ejecucion_id = o.ejecucion_id
+WHERE    a.en_categoria = 1
+GROUP BY c.nombre, e.recoleccion_id
+ORDER BY e.recoleccion_id, productos_categoria DESC;
+""", con)
+tabla(p8, decimales=1)
+```
+
+**Interpretación.**
+
+- **Tamaño de la oferta.** Éxito tiene la oferta más amplia de la categoría, pero la mayoría de sus productos está agotada. La Rebaja tiene `{python} int(p8.loc[p8["comercio"] == "La Rebaja", "productos_categoria"].iloc[-1])` productos de la categoría y Olímpica `{python} int(p8.loc[p8["comercio"] == "Olimpica", "productos_categoria"].iloc[-1])`; en Olímpica todos aparecen disponibles porque su buscador solo devuelve los que tienen existencias. Entre las dos recolecciones la oferta no cambió; solo cambió la disponibilidad.
+- **Marca y contenido.** Se identifican en casi todos los anuncios.
+- **Descripción.** Es lo que más falta en Éxito, donde muchos anuncios no traen ficha ni descripción.
+
+## 6. Visualizaciones
+
+Los tres gráficos leen los datos de SQLite y siguen las reglas de la clase 9: el título dice el hallazgo, los ejes tienen nombre y unidades, las barras empiezan en cero y cada comercio conserva su color en todos los gráficos. Se usa `plotly.express`, la opción que la clase 10 recomienda en Python; al pasar el cursor se ve el valor exacto.
+
+```{python}
+#| label: datos-graficos
+precios = pd.read_sql_query(f"""
+WITH {COMPARABLES}
+SELECT producto_id, descripcion, contenido, comercio, precio, precio_antes, promocion,
+       precio / contenido AS precio_por_unidad
+FROM   ultima;
+""", con)
+# Etiqueta corta para el eje: "P01 slip comfort L (21 und)"
+precios["producto"] = precios["producto_id"] + " " + (
+    precios["descripcion"]
+    .str.replace(r"Pañales para adultos |Pañales |Toallas higiénicas |TENA |,", "", regex=True)
+    .str.replace(r"\s+", " ", regex=True))
+orden_productos = sorted(precios["producto"].unique())   # P01 arriba
+```
+
+### Gráfico 1. Precio de cada presentación en los tres comercios
+
+```{python}
+#| label: grafico-precios
+#| fig-cap: "Precio de cada producto comparable por comercio (COP, recolección más reciente)."
+ganadora = ganadas.index[0]
+fig1 = px.bar(
+    precios, x="precio", y="producto", color="comercio", orientation="h",
+    barmode="group", color_discrete_map=COLORES,
+    category_orders={"producto": orden_productos, "comercio": list(COLORES)},
+    labels={"precio": "Precio (COP)", "producto": "", "comercio": "Comercio"},
+    title=f"Ninguna tienda es la más barata en todo: {ganadora} gana en "
+          f"{ganadas.iloc[0]} de {len(p3)} productos",
+    hover_data={"precio": ":,.0f", "promocion": True},
+)
+fig1.update_layout(height=750, xaxis_tickformat=",.0f", legend_title_text="Comercio",
+                   separators=",.")   # coma decimal y punto de miles
+mostrar(fig1)
+```
+
+**Interpretación.** Las barras de un mismo producto quedan juntas, así que se ve de inmediato qué tienda es la más barata en cada uno. La tienda más barata cambia de un producto a otro, y en varios pañales la diferencia es de miles de pesos.
+
+**Limitación.** Los precios de productos distintos no se comparan entre sí, porque cada paquete trae un número diferente de unidades. Son los precios de un solo día y varios incluyen promociones temporales.
+
+### Gráfico 2. Precio por unidad cuando hay tamaños distintos
+
+```{python}
+#| label: grafico-unidad
+#| fig-cap: "Precio por unidad (COP por pañal) del mismo producto en paquetes de distinto tamaño."
+por_unidad = precios[precios["producto_id"].isin(p5["producto_id"])].copy()
+grande_gana = pd.Series(dtype=bool)   # tiendas donde el paquete grande gana
+if len(por_unidad):
+    por_unidad["presentacion"] = "Paquete de " + por_unidad["contenido"].astype(int).astype(str) + " und"
+    # ¿En qué tiendas el paquete grande sale más barato por unidad?
+    pivote = por_unidad.pivot(index="comercio", columns="contenido", values="precio_por_unidad")
+    grande_gana = pivote[pivote.columns.max()] < pivote[pivote.columns.min()]
+    fig2 = px.bar(
+        por_unidad, x="comercio", y="precio_por_unidad", color="comercio",
+        facet_col="presentacion", color_discrete_map=COLORES,
+        category_orders={"comercio": list(COLORES),
+                         "presentacion": sorted(por_unidad["presentacion"].unique(),
+                                                key=lambda s: int(s.split()[2]))},
+        text=por_unidad["precio_por_unidad"].map(cop),
+        labels={"precio_por_unidad": "Precio por unidad (COP/und)", "comercio": ""},
+        title=f"El paquete grande sale más barato por unidad en {int(grande_gana.sum())} "
+              f"de {len(grande_gana)} tiendas" + (", no en todas" if grande_gana.sum() < len(grande_gana) else ""),
+    )
+    fig2.update_layout(height=450, showlegend=False, yaxis_tickformat=",.0f", separators=",.")
+    fig2.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1]))
+    mostrar(fig2)
+else:
+    print("En esta recolección ningún producto tiene dos tamaños con precio en las tres tiendas.")
+```
+
+**Interpretación.** `{python} texto_grafico2` Tiendas donde el paquete grande sale más barato por unidad: `{python} ", ".join(grande_gana[grande_gana].index) or "ninguna"`.
+
+**Limitación.** Solo uno de los productos comparables se vende en dos tamaños en las tres tiendas, así que esta comparación no se puede generalizar a toda la categoría.
+
+### Gráfico 3. Oportunidades de ahorro
+
+```{python}
+#| label: grafico-ahorro
+#| fig-cap: "Ahorro al comprar en la tienda más barata frente a la más cara (% del precio más alto)."
+ahorro = p6.copy()
+ahorro["producto"] = precios.drop_duplicates("producto_id").set_index("producto_id") \
+    .loc[ahorro["producto_id"], "producto"].values
+ahorro["etiqueta"] = ahorro["ahorro_pct"].map(pct) + " (" + ahorro["diferencia_cop"].map(cop) + " COP)"
+fig3 = px.bar(
+    ahorro, x="ahorro_pct", y="producto", color="mas_barato",
+    orientation="h", text="etiqueta", color_discrete_map=COLORES,
+    # el mayor ahorro arriba (p6 ya viene ordenada de mayor a menor)
+    category_orders={"mas_barato": list(COLORES), "producto": list(ahorro["producto"])},
+    labels={"ahorro_pct": "Ahorro frente a la tienda más cara (%)", "producto": "",
+            "mas_barato": "Tienda más barata"},
+    title=f"Comprar en la tienda más barata ahorra hasta {pct(ahorro['ahorro_pct'].max())} "
+          f"en un mismo producto",
+)
+fig3.update_layout(height=650, xaxis_range=[0, ahorro["ahorro_pct"].max() * 1.35],
+                   separators=",.")
+fig3.update_traces(textposition="outside")
+mostrar(fig3)
+```
+
+**Interpretación.** Los productos están ordenados por ahorro porcentual y el color indica dónde comprar. Las mayores oportunidades están en los pañales con promoción en una sola tienda. La menor diferencia es la de `{python} p6.iloc[-1]["descripcion"]`: `{python} pct(p6.iloc[-1]["ahorro_pct"])`, casi el mismo precio en las tres.
+
+**Limitación.** El ahorro se mide frente a la tienda más cara, que es el peor caso. Frente al promedio, el ahorro es menor (pregunta 4). Tampoco incluye el costo de envío ni los montos mínimos de compra.
+
+## 7. Limitaciones y conclusiones
+
+### Limitaciones
+
+- **Precios del momento.** Son los de la fecha y hora de cada captura y no son permanentes. Entre las dos recolecciones cambiaron `{python} len(p6b)` de los `{python} len(productos) * 3` precios comparables, casi siempre por promociones que empiezan o terminan.
+- **Promociones.** El precio comparado es el que mostraba la tienda, con la promoción incluida. El precio antes del descuento se guarda aparte (`precio_antes`).
+- **Alcance geográfico.** Olímpica ajusta su catálogo según la ciudad: el servicio sin ciudad muestra 162 productos y la web, con Barranquilla, 114. Los precios pueden variar según la ciudad y el vendedor (en Éxito se usa el vendedor que la tienda muestra por defecto).
+- **Un solo fabricante.** Los `{python} len(productos)` productos comparables son de TENA. CONTENT, PLENITUD, RELY y NATEEN no se pudieron comparar en las tres tiendas, por falta de EAN en La Rebaja o porque no están en las tres.
+- **Disponibilidad.** Una buena parte de la oferta de Éxito y La Rebaja estaba agotada. Esos productos se guardan sin precio y no entran en la comparación.
+- **Costos no incluidos.** No se consideran envío, montos mínimos de compra ni descuentos con tarjetas o programas de fidelidad.
+
+### Conclusión para el consumidor
+
+```{python}
+#| label: donde-comprar
+donde = p6[["producto_id", "descripcion", "mas_barato", "precio_min", "mas_caro",
+            "precio_max", "diferencia_cop", "ahorro_pct"]].sort_values("producto_id")
+tabla(donde, decimales=1)
+```
+
+- **Dónde comprar.** No hay una tienda que siempre sea la más barata. Con los datos de la última recolección:
+  - `{python} ganadas.index[0]` ofrece el menor precio en `{python} int(ganadas.iloc[0])` de `{python} len(p3)` productos.
+  - Para el resto, la tabla anterior indica dónde conviene comprar cada uno.
+  - En los productos con mayor diferencia, elegir bien la tienda ahorra hasta `{python} cop(p6["diferencia_cop"].max())` COP por paquete.
+- **¿Paquete grande o pequeño?** `{python} texto_tamanos` Sin embargo, un paquete pequeño en promoción puede costar casi lo mismo por unidad. El paquete grande conviene solo si se compara en la misma tienda y sin promociones de por medio.
+- **Ahorro unitario, desembolso total y condiciones de compra.**
+  - El paquete grande puede ahorrar por unidad, pero exige un desembolso mayor en el momento de la compra: `{python} texto_desembolso`.
+  - Para quien compra poco o no tiene dónde guardar, el paquete pequeño en promoción es una buena opción.
+  - Las promociones duran poco, así que conviene revisar el precio el día de la compra.
+  - Hay que sumar el envío y verificar que el producto esté disponible en la ciudad.
+
+```{python}
+#| echo: false
+con.close()
+```

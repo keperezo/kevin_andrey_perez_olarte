@@ -1,0 +1,5 @@
+__pycache__/
+.quarto/
+taller_1_files/
+.venv/
+*.pyc

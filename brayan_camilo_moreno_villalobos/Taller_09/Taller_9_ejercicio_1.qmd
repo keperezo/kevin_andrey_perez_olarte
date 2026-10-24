@@ -1,0 +1,168 @@
+---
+title: "Análisis del Mercado de Arriendos"
+author: "Consultor Analítico"
+format:
+  html:
+    embed-resources: true
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+#\| label: setup 
+library(tidyverse) 
+library(kableExtra) 
+library(moments) 
+library(corrplot)
+
+# 1. Generación del dataset original con errores[cite: 3]
+set.seed(1010); n <- 900
+arriendos_sucios <- tibble(
+  ciudad = sample(c("Bogotá", "Medellín", "Cali"), n, TRUE, prob = c(.5, .3, .2)),
+  estrato = sample(1:6, n, TRUE, prob = c(.08, .22, .32, .20, .11, .07)),
+  area_m2 = round(rlnorm(n, log(45) + 0.12 * estrato, 0.35)),
+  antiguedad = round(runif(n, 0, 40)),
+  arriendo = round(exp(11.8 + 0.15 * estrato + 0.5 * log(area_m2) - 0.12 * (ciudad == "Cali") + rnorm(n, 0, 0.25)), -4)
+)
+err <- sample(n, 6) # Errores de digitación intencionales (ceros de más)[cite: 2]
+arriendos_sucios$arriendo[err] <- arriendos_sucios$arriendo[err] * 10
+
+# 2. Creación del dataset limpio (corrigiendo los 6 registros inflados por 10)
+# Identificamos el top 6 de valores extremos que corresponden a la trampa intencional
+limite_error <- quantile(arriendos_sucios$arriendo, 0.99)
+arriendos_limpio <- arriendos_sucios %>%
+  mutate(arriendo = ifelse(arriendo > limite_error, arriendo / 10, arriendo))
+
+# ==============================================================================
+# CONTROL DE REPRODUCIBILIDAD
+# Cambia 'arriendos_sucios' por 'arriendos_limpio' para ver cómo cambian las cifras.
+datos_trabajo <- arriendos_sucios 
+# ==============================================================================
+
+# Cálculos generales para el texto
+media_arr <- mean(datos_trabajo$arriendo)
+mediana_arr <- median(datos_trabajo$arriendo)
+asimetria_arr <- skewness(datos_trabajo$arriendo)
+
+```
+
+1.  ¿Cuánto cuesta un arriendo típico?El precio promedio del arriendo en la muestra actual es de \$r format(media_arr, big.mark = ".", scientific = FALSE) COP. Sin embargo, la mediana se sitúa en \$r format(mediana_arr, big.mark = ".", scientific = FALSE) COP. Conclusión: La medida más adecuada para hablar de un "arriendo típico" es la mediana. La distribución de los precios presenta una asimetría de r round(asimetria_arr, 2); al tener un sesgo fuertemente positivo, la media es arrastrada por los valores extremos (ya sean inmuebles de lujo o errores de digitación), mientras que la mediana refleja el valor que divide al mercado exactamente en dos.
+
+```{r}
+#| label: densidad-arriendos
+# Gráfico de densidad con líneas de media y mediana[cite: 5]
+ggplot(datos_trabajo, aes(x = arriendo)) +
+  geom_density(fill = "steelblue", alpha = 0.5) +
+  geom_vline(aes(xintercept = media_arr, color = "Media"), linetype = "dashed", size = 1) +
+  geom_vline(aes(xintercept = mediana_arr, color = "Mediana"), linetype = "solid", size = 1) +
+  scale_color_manual(name = "Medidas", values = c(Media = "red", Mediana = "darkgreen")) +
+  scale_x_continuous(labels = scales::comma) +
+  labs(title = "Distribución de los precios de arriendo", x = "Arriendo (COP)", y = "Densidad") +
+  theme_minimal()
+```
+
+2.  ¿En qué ciudad los precios son más dispersos?
+
+```{r}
+#| label: tabla-ciudades
+# Tabla por ciudad con kableExtra: n, media, mediana, DE, CV e IQR[cite: 4, 5]
+tabla_ciudades <- datos_trabajo %>%
+  group_by(ciudad) %>%
+  summarise(
+    n = n(),
+    Media = mean(arriendo),
+    Mediana = median(arriendo),
+    DE = sd(arriendo),
+    CV = (sd(arriendo) / mean(arriendo)) * 100,
+    IQR = IQR(arriendo)
+  )
+
+tabla_ciudades %>%
+  kable(format.args = list(big.mark = ",", scientific = FALSE), digits = 2,
+        col.names = c("Ciudad", "N", "Media", "Mediana", "Desv. Estándar", "CV (%)", "IQR")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+```
+
+Conclusión: Para comparar la dispersión entre ciudades con diferentes niveles de precios, el Coeficiente de Variación (CV) es la medida más justa, ya que estandariza la desviación respecto a la media de cada ciudad. Adicionalmente, el IQR nos permite ver la amplitud del 50% central del mercado, sin la distorsión de los valores atípicos.
+
+3.  ¿Qué registros son sospechosos?Utilizamos la regla del Rango Intercuartílico (IQR) para identificar anomalías. El límite superior teórico se calcula como $Q3 + 1.5 \times IQR$.
+
+```{r}
+#| label: atipicos
+q1 <- quantile(datos_trabajo$arriendo, 0.25)
+q3 <- quantile(datos_trabajo$arriendo, 0.75)
+iqr_val <- q3 - q1
+limite_superior <- q3 + 1.5 * iqr_val
+
+atipicos <- datos_trabajo %>%
+  filter(arriendo > limite_superior) %>%
+  arrange(desc(arriendo)) %>%
+  mutate(Motivo_Probable = ifelse(arriendo > quantile(arriendo, 0.99), "Error de Digitación", "Arriendo Alto (Lujo)"))
+
+atipicos %>%
+  head(10) %>%
+  kable(format.args = list(big.mark = ",", scientific = FALSE),
+        caption = "Top 10 registros atípicos (Límite IQR superado)[cite: 5]") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = F)
+```
+
+Conclusión: La tabla diferencia claramente los registros de "lujo" (inmuebles en estrato 6 con grandes áreas) de los errores puros. Los errores de digitación (ceros adicionales) escalan un orden de magnitud completo por encima de los atípicos naturales, lo que los hace evidentes al revisar los cuantiles superiores.
+
+4.  ¿Qué variables se asocian con el arriendo?
+
+```{r}
+#| label: correlacion
+vars_num <- datos_trabajo %>% select(arriendo, estrato, area_m2, antiguedad)
+cor_pearson <- cor(vars_num, method = "pearson")
+cor_spearman <- cor(vars_num, method = "spearman")
+```
+
+Las variables numéricas se evaluaron usando coeficientes de Pearson y Spearman. Conclusión: Spearman es superior en este escenario, ya que captura relaciones monótonas no lineales y es altamente robusto ante los errores extremos del dataset. Pearson, por el contrario, asume linealidad y sufre distorsiones severas por culpa de los 6 atípicos. El estrato y el área muestran la mayor fuerza de asociación con el precio.
+
+```{r}
+#| label: correlograma
+# Correlograma de Spearman[cite: 5]
+corrplot(cor_spearman, method = "color", type = "upper", 
+         addCoef.col = "black", tl.col = "black", tl.srt = 45, 
+         title = "Correlograma (Spearman)", mar = c(0,0,1,0))
+```
+
+Análisis de Impacto de Depuración La siguiente tabla resume cómo cambian las estadísticas globales al limpiar exclusivamente los 6 errores de digitación (ceros de más) sobre el universo de 900 registros.
+
+```{r}
+#| label: tabla-comparativa
+# Cálculos de comparación pre y post depuración
+medidas_sucias <- c(
+  mean(arriendos_sucios$arriendo),
+  median(arriendos_sucios$arriendo),
+  skewness(arriendos_sucios$arriendo),
+  sd(arriendos_sucios$arriendo)/mean(arriendos_sucios$arriendo)*100,
+  cor(arriendos_sucios$arriendo, arriendos_sucios$area_m2, method="pearson"),
+  cor(arriendos_sucios$arriendo, arriendos_sucios$area_m2, method="spearman")
+)
+
+medidas_limpias <- c(
+  mean(arriendos_limpio$arriendo),
+  median(arriendos_limpio$arriendo),
+  skewness(arriendos_limpio$arriendo),
+  sd(arriendos_limpio$arriendo)/mean(arriendos_limpio$arriendo)*100,
+  cor(arriendos_limpio$arriendo, arriendos_limpio$area_m2, method="pearson"),
+  cor(arriendos_limpio$arriendo, arriendos_limpio$area_m2, method="spearman")
+)
+
+tabla_cambios <- tibble(
+  Medida = c("Media", "Mediana", "Asimetría", "CV General", "Pearson (Arriendo vs Área)", "Spearman (Arriendo vs Área)"),
+  `Con errores` = round(medidas_sucias, 2),
+  `Sin los 6 errores` = round(medidas_limpias, 2),
+  `¿Cambió mucho?` = ifelse(abs((medidas_sucias - medidas_limpias)/medidas_limpias) > 0.1, "Sí", "No")
+)
+
+tabla_cambios %>%
+  kable(format.args = list(big.mark = ",", scientific = FALSE)) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
+  row_spec(which(tabla_cambios$`¿Cambió mucho?` == "Sí"), bold = T, color = "white", background = "#D9534F")
+```
+
+Pregunta de Cierre¿Qué medidas son robustas a seis errores entre 900 registros, y cuáles no? ¿Por qué? Medidas Robustas: La Mediana, el IQR y el coeficiente de Spearman demostraron no sufrir alteraciones significativas. Estas medidas operan basándose en la posición o el orden de los rangos de los datos. Alterar drásticamente la magnitud del extremo derecho no afecta el punto medio de los datos ni la jerarquía posicional relativa de las variables. Medidas Sensibles: La Media, la Desviación Estándar (y por ende el CV), la Asimetría y el coeficiente de Pearson sufrieron variaciones extremas\[cite: 6\]. Estas medidas incorporan el valor algebraico absoluto de cada registro en su cálculo. Solo 6 valores multiplicados por 10 (inflados artificialmente) inyectaron suficiente peso matemático como para desplazar el centro de gravedad del promedio de 900 registros y destrozar la varianza real del mercado.

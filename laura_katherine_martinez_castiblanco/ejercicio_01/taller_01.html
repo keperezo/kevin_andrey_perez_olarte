@@ -1,0 +1,1849 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.8.25">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="Laura Katherine Martínez Castiblanco">
+
+<title>Solución Taller 1</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="taller_01_files/libs/clipboard/clipboard.min.js"></script>
+<script src="taller_01_files/libs/quarto-html/quarto.js" type="module"></script>
+<script src="taller_01_files/libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="taller_01_files/libs/quarto-html/axe/axe-check.js" type="module"></script>
+<script src="taller_01_files/libs/quarto-html/popper.min.js"></script>
+<script src="taller_01_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="taller_01_files/libs/quarto-html/anchor.min.js"></script>
+<link href="taller_01_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="taller_01_files/libs/quarto-html/quarto-syntax-highlighting-7b89279ff1a6dce999919e0e67d4d9ec.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="taller_01_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="taller_01_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="taller_01_files/libs/bootstrap/bootstrap-9e3ffae467580fdb927a41352e75a2e0.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+
+
+</head>
+
+<body class="fullcontent quarto-light">
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
+
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">Solución Taller 1</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    <div>
+    <div class="quarto-title-meta-heading">Author</div>
+    <div class="quarto-title-meta-contents">
+             <p>Laura Katherine Martínez Castiblanco </p>
+          </div>
+  </div>
+    
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<section id="leer-una-página-web" class="level1">
+<h1>4. Leer una página web</h1>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>paquetes <span class="ot">&lt;-</span> <span class="fu">c</span>(</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>  <span class="st">"rvest"</span>, <span class="st">"xml2"</span>, <span class="st">"dplyr"</span>, <span class="st">"stringr"</span>,</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>  <span class="st">"purrr"</span>, <span class="st">"janitor"</span>, <span class="st">"readr"</span>, <span class="st">"knitr"</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="co"># Verificamos qué paquetes faltan. La instalación se hace por fuera de la</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="co"># compilación para evitar cambios inesperados en el entorno del estudiante.</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>instalados <span class="ot">&lt;-</span> <span class="fu">rownames</span>(<span class="fu">installed.packages</span>())</span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>pendientes <span class="ot">&lt;-</span> <span class="fu">setdiff</span>(paquetes, instalados)</span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (<span class="fu">length</span>(pendientes) <span class="sc">&gt;</span> <span class="dv">0</span>) {</span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">stop</span>(</span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>    <span class="st">"Faltan paquetes: "</span>, <span class="fu">paste</span>(pendientes, <span class="at">collapse =</span> <span class="st">", "</span>),</span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>    <span class="st">". Instálelos con install.packages(c("</span>,</span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>    <span class="fu">paste</span>(<span class="fu">sprintf</span>(<span class="st">'"%s"'</span>, pendientes), <span class="at">collapse =</span> <span class="st">", "</span>), <span class="st">"))"</span></span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a><span class="co"># Cargamos los paquetes sin mostrar mensajes</span></span>
+<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a><span class="fu">invisible</span>(<span class="fu">lapply</span>(paquetes, library, <span class="at">character.only =</span> <span class="cn">TRUE</span>))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>
+Attaching package: 'dplyr'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>The following objects are masked from 'package:stats':
+
+    filter, lag</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>The following objects are masked from 'package:base':
+
+    intersect, setdiff, setequal, union</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>
+Attaching package: 'janitor'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>The following objects are masked from 'package:stats':
+
+    chisq.test, fisher.test</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>
+Attaching package: 'readr'</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>The following object is masked from 'package:rvest':
+
+    guess_encoding</code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a>url_quotes <span class="ot">&lt;-</span> <span class="st">"https://quotes.toscrape.com/"</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a><span class="co"># Leemos el HTML de la página</span></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>pagina_quotes <span class="ot">&lt;-</span> <span class="fu">read_html</span>(url_quotes)</span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>pagina_quotes</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>{html_document}
+&lt;html lang="en"&gt;
+[1] &lt;head&gt;\n&lt;meta http-equiv="Content-Type" content="text/html; charset=UTF-8 ...
+[2] &lt;body&gt;\n    &lt;div class="container"&gt;\n        &lt;div class="row header-box"&gt; ...</code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb11"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a>pagina_quotes <span class="sc">%&gt;%</span></span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">html_element</span>(<span class="st">"title"</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">html_text2</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "Quotes to Scrape"</code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb13"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a>citas <span class="ot">&lt;-</span> pagina_quotes <span class="sc">%&gt;%</span></span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">html_elements</span>(<span class="st">".quote .text"</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">html_text2</span>()</span>
+<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a>citas</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code> [1] "“The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking.”"                
+ [2] "“It is our choices, Harry, that show what we truly are, far more than our abilities.”"                                              
+ [3] "“There are only two ways to live your life. One is as though nothing is a miracle. The other is as though everything is a miracle.”"
+ [4] "“The person, be it gentleman or lady, who has not pleasure in a good novel, must be intolerably stupid.”"                           
+ [5] "“Imperfection is beauty, madness is genius and it's better to be absolutely ridiculous than absolutely boring.”"                    
+ [6] "“Try not to become a man of success. Rather become a man of value.”"                                                                
+ [7] "“It is better to be hated for what you are than to be loved for what you are not.”"                                                 
+ [8] "“I have not failed. I've just found 10,000 ways that won't work.”"                                                                  
+ [9] "“A woman is like a tea bag; you never know how strong it is until it's in hot water.”"                                              
+[10] "“A day without sunshine is like, you know, night.”"                                                                                 </code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb15"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a>autores <span class="ot">&lt;-</span> pagina_quotes <span class="sc">%&gt;%</span></span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">html_elements</span>(<span class="st">".quote .author"</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">html_text2</span>()</span>
+<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a>autores</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code> [1] "Albert Einstein"   "J.K. Rowling"      "Albert Einstein"  
+ [4] "Jane Austen"       "Marilyn Monroe"    "Albert Einstein"  
+ [7] "André Gide"        "Thomas A. Edison"  "Eleanor Roosevelt"
+[10] "Steve Martin"     </code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb17"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Creamos la tabla</span></span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>tabla_citas <span class="ot">&lt;-</span> <span class="fu">tibble</span>(</span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">cita =</span> citas,</span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">autor =</span> autores</span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb17-6"><a href="#cb17-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-7"><a href="#cb17-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Mostramos las citas en una tabla</span></span>
+<span id="cb17-8"><a href="#cb17-8" aria-hidden="true" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(</span>
+<span id="cb17-9"><a href="#cb17-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">head</span>(tabla_citas, <span class="dv">10</span>), </span>
+<span id="cb17-10"><a href="#cb17-10" aria-hidden="true" tabindex="-1"></a>  <span class="at">caption =</span> <span class="st">"Primeras citas extraídas de Quotes to Scrape"</span>,</span>
+<span id="cb17-11"><a href="#cb17-11" aria-hidden="true" tabindex="-1"></a>  <span class="at">col.names =</span> <span class="fu">c</span>(<span class="st">"Cita"</span>, <span class="st">"Autor"</span>), <span class="co"># Mejora: Nombres de columna claros</span></span>
+<span id="cb17-12"><a href="#cb17-12" aria-hidden="true" tabindex="-1"></a>  <span class="at">format =</span> <span class="st">"html"</span> <span class="co"># Usa "pipe" si prefieres formato markdown plano</span></span>
+<span id="cb17-13"><a href="#cb17-13" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<table class="caption-top table table-sm table-striped small">
+<caption>Primeras citas extraídas de Quotes to Scrape</caption>
+<thead>
+<tr class="header">
+<th style="text-align: left;" data-quarto-table-cell-role="th">Cita</th>
+<th style="text-align: left;" data-quarto-table-cell-role="th">Autor</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">“The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking.”</td>
+<td style="text-align: left;">Albert Einstein</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">“It is our choices, Harry, that show what we truly are, far more than our abilities.”</td>
+<td style="text-align: left;">J.K. Rowling</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">“There are only two ways to live your life. One is as though nothing is a miracle. The other is as though everything is a miracle.”</td>
+<td style="text-align: left;">Albert Einstein</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">“The person, be it gentleman or lady, who has not pleasure in a good novel, must be intolerably stupid.”</td>
+<td style="text-align: left;">Jane Austen</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">“Imperfection is beauty, madness is genius and it's better to be absolutely ridiculous than absolutely boring.”</td>
+<td style="text-align: left;">Marilyn Monroe</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">“Try not to become a man of success. Rather become a man of value.”</td>
+<td style="text-align: left;">Albert Einstein</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">“It is better to be hated for what you are than to be loved for what you are not.”</td>
+<td style="text-align: left;">André Gide</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">“I have not failed. I've just found 10,000 ways that won't work.”</td>
+<td style="text-align: left;">Thomas A. Edison</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">“A woman is like a tea bag; you never know how strong it is until it's in hot water.”</td>
+<td style="text-align: left;">Eleanor Roosevelt</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">“A day without sunshine is like, you know, night.”</td>
+<td style="text-align: left;">Steve Martin</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</section>
+<section id="citas-autores-y-etiquetas" class="level1">
+<h1>5. Citas, autores y etiquetas</h1>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb18"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a>nodos_citas <span class="ot">&lt;-</span> pagina_quotes <span class="sc">%&gt;%</span></span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a>               <span class="fu">html_elements</span>(<span class="st">".quote"</span>)</span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a><span class="fu">length</span>(nodos_citas)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 10</code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb20"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a>tabla_citas_completa <span class="ot">&lt;-</span> <span class="fu">map_dfr</span>(nodos_citas, <span class="cf">function</span>(nodo) {</span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a>  cita <span class="ot">&lt;-</span> nodo <span class="sc">%&gt;%</span> <span class="fu">html_element</span>(<span class="st">".text"</span>) <span class="sc">%&gt;%</span> <span class="fu">html_text2</span>()</span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a>  autor <span class="ot">&lt;-</span> nodo <span class="sc">%&gt;%</span> <span class="fu">html_element</span>(<span class="st">".author"</span>) <span class="sc">%&gt;%</span> <span class="fu">html_text2</span>()</span>
+<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a>  tags <span class="ot">&lt;-</span> nodo <span class="sc">%&gt;%</span> <span class="fu">html_elements</span>(<span class="st">".tags .tag"</span>) <span class="sc">%&gt;%</span> <span class="fu">html_text2</span>()</span>
+<span id="cb20-5"><a href="#cb20-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb20-6"><a href="#cb20-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">tibble</span>(</span>
+<span id="cb20-7"><a href="#cb20-7" aria-hidden="true" tabindex="-1"></a>    <span class="at">cita =</span> cita,</span>
+<span id="cb20-8"><a href="#cb20-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">autor =</span> autor,</span>
+<span id="cb20-9"><a href="#cb20-9" aria-hidden="true" tabindex="-1"></a>    <span class="at">tags =</span> <span class="fu">paste</span>(tags, <span class="at">collapse =</span> <span class="st">", "</span>)</span>
+<span id="cb20-10"><a href="#cb20-10" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb20-11"><a href="#cb20-11" aria-hidden="true" tabindex="-1"></a>})</span>
+<span id="cb20-12"><a href="#cb20-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb20-13"><a href="#cb20-13" aria-hidden="true" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(</span>
+<span id="cb20-14"><a href="#cb20-14" aria-hidden="true" tabindex="-1"></a>  <span class="fu">head</span>(tabla_citas_completa, <span class="dv">10</span>), </span>
+<span id="cb20-15"><a href="#cb20-15" aria-hidden="true" tabindex="-1"></a>  <span class="at">caption =</span> <span class="st">"Citas, autores y etiquetas extraídas"</span>,</span>
+<span id="cb20-16"><a href="#cb20-16" aria-hidden="true" tabindex="-1"></a>  <span class="at">col.names =</span> <span class="fu">c</span>(<span class="st">"Cita"</span>, <span class="st">"Autor"</span>, <span class="st">"Tags"</span>) <span class="co"># Nombres de columna claros</span></span>
+<span id="cb20-17"><a href="#cb20-17" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<table class="caption-top table table-sm table-striped small">
+<caption>Citas, autores y etiquetas extraídas</caption>
+<colgroup>
+<col style="width: 67%">
+<col style="width: 9%">
+<col style="width: 23%">
+</colgroup>
+<thead>
+<tr class="header">
+<th style="text-align: left;">Cita</th>
+<th style="text-align: left;">Autor</th>
+<th style="text-align: left;">Tags</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">“The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking.”</td>
+<td style="text-align: left;">Albert Einstein</td>
+<td style="text-align: left;">change, deep-thoughts, thinking, world</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">“It is our choices, Harry, that show what we truly are, far more than our abilities.”</td>
+<td style="text-align: left;">J.K. Rowling</td>
+<td style="text-align: left;">abilities, choices</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">“There are only two ways to live your life. One is as though nothing is a miracle. The other is as though everything is a miracle.”</td>
+<td style="text-align: left;">Albert Einstein</td>
+<td style="text-align: left;">inspirational, life, live, miracle, miracles</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">“The person, be it gentleman or lady, who has not pleasure in a good novel, must be intolerably stupid.”</td>
+<td style="text-align: left;">Jane Austen</td>
+<td style="text-align: left;">aliteracy, books, classic, humor</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">“Imperfection is beauty, madness is genius and it’s better to be absolutely ridiculous than absolutely boring.”</td>
+<td style="text-align: left;">Marilyn Monroe</td>
+<td style="text-align: left;">be-yourself, inspirational</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">“Try not to become a man of success. Rather become a man of value.”</td>
+<td style="text-align: left;">Albert Einstein</td>
+<td style="text-align: left;">adulthood, success, value</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">“It is better to be hated for what you are than to be loved for what you are not.”</td>
+<td style="text-align: left;">André Gide</td>
+<td style="text-align: left;">life, love</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">“I have not failed. I’ve just found 10,000 ways that won’t work.”</td>
+<td style="text-align: left;">Thomas A. Edison</td>
+<td style="text-align: left;">edison, failure, inspirational, paraphrased</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">“A woman is like a tea bag; you never know how strong it is until it’s in hot water.”</td>
+<td style="text-align: left;">Eleanor Roosevelt</td>
+<td style="text-align: left;">misattributed-eleanor-roosevelt</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">“A day without sunshine is like, you know, night.”</td>
+<td style="text-align: left;">Steve Martin</td>
+<td style="text-align: left;">humor, obvious, simile</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</section>
+<section id="limpieza-básica-del-texto-extraído" class="level1">
+<h1>6. Limpieza básica del texto extraído</h1>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb21"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a>tabla_citas_limpia <span class="ot">&lt;-</span> tabla_citas_completa <span class="sc">%&gt;%</span></span>
+<span id="cb21-2"><a href="#cb21-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(</span>
+<span id="cb21-3"><a href="#cb21-3" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Quitamos las comillas tipográficas de la cita</span></span>
+<span id="cb21-4"><a href="#cb21-4" aria-hidden="true" tabindex="-1"></a>    <span class="at">cita =</span> <span class="fu">str_replace_all</span>(cita, <span class="st">"[\u201c\u201d]"</span>, <span class="st">""</span>),</span>
+<span id="cb21-5"><a href="#cb21-5" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Eliminamos espacios sobrantes en el texto de la cita</span></span>
+<span id="cb21-6"><a href="#cb21-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">cita =</span> <span class="fu">str_squish</span>(cita),</span>
+<span id="cb21-7"><a href="#cb21-7" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Limpiamos espacios innecesarios en el nombre del autor</span></span>
+<span id="cb21-8"><a href="#cb21-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">autor =</span> <span class="fu">str_squish</span>(autor),</span>
+<span id="cb21-9"><a href="#cb21-9" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Calculamos cuántas etiquetas tiene cada cita</span></span>
+<span id="cb21-10"><a href="#cb21-10" aria-hidden="true" tabindex="-1"></a>    <span class="at">n_tags =</span> <span class="fu">if_else</span>(tags <span class="sc">==</span> <span class="st">""</span>, <span class="dv">0</span>L, <span class="fu">str_count</span>(tags, <span class="st">","</span>) <span class="sc">+</span> <span class="dv">1</span>L)</span>
+<span id="cb21-11"><a href="#cb21-11" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb21-12"><a href="#cb21-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb21-13"><a href="#cb21-13" aria-hidden="true" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(</span>
+<span id="cb21-14"><a href="#cb21-14" aria-hidden="true" tabindex="-1"></a>  <span class="fu">head</span>(tabla_citas_limpia, <span class="dv">10</span>), </span>
+<span id="cb21-15"><a href="#cb21-15" aria-hidden="true" tabindex="-1"></a>  <span class="at">caption =</span> <span class="st">"Citas limpias con número de etiquetas"</span>,</span>
+<span id="cb21-16"><a href="#cb21-16" aria-hidden="true" tabindex="-1"></a>  <span class="at">col.names =</span> <span class="fu">c</span>(<span class="st">"Cita"</span>, <span class="st">"Autor"</span>, <span class="st">"tags"</span>, <span class="st">"n Tags"</span>) <span class="co"># Nombres de columna claros</span></span>
+<span id="cb21-17"><a href="#cb21-17" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<table class="caption-top table table-sm table-striped small">
+<caption>Citas limpias con número de etiquetas</caption>
+<colgroup>
+<col style="width: 65%">
+<col style="width: 9%">
+<col style="width: 22%">
+<col style="width: 3%">
+</colgroup>
+<thead>
+<tr class="header">
+<th style="text-align: left;">Cita</th>
+<th style="text-align: left;">Autor</th>
+<th style="text-align: left;">tags</th>
+<th style="text-align: right;">n Tags</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking.</td>
+<td style="text-align: left;">Albert Einstein</td>
+<td style="text-align: left;">change, deep-thoughts, thinking, world</td>
+<td style="text-align: right;">4</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">It is our choices, Harry, that show what we truly are, far more than our abilities.</td>
+<td style="text-align: left;">J.K. Rowling</td>
+<td style="text-align: left;">abilities, choices</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">There are only two ways to live your life. One is as though nothing is a miracle. The other is as though everything is a miracle.</td>
+<td style="text-align: left;">Albert Einstein</td>
+<td style="text-align: left;">inspirational, life, live, miracle, miracles</td>
+<td style="text-align: right;">5</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">The person, be it gentleman or lady, who has not pleasure in a good novel, must be intolerably stupid.</td>
+<td style="text-align: left;">Jane Austen</td>
+<td style="text-align: left;">aliteracy, books, classic, humor</td>
+<td style="text-align: right;">4</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Imperfection is beauty, madness is genius and it’s better to be absolutely ridiculous than absolutely boring.</td>
+<td style="text-align: left;">Marilyn Monroe</td>
+<td style="text-align: left;">be-yourself, inspirational</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Try not to become a man of success. Rather become a man of value.</td>
+<td style="text-align: left;">Albert Einstein</td>
+<td style="text-align: left;">adulthood, success, value</td>
+<td style="text-align: right;">3</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">It is better to be hated for what you are than to be loved for what you are not.</td>
+<td style="text-align: left;">André Gide</td>
+<td style="text-align: left;">life, love</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">I have not failed. I’ve just found 10,000 ways that won’t work.</td>
+<td style="text-align: left;">Thomas A. Edison</td>
+<td style="text-align: left;">edison, failure, inspirational, paraphrased</td>
+<td style="text-align: right;">4</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">A woman is like a tea bag; you never know how strong it is until it’s in hot water.</td>
+<td style="text-align: left;">Eleanor Roosevelt</td>
+<td style="text-align: left;">misattributed-eleanor-roosevelt</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">A day without sunshine is like, you know, night.</td>
+<td style="text-align: left;">Steve Martin</td>
+<td style="text-align: left;">humor, obvious, simile</td>
+<td style="text-align: right;">3</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb22"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a>tabla_citas_limpia <span class="sc">%&gt;%</span></span>
+<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">count</span>(autor, <span class="at">sort =</span> <span class="cn">TRUE</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">head</span>(<span class="dv">10</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb22-4"><a href="#cb22-4" aria-hidden="true" tabindex="-1"></a>  knitr<span class="sc">::</span><span class="fu">kable</span>(</span>
+<span id="cb22-5"><a href="#cb22-5" aria-hidden="true" tabindex="-1"></a>    <span class="at">caption =</span> <span class="st">"Autores con más citas"</span>,</span>
+<span id="cb22-6"><a href="#cb22-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">col.names =</span> <span class="fu">c</span>(<span class="st">"Autor"</span>, <span class="st">"Número de citas"</span>)</span>
+<span id="cb22-7"><a href="#cb22-7" aria-hidden="true" tabindex="-1"></a>  )</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<table class="caption-top table table-sm table-striped small">
+<caption>Autores con más citas</caption>
+<thead>
+<tr class="header">
+<th style="text-align: left;">Autor</th>
+<th style="text-align: right;">Número de citas</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">Albert Einstein</td>
+<td style="text-align: right;">3</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">André Gide</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Eleanor Roosevelt</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">J.K. Rowling</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Jane Austen</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Marilyn Monroe</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Steve Martin</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Thomas A. Edison</td>
+<td style="text-align: right;">1</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</section>
+<section id="navegar-varias-páginas" class="level1">
+<h1>7. Navegar varias páginas</h1>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb23"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a>urls_paginas_quotes <span class="ot">&lt;-</span> <span class="fu">c</span>(</span>
+<span id="cb23-2"><a href="#cb23-2" aria-hidden="true" tabindex="-1"></a>  <span class="st">"https://quotes.toscrape.com/page/1/"</span>,</span>
+<span id="cb23-3"><a href="#cb23-3" aria-hidden="true" tabindex="-1"></a>  <span class="st">"https://quotes.toscrape.com/page/2/"</span>,</span>
+<span id="cb23-4"><a href="#cb23-4" aria-hidden="true" tabindex="-1"></a>  <span class="st">"https://quotes.toscrape.com/page/3/"</span></span>
+<span id="cb23-5"><a href="#cb23-5" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb23-6"><a href="#cb23-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-7"><a href="#cb23-7" aria-hidden="true" tabindex="-1"></a>urls_paginas_quotes</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "https://quotes.toscrape.com/page/1/" "https://quotes.toscrape.com/page/2/"
+[3] "https://quotes.toscrape.com/page/3/"</code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb25"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Definimos una función que recibe la URL de una página</span></span>
+<span id="cb25-2"><a href="#cb25-2" aria-hidden="true" tabindex="-1"></a>scrapear_quotes <span class="ot">&lt;-</span> <span class="cf">function</span>(url) {</span>
+<span id="cb25-3"><a href="#cb25-3" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Leemos el HTML de la página</span></span>
+<span id="cb25-4"><a href="#cb25-4" aria-hidden="true" tabindex="-1"></a>  pagina <span class="ot">&lt;-</span> <span class="fu">read_html</span>(url)</span>
+<span id="cb25-5"><a href="#cb25-5" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Seleccionamos todos los bloques que contienen citas</span></span>
+<span id="cb25-6"><a href="#cb25-6" aria-hidden="true" tabindex="-1"></a>  nodos <span class="ot">&lt;-</span> pagina <span class="sc">%&gt;%</span> <span class="fu">html_elements</span>(<span class="st">".quote"</span>)</span>
+<span id="cb25-7"><a href="#cb25-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb25-8"><a href="#cb25-8" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (<span class="fu">length</span>(nodos) <span class="sc">==</span> <span class="dv">0</span>) {</span>
+<span id="cb25-9"><a href="#cb25-9" aria-hidden="true" tabindex="-1"></a>    <span class="fu">stop</span>(<span class="st">"No se encontraron citas en: "</span>, url)</span>
+<span id="cb25-10"><a href="#cb25-10" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb25-11"><a href="#cb25-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb25-12"><a href="#cb25-12" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Recorremos cada bloque de cita y unimos los resultados en una tabla</span></span>
+<span id="cb25-13"><a href="#cb25-13" aria-hidden="true" tabindex="-1"></a>  <span class="fu">map_dfr</span>(nodos, <span class="cf">function</span>(nodo) {</span>
+<span id="cb25-14"><a href="#cb25-14" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Extraemos el texto de la cita</span></span>
+<span id="cb25-15"><a href="#cb25-15" aria-hidden="true" tabindex="-1"></a>    cita <span class="ot">&lt;-</span> nodo <span class="sc">%&gt;%</span> <span class="fu">html_element</span>(<span class="st">".text"</span>) <span class="sc">%&gt;%</span> <span class="fu">html_text2</span>()</span>
+<span id="cb25-16"><a href="#cb25-16" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Extraemos el nombre del autor</span></span>
+<span id="cb25-17"><a href="#cb25-17" aria-hidden="true" tabindex="-1"></a>    autor <span class="ot">&lt;-</span> nodo <span class="sc">%&gt;%</span> <span class="fu">html_element</span>(<span class="st">".author"</span>) <span class="sc">%&gt;%</span> <span class="fu">html_text2</span>()</span>
+<span id="cb25-18"><a href="#cb25-18" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Extraemos todas las etiquetas asociadas a la cita</span></span>
+<span id="cb25-19"><a href="#cb25-19" aria-hidden="true" tabindex="-1"></a>    tags <span class="ot">&lt;-</span> nodo <span class="sc">%&gt;%</span> <span class="fu">html_elements</span>(<span class="st">".tag"</span>) <span class="sc">%&gt;%</span> <span class="fu">html_text2</span>()</span>
+<span id="cb25-20"><a href="#cb25-20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb25-21"><a href="#cb25-21" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Construimos una fila con la información extraída</span></span>
+<span id="cb25-22"><a href="#cb25-22" aria-hidden="true" tabindex="-1"></a>    <span class="fu">tibble</span>(</span>
+<span id="cb25-23"><a href="#cb25-23" aria-hidden="true" tabindex="-1"></a>      <span class="co"># Guardamos la URL de origen</span></span>
+<span id="cb25-24"><a href="#cb25-24" aria-hidden="true" tabindex="-1"></a>      <span class="at">url_origen =</span> url,</span>
+<span id="cb25-25"><a href="#cb25-25" aria-hidden="true" tabindex="-1"></a>      <span class="co"># Limpiamos comillas y espacios del texto de la cita</span></span>
+<span id="cb25-26"><a href="#cb25-26" aria-hidden="true" tabindex="-1"></a>      <span class="at">cita =</span> <span class="fu">str_squish</span>(<span class="fu">str_replace_all</span>(cita, <span class="st">"[\u201c\u201d]"</span>, <span class="st">""</span>)),</span>
+<span id="cb25-27"><a href="#cb25-27" aria-hidden="true" tabindex="-1"></a>      <span class="co"># Limpiamos espacios extra en el nombre del autor</span></span>
+<span id="cb25-28"><a href="#cb25-28" aria-hidden="true" tabindex="-1"></a>      <span class="at">autor =</span> <span class="fu">str_squish</span>(autor),</span>
+<span id="cb25-29"><a href="#cb25-29" aria-hidden="true" tabindex="-1"></a>      <span class="co"># Unimos las etiquetas en un solo texto separado por comas</span></span>
+<span id="cb25-30"><a href="#cb25-30" aria-hidden="true" tabindex="-1"></a>      <span class="at">tags =</span> <span class="fu">paste</span>(tags, <span class="at">collapse =</span> <span class="st">", "</span>)</span>
+<span id="cb25-31"><a href="#cb25-31" aria-hidden="true" tabindex="-1"></a>    )</span>
+<span id="cb25-32"><a href="#cb25-32" aria-hidden="true" tabindex="-1"></a>  })</span>
+<span id="cb25-33"><a href="#cb25-33" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb26"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a>quotes_tres_paginas <span class="ot">&lt;-</span> <span class="fu">map_dfr</span>(urls_paginas_quotes, scrapear_quotes)</span>
+<span id="cb26-2"><a href="#cb26-2" aria-hidden="true" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(</span>
+<span id="cb26-3"><a href="#cb26-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">head</span>(quotes_tres_paginas, <span class="dv">10</span>), </span>
+<span id="cb26-4"><a href="#cb26-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">caption =</span> <span class="st">"Resultados combinados de varias páginas"</span>,</span>
+<span id="cb26-5"><a href="#cb26-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">col.names =</span> <span class="fu">c</span>(<span class="st">"URL Origen"</span>, <span class="st">"Cita"</span>, <span class="st">"Autor"</span>, <span class="st">"Etiquetas"</span>) <span class="co"># Nombres de columna claros</span></span>
+<span id="cb26-6"><a href="#cb26-6" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<table class="caption-top table table-sm table-striped small">
+<caption>Resultados combinados de varias páginas</caption>
+<colgroup>
+<col style="width: 15%">
+<col style="width: 56%">
+<col style="width: 7%">
+<col style="width: 19%">
+</colgroup>
+<thead>
+<tr class="header">
+<th style="text-align: left;">URL Origen</th>
+<th style="text-align: left;">Cita</th>
+<th style="text-align: left;">Autor</th>
+<th style="text-align: left;">Etiquetas</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">https://quotes.toscrape.com/page/1/</td>
+<td style="text-align: left;">The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking.</td>
+<td style="text-align: left;">Albert Einstein</td>
+<td style="text-align: left;">change, deep-thoughts, thinking, world</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">https://quotes.toscrape.com/page/1/</td>
+<td style="text-align: left;">It is our choices, Harry, that show what we truly are, far more than our abilities.</td>
+<td style="text-align: left;">J.K. Rowling</td>
+<td style="text-align: left;">abilities, choices</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">https://quotes.toscrape.com/page/1/</td>
+<td style="text-align: left;">There are only two ways to live your life. One is as though nothing is a miracle. The other is as though everything is a miracle.</td>
+<td style="text-align: left;">Albert Einstein</td>
+<td style="text-align: left;">inspirational, life, live, miracle, miracles</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">https://quotes.toscrape.com/page/1/</td>
+<td style="text-align: left;">The person, be it gentleman or lady, who has not pleasure in a good novel, must be intolerably stupid.</td>
+<td style="text-align: left;">Jane Austen</td>
+<td style="text-align: left;">aliteracy, books, classic, humor</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">https://quotes.toscrape.com/page/1/</td>
+<td style="text-align: left;">Imperfection is beauty, madness is genius and it’s better to be absolutely ridiculous than absolutely boring.</td>
+<td style="text-align: left;">Marilyn Monroe</td>
+<td style="text-align: left;">be-yourself, inspirational</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">https://quotes.toscrape.com/page/1/</td>
+<td style="text-align: left;">Try not to become a man of success. Rather become a man of value.</td>
+<td style="text-align: left;">Albert Einstein</td>
+<td style="text-align: left;">adulthood, success, value</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">https://quotes.toscrape.com/page/1/</td>
+<td style="text-align: left;">It is better to be hated for what you are than to be loved for what you are not.</td>
+<td style="text-align: left;">André Gide</td>
+<td style="text-align: left;">life, love</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">https://quotes.toscrape.com/page/1/</td>
+<td style="text-align: left;">I have not failed. I’ve just found 10,000 ways that won’t work.</td>
+<td style="text-align: left;">Thomas A. Edison</td>
+<td style="text-align: left;">edison, failure, inspirational, paraphrased</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">https://quotes.toscrape.com/page/1/</td>
+<td style="text-align: left;">A woman is like a tea bag; you never know how strong it is until it’s in hot water.</td>
+<td style="text-align: left;">Eleanor Roosevelt</td>
+<td style="text-align: left;">misattributed-eleanor-roosevelt</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">https://quotes.toscrape.com/page/1/</td>
+<td style="text-align: left;">A day without sunshine is like, you know, night.</td>
+<td style="text-align: left;">Steve Martin</td>
+<td style="text-align: left;">humor, obvious, simile</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb27"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a>quotes_tres_paginas <span class="sc">%&gt;%</span></span>
+<span id="cb27-2"><a href="#cb27-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarise</span>(</span>
+<span id="cb27-3"><a href="#cb27-3" aria-hidden="true" tabindex="-1"></a>    <span class="at">filas =</span> <span class="fu">n</span>(),</span>
+<span id="cb27-4"><a href="#cb27-4" aria-hidden="true" tabindex="-1"></a>    <span class="at">autores_unicos =</span> <span class="fu">n_distinct</span>(autor),</span>
+<span id="cb27-5"><a href="#cb27-5" aria-hidden="true" tabindex="-1"></a>    <span class="at">citas_duplicadas =</span> <span class="fu">sum</span>(<span class="fu">duplicated</span>(cita))</span>
+<span id="cb27-6"><a href="#cb27-6" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">%&gt;%</span></span>
+<span id="cb27-7"><a href="#cb27-7" aria-hidden="true" tabindex="-1"></a>   knitr<span class="sc">::</span><span class="fu">kable</span>(</span>
+<span id="cb27-8"><a href="#cb27-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">caption =</span> <span class="st">"Validación básica del scraping de citas"</span>,</span>
+<span id="cb27-9"><a href="#cb27-9" aria-hidden="true" tabindex="-1"></a>    <span class="at">col.names =</span> <span class="fu">c</span>(<span class="st">"Filas totales"</span>, <span class="st">"Autores únicos"</span>, <span class="st">"Citas duplicadas"</span>)</span>
+<span id="cb27-10"><a href="#cb27-10" aria-hidden="true" tabindex="-1"></a>  )</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<table class="caption-top table table-sm table-striped small">
+<caption>Validación básica del scraping de citas</caption>
+<thead>
+<tr class="header">
+<th style="text-align: right;">Filas totales</th>
+<th style="text-align: right;">Autores únicos</th>
+<th style="text-align: right;">Citas duplicadas</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: right;">30</td>
+<td style="text-align: right;">20</td>
+<td style="text-align: right;">0</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</section>
+<section id="scraping-de-un-catálogo-de-libros" class="level1">
+<h1>8. Scraping de un catálogo de libros</h1>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb28"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a>url_books <span class="ot">&lt;-</span> <span class="st">"https://books.toscrape.com/catalogue/page-1.html"</span></span>
+<span id="cb28-2"><a href="#cb28-2" aria-hidden="true" tabindex="-1"></a>pagina_books <span class="ot">&lt;-</span> <span class="fu">read_html</span>(url_books)</span>
+<span id="cb28-3"><a href="#cb28-3" aria-hidden="true" tabindex="-1"></a>pagina_books</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>{html_document}
+&lt;html lang="en-us" class="no-js"&gt;
+[1] &lt;head&gt;\n&lt;title&gt;\n    All products | Books to Scrape - Sandbox\n&lt;/title&gt;\n ...
+[2] &lt;body id="default" class="default"&gt;\n        \n        \n    \n    \n     ...</code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb30"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb30-1"><a href="#cb30-1" aria-hidden="true" tabindex="-1"></a>nodos_libros <span class="ot">&lt;-</span> pagina_books <span class="sc">%&gt;%</span></span>
+<span id="cb30-2"><a href="#cb30-2" aria-hidden="true" tabindex="-1"></a>                <span class="fu">html_elements</span>(<span class="st">"article.product_pod"</span>)</span>
+<span id="cb30-3"><a href="#cb30-3" aria-hidden="true" tabindex="-1"></a><span class="fu">length</span>(nodos_libros)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 20</code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb32"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb32-1"><a href="#cb32-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Recorremos cada bloque de libro y unimos los resultados en una tabla</span></span>
+<span id="cb32-2"><a href="#cb32-2" aria-hidden="true" tabindex="-1"></a>libros_pagina_1 <span class="ot">&lt;-</span> <span class="fu">map_dfr</span>(nodos_libros, <span class="cf">function</span>(nodo) {</span>
+<span id="cb32-3"><a href="#cb32-3" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Extraemos el título del libro desde el atributo title del enlace</span></span>
+<span id="cb32-4"><a href="#cb32-4" aria-hidden="true" tabindex="-1"></a>  titulo <span class="ot">&lt;-</span> nodo <span class="sc">%&gt;%</span></span>
+<span id="cb32-5"><a href="#cb32-5" aria-hidden="true" tabindex="-1"></a>            <span class="fu">html_element</span>(<span class="st">"h3 a"</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb32-6"><a href="#cb32-6" aria-hidden="true" tabindex="-1"></a>            <span class="fu">html_attr</span>(<span class="st">"title"</span>)</span>
+<span id="cb32-7"><a href="#cb32-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb32-8"><a href="#cb32-8" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Extraemos el precio como texto</span></span>
+<span id="cb32-9"><a href="#cb32-9" aria-hidden="true" tabindex="-1"></a>  precio <span class="ot">&lt;-</span> nodo <span class="sc">%&gt;%</span></span>
+<span id="cb32-10"><a href="#cb32-10" aria-hidden="true" tabindex="-1"></a>            <span class="fu">html_element</span>(<span class="st">".price_color"</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb32-11"><a href="#cb32-11" aria-hidden="true" tabindex="-1"></a>            <span class="fu">html_text2</span>()</span>
+<span id="cb32-12"><a href="#cb32-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb32-13"><a href="#cb32-13" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Extraemos el texto de disponibilidad del libro</span></span>
+<span id="cb32-14"><a href="#cb32-14" aria-hidden="true" tabindex="-1"></a>  disponibilidad <span class="ot">&lt;-</span> nodo <span class="sc">%&gt;%</span></span>
+<span id="cb32-15"><a href="#cb32-15" aria-hidden="true" tabindex="-1"></a>                    <span class="fu">html_element</span>(<span class="st">".availability"</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb32-16"><a href="#cb32-16" aria-hidden="true" tabindex="-1"></a>                    <span class="fu">html_text2</span>()</span>
+<span id="cb32-17"><a href="#cb32-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb32-18"><a href="#cb32-18" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Extraemos la clase CSS donde está codificado el rating</span></span>
+<span id="cb32-19"><a href="#cb32-19" aria-hidden="true" tabindex="-1"></a>  rating_clase <span class="ot">&lt;-</span> nodo <span class="sc">%&gt;%</span></span>
+<span id="cb32-20"><a href="#cb32-20" aria-hidden="true" tabindex="-1"></a>                  <span class="fu">html_element</span>(<span class="st">"p.star-rating"</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb32-21"><a href="#cb32-21" aria-hidden="true" tabindex="-1"></a>                  <span class="fu">html_attr</span>(<span class="st">"class"</span>)</span>
+<span id="cb32-22"><a href="#cb32-22" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb32-23"><a href="#cb32-23" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Extraemos el enlace relativo hacia el detalle del libro</span></span>
+<span id="cb32-24"><a href="#cb32-24" aria-hidden="true" tabindex="-1"></a>  enlace_relativo <span class="ot">&lt;-</span> nodo <span class="sc">%&gt;%</span></span>
+<span id="cb32-25"><a href="#cb32-25" aria-hidden="true" tabindex="-1"></a>                    <span class="fu">html_element</span>(<span class="st">"h3 a"</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb32-26"><a href="#cb32-26" aria-hidden="true" tabindex="-1"></a>                    <span class="fu">html_attr</span>(<span class="st">"href"</span>)</span>
+<span id="cb32-27"><a href="#cb32-27" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb32-28"><a href="#cb32-28" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Construimos una fila con las variables extraídas</span></span>
+<span id="cb32-29"><a href="#cb32-29" aria-hidden="true" tabindex="-1"></a>  <span class="fu">tibble</span>(</span>
+<span id="cb32-30"><a href="#cb32-30" aria-hidden="true" tabindex="-1"></a>    <span class="at">titulo          =</span> titulo,</span>
+<span id="cb32-31"><a href="#cb32-31" aria-hidden="true" tabindex="-1"></a>    <span class="at">precio_texto    =</span> precio,</span>
+<span id="cb32-32"><a href="#cb32-32" aria-hidden="true" tabindex="-1"></a>    <span class="at">disponibilidad  =</span> disponibilidad,</span>
+<span id="cb32-33"><a href="#cb32-33" aria-hidden="true" tabindex="-1"></a>    <span class="at">rating_raw      =</span> rating_clase,</span>
+<span id="cb32-34"><a href="#cb32-34" aria-hidden="true" tabindex="-1"></a>    <span class="at">enlace_relativo =</span> enlace_relativo</span>
+<span id="cb32-35"><a href="#cb32-35" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb32-36"><a href="#cb32-36" aria-hidden="true" tabindex="-1"></a>})</span>
+<span id="cb32-37"><a href="#cb32-37" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb32-38"><a href="#cb32-38" aria-hidden="true" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(</span>
+<span id="cb32-39"><a href="#cb32-39" aria-hidden="true" tabindex="-1"></a>  <span class="fu">head</span>(libros_pagina_1, <span class="dv">10</span>), </span>
+<span id="cb32-40"><a href="#cb32-40" aria-hidden="true" tabindex="-1"></a>  <span class="at">caption =</span> <span class="st">"Libros extraídos de una página (Datos crudos)"</span>,</span>
+<span id="cb32-41"><a href="#cb32-41" aria-hidden="true" tabindex="-1"></a>  <span class="at">col.names =</span> <span class="fu">c</span>(<span class="st">"Título"</span>, <span class="st">"Precio (Texto)"</span>, <span class="st">"Disponibilidad"</span>, <span class="st">"Rating (Raw)"</span>, <span class="st">"Enlace Relativo"</span>)</span>
+<span id="cb32-42"><a href="#cb32-42" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<table class="caption-top table table-sm table-striped small">
+<caption>Libros extraídos de una página (Datos crudos)</caption>
+<colgroup>
+<col style="width: 37%">
+<col style="width: 5%">
+<col style="width: 5%">
+<col style="width: 7%">
+<col style="width: 43%">
+</colgroup>
+<thead>
+<tr class="header">
+<th style="text-align: left;">Título</th>
+<th style="text-align: left;">Precio (Texto)</th>
+<th style="text-align: left;">Disponibilidad</th>
+<th style="text-align: left;">Rating (Raw)</th>
+<th style="text-align: left;">Enlace Relativo</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">A Light in the Attic</td>
+<td style="text-align: left;">£51.77</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">star-rating Three</td>
+<td style="text-align: left;">a-light-in-the-attic_1000/index.html</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Tipping the Velvet</td>
+<td style="text-align: left;">£53.74</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">star-rating One</td>
+<td style="text-align: left;">tipping-the-velvet_999/index.html</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Soumission</td>
+<td style="text-align: left;">£50.10</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">star-rating One</td>
+<td style="text-align: left;">soumission_998/index.html</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Sharp Objects</td>
+<td style="text-align: left;">£47.82</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">star-rating Four</td>
+<td style="text-align: left;">sharp-objects_997/index.html</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Sapiens: A Brief History of Humankind</td>
+<td style="text-align: left;">£54.23</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">star-rating Five</td>
+<td style="text-align: left;">sapiens-a-brief-history-of-humankind_996/index.html</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">The Requiem Red</td>
+<td style="text-align: left;">£22.65</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">star-rating One</td>
+<td style="text-align: left;">the-requiem-red_995/index.html</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">The Dirty Little Secrets of Getting Your Dream Job</td>
+<td style="text-align: left;">£33.34</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">star-rating Four</td>
+<td style="text-align: left;">the-dirty-little-secrets-of-getting-your-dream-job_994/index.html</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">The Coming Woman: A Novel Based on the Life of the Infamous Feminist, Victoria Woodhull</td>
+<td style="text-align: left;">£17.93</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">star-rating Three</td>
+<td style="text-align: left;">the-coming-woman-a-novel-based-on-the-life-of-the-infamous-feminist-victoria-woodhull_993/index.html</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">The Boys in the Boat: Nine Americans and Their Epic Quest for Gold at the 1936 Berlin Olympics</td>
+<td style="text-align: left;">£22.60</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">star-rating Four</td>
+<td style="text-align: left;">the-boys-in-the-boat-nine-americans-and-their-epic-quest-for-gold-at-the-1936-berlin-olympics_992/index.html</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">The Black Maria</td>
+<td style="text-align: left;">£52.15</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">star-rating One</td>
+<td style="text-align: left;">the-black-maria_991/index.html</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</section>
+<section id="limpieza-del-catálogo" class="level1">
+<h1>9. Limpieza del catálogo</h1>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb33"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Definimos una función para limpiar la clase CSS del rating</span></span>
+<span id="cb33-2"><a href="#cb33-2" aria-hidden="true" tabindex="-1"></a>limpiar_rating <span class="ot">&lt;-</span> <span class="cf">function</span>(x) {</span>
+<span id="cb33-3"><a href="#cb33-3" aria-hidden="true" tabindex="-1"></a>     <span class="co"># Quitamos el prefijo "star-rating" y dejamos solo la categoría</span></span>
+<span id="cb33-4"><a href="#cb33-4" aria-hidden="true" tabindex="-1"></a>     x <span class="sc">%&gt;%</span></span>
+<span id="cb33-5"><a href="#cb33-5" aria-hidden="true" tabindex="-1"></a>     <span class="fu">str_remove</span>(<span class="st">"star-rating</span><span class="sc">\\</span><span class="st">s+"</span>)</span>
+<span id="cb33-6"><a href="#cb33-6" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb33-7"><a href="#cb33-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb33-8"><a href="#cb33-8" aria-hidden="true" tabindex="-1"></a><span class="co"># Transformamos las variables extraídas a un formato más útil para análisis</span></span>
+<span id="cb33-9"><a href="#cb33-9" aria-hidden="true" tabindex="-1"></a>libros_pagina_1_limpia <span class="ot">&lt;-</span> libros_pagina_1 <span class="sc">%&gt;%</span></span>
+<span id="cb33-10"><a href="#cb33-10" aria-hidden="true" tabindex="-1"></a>                          <span class="fu">mutate</span>(</span>
+<span id="cb33-11"><a href="#cb33-11" aria-hidden="true" tabindex="-1"></a>                            <span class="co"># Convertimos el precio de texto a número</span></span>
+<span id="cb33-12"><a href="#cb33-12" aria-hidden="true" tabindex="-1"></a>                                <span class="at">precio =</span> precio_texto <span class="sc">%&gt;%</span></span>
+<span id="cb33-13"><a href="#cb33-13" aria-hidden="true" tabindex="-1"></a>                                  <span class="fu">str_replace_all</span>(<span class="st">"[^0-9</span><span class="sc">\\</span><span class="st">.]"</span>, <span class="st">""</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb33-14"><a href="#cb33-14" aria-hidden="true" tabindex="-1"></a>                                  <span class="fu">as.numeric</span>(),</span>
+<span id="cb33-15"><a href="#cb33-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb33-16"><a href="#cb33-16" aria-hidden="true" tabindex="-1"></a>                            <span class="co"># Limpiamos la clase del rating para dejar solo su valor</span></span>
+<span id="cb33-17"><a href="#cb33-17" aria-hidden="true" tabindex="-1"></a>                            <span class="at">rating =</span> <span class="fu">limpiar_rating</span>(rating_raw),</span>
+<span id="cb33-18"><a href="#cb33-18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb33-19"><a href="#cb33-19" aria-hidden="true" tabindex="-1"></a>                            <span class="co"># Creamos una variable lógica que indica si el libro está disponible</span></span>
+<span id="cb33-20"><a href="#cb33-20" aria-hidden="true" tabindex="-1"></a>                            <span class="at">disponible =</span> <span class="fu">str_detect</span>(<span class="fu">str_to_lower</span>(disponibilidad), <span class="st">"in stock"</span>),</span>
+<span id="cb33-21"><a href="#cb33-21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb33-22"><a href="#cb33-22" aria-hidden="true" tabindex="-1"></a>                            <span class="co"># Construimos el enlace completo hacia el detalle del libro</span></span>
+<span id="cb33-23"><a href="#cb33-23" aria-hidden="true" tabindex="-1"></a>                            <span class="at">enlace =</span> <span class="fu">paste0</span>(<span class="st">"https://books.toscrape.com/catalogue/"</span>, enlace_relativo)) <span class="sc">%&gt;%</span></span>
+<span id="cb33-24"><a href="#cb33-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb33-25"><a href="#cb33-25" aria-hidden="true" tabindex="-1"></a>                          <span class="co"># Seleccionamos las variables finales que queremos conservar</span></span>
+<span id="cb33-26"><a href="#cb33-26" aria-hidden="true" tabindex="-1"></a>                          <span class="fu">select</span>(titulo, precio, disponibilidad, disponible, rating, enlace)</span>
+<span id="cb33-27"><a href="#cb33-27" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb33-28"><a href="#cb33-28" aria-hidden="true" tabindex="-1"></a><span class="co"># Mostramos la tabla con las variables ya transformadas</span></span>
+<span id="cb33-29"><a href="#cb33-29" aria-hidden="true" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(</span>
+<span id="cb33-30"><a href="#cb33-30" aria-hidden="true" tabindex="-1"></a><span class="fu">head</span>(libros_pagina_1_limpia, <span class="dv">10</span>),</span>
+<span id="cb33-31"><a href="#cb33-31" aria-hidden="true" tabindex="-1"></a><span class="at">caption =</span> <span class="st">"Libros con variables transformadas (Datos limpios)"</span>,</span>
+<span id="cb33-32"><a href="#cb33-32" aria-hidden="true" tabindex="-1"></a><span class="at">col.names =</span> <span class="fu">c</span>(<span class="st">"Título"</span>, <span class="st">"Precio (£)"</span>, <span class="st">"Disponibilidad (Texto)"</span>, <span class="st">"Disponible (Lógico)"</span>, <span class="st">"Rating"</span>, <span class="st">"Enlace Completo"</span>)</span>
+<span id="cb33-33"><a href="#cb33-33" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<table class="caption-top table table-sm table-striped small">
+<caption>Libros con variables transformadas (Datos limpios)</caption>
+<colgroup>
+<col style="width: 31%">
+<col style="width: 3%">
+<col style="width: 7%">
+<col style="width: 6%">
+<col style="width: 2%">
+<col style="width: 48%">
+</colgroup>
+<thead>
+<tr class="header">
+<th style="text-align: left;">Título</th>
+<th style="text-align: right;">Precio (£)</th>
+<th style="text-align: left;">Disponibilidad (Texto)</th>
+<th style="text-align: left;">Disponible (Lógico)</th>
+<th style="text-align: left;">Rating</th>
+<th style="text-align: left;">Enlace Completo</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">A Light in the Attic</td>
+<td style="text-align: right;">51.77</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">TRUE</td>
+<td style="text-align: left;">Three</td>
+<td style="text-align: left;">https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Tipping the Velvet</td>
+<td style="text-align: right;">53.74</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">TRUE</td>
+<td style="text-align: left;">One</td>
+<td style="text-align: left;">https://books.toscrape.com/catalogue/tipping-the-velvet_999/index.html</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Soumission</td>
+<td style="text-align: right;">50.10</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">TRUE</td>
+<td style="text-align: left;">One</td>
+<td style="text-align: left;">https://books.toscrape.com/catalogue/soumission_998/index.html</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Sharp Objects</td>
+<td style="text-align: right;">47.82</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">TRUE</td>
+<td style="text-align: left;">Four</td>
+<td style="text-align: left;">https://books.toscrape.com/catalogue/sharp-objects_997/index.html</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Sapiens: A Brief History of Humankind</td>
+<td style="text-align: right;">54.23</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">TRUE</td>
+<td style="text-align: left;">Five</td>
+<td style="text-align: left;">https://books.toscrape.com/catalogue/sapiens-a-brief-history-of-humankind_996/index.html</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">The Requiem Red</td>
+<td style="text-align: right;">22.65</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">TRUE</td>
+<td style="text-align: left;">One</td>
+<td style="text-align: left;">https://books.toscrape.com/catalogue/the-requiem-red_995/index.html</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">The Dirty Little Secrets of Getting Your Dream Job</td>
+<td style="text-align: right;">33.34</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">TRUE</td>
+<td style="text-align: left;">Four</td>
+<td style="text-align: left;">https://books.toscrape.com/catalogue/the-dirty-little-secrets-of-getting-your-dream-job_994/index.html</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">The Coming Woman: A Novel Based on the Life of the Infamous Feminist, Victoria Woodhull</td>
+<td style="text-align: right;">17.93</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">TRUE</td>
+<td style="text-align: left;">Three</td>
+<td style="text-align: left;">https://books.toscrape.com/catalogue/the-coming-woman-a-novel-based-on-the-life-of-the-infamous-feminist-victoria-woodhull_993/index.html</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">The Boys in the Boat: Nine Americans and Their Epic Quest for Gold at the 1936 Berlin Olympics</td>
+<td style="text-align: right;">22.60</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">TRUE</td>
+<td style="text-align: left;">Four</td>
+<td style="text-align: left;">https://books.toscrape.com/catalogue/the-boys-in-the-boat-nine-americans-and-their-epic-quest-for-gold-at-the-1936-berlin-olympics_992/index.html</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">The Black Maria</td>
+<td style="text-align: right;">52.15</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">TRUE</td>
+<td style="text-align: left;">One</td>
+<td style="text-align: left;">https://books.toscrape.com/catalogue/the-black-maria_991/index.html</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</section>
+<section id="scrapear-varias-páginas-del-catálogo" class="level1">
+<h1>10. Scrapear varias páginas del catálogo</h1>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb34"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb34-1"><a href="#cb34-1" aria-hidden="true" tabindex="-1"></a>urls_books <span class="ot">&lt;-</span> <span class="fu">paste0</span>(</span>
+<span id="cb34-2"><a href="#cb34-2" aria-hidden="true" tabindex="-1"></a>  <span class="st">"https://books.toscrape.com/catalogue/page-"</span>,</span>
+<span id="cb34-3"><a href="#cb34-3" aria-hidden="true" tabindex="-1"></a>  <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>,</span>
+<span id="cb34-4"><a href="#cb34-4" aria-hidden="true" tabindex="-1"></a>  <span class="st">".html"</span></span>
+<span id="cb34-5"><a href="#cb34-5" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb34-6"><a href="#cb34-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb34-7"><a href="#cb34-7" aria-hidden="true" tabindex="-1"></a>urls_books</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "https://books.toscrape.com/catalogue/page-1.html"
+[2] "https://books.toscrape.com/catalogue/page-2.html"
+[3] "https://books.toscrape.com/catalogue/page-3.html"</code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb36"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb36-1"><a href="#cb36-1" aria-hidden="true" tabindex="-1"></a>scrapear_libros <span class="ot">&lt;-</span> <span class="cf">function</span>(url) {</span>
+<span id="cb36-2"><a href="#cb36-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb36-3"><a href="#cb36-3" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Leemos el HTML de la página indicada</span></span>
+<span id="cb36-4"><a href="#cb36-4" aria-hidden="true" tabindex="-1"></a>  pagina <span class="ot">&lt;-</span> <span class="fu">read_html</span>(url)</span>
+<span id="cb36-5"><a href="#cb36-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb36-6"><a href="#cb36-6" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Seleccionamos todos los bloques que representan libros</span></span>
+<span id="cb36-7"><a href="#cb36-7" aria-hidden="true" tabindex="-1"></a>  nodos  <span class="ot">&lt;-</span> pagina <span class="sc">%&gt;%</span></span>
+<span id="cb36-8"><a href="#cb36-8" aria-hidden="true" tabindex="-1"></a>            <span class="fu">html_elements</span>(<span class="st">"article.product_pod"</span>)</span>
+<span id="cb36-9"><a href="#cb36-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb36-10"><a href="#cb36-10" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (<span class="fu">length</span>(nodos) <span class="sc">==</span> <span class="dv">0</span>) {</span>
+<span id="cb36-11"><a href="#cb36-11" aria-hidden="true" tabindex="-1"></a>    <span class="fu">stop</span>(<span class="st">"No se encontraron libros en: "</span>, url)</span>
+<span id="cb36-12"><a href="#cb36-12" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb36-13"><a href="#cb36-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb36-14"><a href="#cb36-14" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Recorremos cada bloque y unimos los resultados en una sola tabla</span></span>
+<span id="cb36-15"><a href="#cb36-15" aria-hidden="true" tabindex="-1"></a>  <span class="fu">map_dfr</span>(nodos, <span class="cf">function</span>(nodo) {</span>
+<span id="cb36-16"><a href="#cb36-16" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Extraemos el título del libro desde el atributo title</span></span>
+<span id="cb36-17"><a href="#cb36-17" aria-hidden="true" tabindex="-1"></a>    titulo <span class="ot">&lt;-</span> nodo <span class="sc">%&gt;%</span></span>
+<span id="cb36-18"><a href="#cb36-18" aria-hidden="true" tabindex="-1"></a>              <span class="fu">html_element</span>(<span class="st">"h3 a"</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb36-19"><a href="#cb36-19" aria-hidden="true" tabindex="-1"></a>              <span class="fu">html_attr</span>(<span class="st">"title"</span>)</span>
+<span id="cb36-20"><a href="#cb36-20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb36-21"><a href="#cb36-21" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Extraemos el precio tal como aparece en la página</span></span>
+<span id="cb36-22"><a href="#cb36-22" aria-hidden="true" tabindex="-1"></a>    precio <span class="ot">&lt;-</span> nodo <span class="sc">%&gt;%</span></span>
+<span id="cb36-23"><a href="#cb36-23" aria-hidden="true" tabindex="-1"></a>              <span class="fu">html_element</span>(<span class="st">".price_color"</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb36-24"><a href="#cb36-24" aria-hidden="true" tabindex="-1"></a>              <span class="fu">html_text2</span>()</span>
+<span id="cb36-25"><a href="#cb36-25" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb36-26"><a href="#cb36-26" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Extraemos el texto de disponibilidad</span></span>
+<span id="cb36-27"><a href="#cb36-27" aria-hidden="true" tabindex="-1"></a>    disponibilidad <span class="ot">&lt;-</span> nodo <span class="sc">%&gt;%</span></span>
+<span id="cb36-28"><a href="#cb36-28" aria-hidden="true" tabindex="-1"></a>                      <span class="fu">html_element</span>(<span class="st">".availability"</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb36-29"><a href="#cb36-29" aria-hidden="true" tabindex="-1"></a>                      <span class="fu">html_text2</span>()</span>
+<span id="cb36-30"><a href="#cb36-30" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Extraemos la clase CSS que contiene la información del rating</span></span>
+<span id="cb36-31"><a href="#cb36-31" aria-hidden="true" tabindex="-1"></a>    rating_raw <span class="ot">&lt;-</span> nodo <span class="sc">%&gt;%</span></span>
+<span id="cb36-32"><a href="#cb36-32" aria-hidden="true" tabindex="-1"></a>                  <span class="fu">html_element</span>(<span class="st">"p.star-rating"</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb36-33"><a href="#cb36-33" aria-hidden="true" tabindex="-1"></a>                  <span class="fu">html_attr</span>(<span class="st">"class"</span>)</span>
+<span id="cb36-34"><a href="#cb36-34" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb36-35"><a href="#cb36-35" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Extraemos el enlace relativo hacia la página de detalle</span></span>
+<span id="cb36-36"><a href="#cb36-36" aria-hidden="true" tabindex="-1"></a>    enlace_relativo <span class="ot">&lt;-</span> nodo <span class="sc">%&gt;%</span></span>
+<span id="cb36-37"><a href="#cb36-37" aria-hidden="true" tabindex="-1"></a>                       <span class="fu">html_element</span>(<span class="st">"h3 a"</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb36-38"><a href="#cb36-38" aria-hidden="true" tabindex="-1"></a>                       <span class="fu">html_attr</span>(<span class="st">"href"</span>)</span>
+<span id="cb36-39"><a href="#cb36-39" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb36-40"><a href="#cb36-40" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Construimos una fila con los datos limpios y listos para analizar</span></span>
+<span id="cb36-41"><a href="#cb36-41" aria-hidden="true" tabindex="-1"></a>    <span class="fu">tibble</span>(</span>
+<span id="cb36-42"><a href="#cb36-42" aria-hidden="true" tabindex="-1"></a>      <span class="at">url_origen     =</span> url,</span>
+<span id="cb36-43"><a href="#cb36-43" aria-hidden="true" tabindex="-1"></a>      <span class="at">titulo         =</span> titulo,</span>
+<span id="cb36-44"><a href="#cb36-44" aria-hidden="true" tabindex="-1"></a>      <span class="at">precio         =</span> precio <span class="sc">%&gt;%</span> <span class="fu">str_replace_all</span>(<span class="st">"[^0-9</span><span class="sc">\\</span><span class="st">.]"</span>, <span class="st">""</span>) <span class="sc">%&gt;%</span> <span class="fu">as.numeric</span>(),</span>
+<span id="cb36-45"><a href="#cb36-45" aria-hidden="true" tabindex="-1"></a>      <span class="at">disponibilidad =</span> <span class="fu">str_squish</span>(disponibilidad),</span>
+<span id="cb36-46"><a href="#cb36-46" aria-hidden="true" tabindex="-1"></a>      <span class="at">rating         =</span> rating_raw <span class="sc">%&gt;%</span> <span class="fu">str_remove</span>(<span class="st">"star-rating</span><span class="sc">\\</span><span class="st">s+"</span>),</span>
+<span id="cb36-47"><a href="#cb36-47" aria-hidden="true" tabindex="-1"></a>      <span class="at">enlace         =</span> <span class="fu">paste0</span>(<span class="st">"https://books.toscrape.com/catalogue/"</span>, enlace_relativo)</span>
+<span id="cb36-48"><a href="#cb36-48" aria-hidden="true" tabindex="-1"></a>    )</span>
+<span id="cb36-49"><a href="#cb36-49" aria-hidden="true" tabindex="-1"></a>  })</span>
+<span id="cb36-50"><a href="#cb36-50" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb37"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb37-1"><a href="#cb37-1" aria-hidden="true" tabindex="-1"></a>libros_varias_paginas <span class="ot">&lt;-</span> <span class="fu">map_dfr</span>(urls_books, scrapear_libros)</span>
+<span id="cb37-2"><a href="#cb37-2" aria-hidden="true" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(</span>
+<span id="cb37-3"><a href="#cb37-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">head</span>(libros_varias_paginas, <span class="dv">10</span>), </span>
+<span id="cb37-4"><a href="#cb37-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">caption =</span> <span class="st">"Libros combinados de varias páginas"</span>,</span>
+<span id="cb37-5"><a href="#cb37-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">col.names =</span> <span class="fu">c</span>(<span class="st">"URL Origen"</span>, <span class="st">"Título"</span>, <span class="st">"Precio (£)"</span>, <span class="st">"Disponibilidad"</span>, <span class="st">"Rating"</span>, <span class="st">"Enlace"</span>)</span>
+<span id="cb37-6"><a href="#cb37-6" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<table class="caption-top table table-sm table-striped small">
+<caption>Libros combinados de varias páginas</caption>
+<colgroup>
+<col style="width: 15%">
+<col style="width: 29%">
+<col style="width: 3%">
+<col style="width: 4%">
+<col style="width: 2%">
+<col style="width: 45%">
+</colgroup>
+<thead>
+<tr class="header">
+<th style="text-align: left;">URL Origen</th>
+<th style="text-align: left;">Título</th>
+<th style="text-align: right;">Precio (£)</th>
+<th style="text-align: left;">Disponibilidad</th>
+<th style="text-align: left;">Rating</th>
+<th style="text-align: left;">Enlace</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">https://books.toscrape.com/catalogue/page-1.html</td>
+<td style="text-align: left;">A Light in the Attic</td>
+<td style="text-align: right;">51.77</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">Three</td>
+<td style="text-align: left;">https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">https://books.toscrape.com/catalogue/page-1.html</td>
+<td style="text-align: left;">Tipping the Velvet</td>
+<td style="text-align: right;">53.74</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">One</td>
+<td style="text-align: left;">https://books.toscrape.com/catalogue/tipping-the-velvet_999/index.html</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">https://books.toscrape.com/catalogue/page-1.html</td>
+<td style="text-align: left;">Soumission</td>
+<td style="text-align: right;">50.10</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">One</td>
+<td style="text-align: left;">https://books.toscrape.com/catalogue/soumission_998/index.html</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">https://books.toscrape.com/catalogue/page-1.html</td>
+<td style="text-align: left;">Sharp Objects</td>
+<td style="text-align: right;">47.82</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">Four</td>
+<td style="text-align: left;">https://books.toscrape.com/catalogue/sharp-objects_997/index.html</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">https://books.toscrape.com/catalogue/page-1.html</td>
+<td style="text-align: left;">Sapiens: A Brief History of Humankind</td>
+<td style="text-align: right;">54.23</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">Five</td>
+<td style="text-align: left;">https://books.toscrape.com/catalogue/sapiens-a-brief-history-of-humankind_996/index.html</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">https://books.toscrape.com/catalogue/page-1.html</td>
+<td style="text-align: left;">The Requiem Red</td>
+<td style="text-align: right;">22.65</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">One</td>
+<td style="text-align: left;">https://books.toscrape.com/catalogue/the-requiem-red_995/index.html</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">https://books.toscrape.com/catalogue/page-1.html</td>
+<td style="text-align: left;">The Dirty Little Secrets of Getting Your Dream Job</td>
+<td style="text-align: right;">33.34</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">Four</td>
+<td style="text-align: left;">https://books.toscrape.com/catalogue/the-dirty-little-secrets-of-getting-your-dream-job_994/index.html</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">https://books.toscrape.com/catalogue/page-1.html</td>
+<td style="text-align: left;">The Coming Woman: A Novel Based on the Life of the Infamous Feminist, Victoria Woodhull</td>
+<td style="text-align: right;">17.93</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">Three</td>
+<td style="text-align: left;">https://books.toscrape.com/catalogue/the-coming-woman-a-novel-based-on-the-life-of-the-infamous-feminist-victoria-woodhull_993/index.html</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">https://books.toscrape.com/catalogue/page-1.html</td>
+<td style="text-align: left;">The Boys in the Boat: Nine Americans and Their Epic Quest for Gold at the 1936 Berlin Olympics</td>
+<td style="text-align: right;">22.60</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">Four</td>
+<td style="text-align: left;">https://books.toscrape.com/catalogue/the-boys-in-the-boat-nine-americans-and-their-epic-quest-for-gold-at-the-1936-berlin-olympics_992/index.html</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">https://books.toscrape.com/catalogue/page-1.html</td>
+<td style="text-align: left;">The Black Maria</td>
+<td style="text-align: right;">52.15</td>
+<td style="text-align: left;">In stock</td>
+<td style="text-align: left;">One</td>
+<td style="text-align: left;">https://books.toscrape.com/catalogue/the-black-maria_991/index.html</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb38"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb38-1"><a href="#cb38-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Cuántos libros hay en cada categoría</span></span>
+<span id="cb38-2"><a href="#cb38-2" aria-hidden="true" tabindex="-1"></a>libros_varias_paginas <span class="sc">%&gt;%</span></span>
+<span id="cb38-3"><a href="#cb38-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">count</span>(rating, <span class="at">sort =</span> <span class="cn">TRUE</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb38-4"><a href="#cb38-4" aria-hidden="true" tabindex="-1"></a>  knitr<span class="sc">::</span><span class="fu">kable</span>(</span>
+<span id="cb38-5"><a href="#cb38-5" aria-hidden="true" tabindex="-1"></a>    <span class="at">caption =</span> <span class="st">"Conteo de libros por rating"</span>,</span>
+<span id="cb38-6"><a href="#cb38-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">col.names =</span> <span class="fu">c</span>(<span class="st">"Rating"</span>, <span class="st">"Cantidad de libros"</span>)</span>
+<span id="cb38-7"><a href="#cb38-7" aria-hidden="true" tabindex="-1"></a>  )</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<table class="caption-top table table-sm table-striped small">
+<caption>Conteo de libros por rating</caption>
+<thead>
+<tr class="header">
+<th style="text-align: left;">Rating</th>
+<th style="text-align: right;">Cantidad de libros</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">One</td>
+<td style="text-align: right;">15</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Five</td>
+<td style="text-align: right;">14</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Three</td>
+<td style="text-align: right;">13</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Four</td>
+<td style="text-align: right;">10</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Two</td>
+<td style="text-align: right;">8</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb39"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb39-1"><a href="#cb39-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Resumen de precios</span></span>
+<span id="cb39-2"><a href="#cb39-2" aria-hidden="true" tabindex="-1"></a>libros_varias_paginas <span class="sc">%&gt;%</span></span>
+<span id="cb39-3"><a href="#cb39-3" aria-hidden="true" tabindex="-1"></a><span class="fu">summarise</span>(</span>
+<span id="cb39-4"><a href="#cb39-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_libros        =</span> <span class="fu">n</span>(),</span>
+<span id="cb39-5"><a href="#cb39-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">precio_promedio =</span> <span class="fu">mean</span>(precio, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb39-6"><a href="#cb39-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">precio_min      =</span> <span class="fu">min</span>(precio, <span class="at">na.rm =</span> <span class="cn">TRUE</span>),</span>
+<span id="cb39-7"><a href="#cb39-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">precio_max      =</span> <span class="fu">max</span>(precio, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb39-8"><a href="#cb39-8" aria-hidden="true" tabindex="-1"></a>) <span class="sc">%&gt;%</span></span>
+<span id="cb39-9"><a href="#cb39-9" aria-hidden="true" tabindex="-1"></a>  knitr<span class="sc">::</span><span class="fu">kable</span>(</span>
+<span id="cb39-10"><a href="#cb39-10" aria-hidden="true" tabindex="-1"></a>    <span class="at">caption =</span> <span class="st">"Resumen estadístico de precios"</span>,</span>
+<span id="cb39-11"><a href="#cb39-11" aria-hidden="true" tabindex="-1"></a>    <span class="at">col.names =</span> <span class="fu">c</span>(<span class="st">"Total de libros"</span>, <span class="st">"Precio promedio (£)"</span>, <span class="st">"Precio mínimo (£)"</span>, <span class="st">"Precio máximo (£)"</span>)</span>
+<span id="cb39-12"><a href="#cb39-12" aria-hidden="true" tabindex="-1"></a>  )</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<table class="caption-top table table-sm table-striped small">
+<caption>Resumen estadístico de precios</caption>
+<colgroup>
+<col style="width: 22%">
+<col style="width: 27%">
+<col style="width: 25%">
+<col style="width: 25%">
+</colgroup>
+<thead>
+<tr class="header">
+<th style="text-align: right;">Total de libros</th>
+<th style="text-align: right;">Precio promedio (£)</th>
+<th style="text-align: right;">Precio mínimo (£)</th>
+<th style="text-align: right;">Precio máximo (£)</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: right;">60</td>
+<td style="text-align: right;">35.00267</td>
+<td style="text-align: right;">12.84</td>
+<td style="text-align: right;">57.31</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</section>
+<section id="extraer-tablas-html-directamente" class="level1">
+<h1>11. Extraer tablas HTML directamente</h1>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb40"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb40-1"><a href="#cb40-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Definimos la URL de una página que contiene tablas HTML</span></span>
+<span id="cb40-2"><a href="#cb40-2" aria-hidden="true" tabindex="-1"></a>url_tabla <span class="ot">&lt;-</span> <span class="st">"https://www.w3schools.com/html/html_tables.asp"</span></span>
+<span id="cb40-3"><a href="#cb40-3" aria-hidden="true" tabindex="-1"></a><span class="co"># Leemos el HTML de la página</span></span>
+<span id="cb40-4"><a href="#cb40-4" aria-hidden="true" tabindex="-1"></a>pagina_tabla <span class="ot">&lt;-</span> <span class="fu">read_html</span>(url_tabla)</span>
+<span id="cb40-5"><a href="#cb40-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb40-6"><a href="#cb40-6" aria-hidden="true" tabindex="-1"></a><span class="co"># Extraemos todas las tablas HTML y las convertimos en data frames</span></span>
+<span id="cb40-7"><a href="#cb40-7" aria-hidden="true" tabindex="-1"></a>tablas <span class="ot">&lt;-</span> pagina_tabla <span class="sc">%&gt;%</span></span>
+<span id="cb40-8"><a href="#cb40-8" aria-hidden="true" tabindex="-1"></a>          <span class="fu">html_table</span>(<span class="at">fill =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb40-9"><a href="#cb40-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb40-10"><a href="#cb40-10" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (<span class="fu">length</span>(tablas) <span class="sc">==</span> <span class="dv">0</span>) {</span>
+<span id="cb40-11"><a href="#cb40-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">stop</span>(<span class="st">"No se encontraron tablas en: "</span>, url_tabla)</span>
+<span id="cb40-12"><a href="#cb40-12" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb40-13"><a href="#cb40-13" aria-hidden="true" tabindex="-1"></a><span class="co"># Contamos cuántas tablas fueron encontradas en la página</span></span>
+<span id="cb40-14"><a href="#cb40-14" aria-hidden="true" tabindex="-1"></a><span class="fu">length</span>(tablas)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 2</code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb42"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb42-1"><a href="#cb42-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Tomamos la primera tabla extraída y limpiamos sus nombres de columnas</span></span>
+<span id="cb42-2"><a href="#cb42-2" aria-hidden="true" tabindex="-1"></a>tabla_ejemplo <span class="ot">&lt;-</span> tablas[[<span class="dv">1</span>]] <span class="sc">%&gt;%</span></span>
+<span id="cb42-3"><a href="#cb42-3" aria-hidden="true" tabindex="-1"></a>                 janitor<span class="sc">::</span><span class="fu">clean_names</span>()</span>
+<span id="cb42-4"><a href="#cb42-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb42-5"><a href="#cb42-5" aria-hidden="true" tabindex="-1"></a><span class="co"># Mostramos la tabla con formato amigable para el reporte</span></span>
+<span id="cb42-6"><a href="#cb42-6" aria-hidden="true" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(</span>
+<span id="cb42-7"><a href="#cb42-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">head</span>(tabla_ejemplo, <span class="dv">10</span>), </span>
+<span id="cb42-8"><a href="#cb42-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">caption =</span> <span class="st">"Ejemplo de tabla HTML extraída directamente"</span>,</span>
+<span id="cb42-9"><a href="#cb42-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">col.names =</span> <span class="fu">c</span>(<span class="st">"Compañía"</span>, <span class="st">"Contacto"</span>, <span class="st">"País"</span>) <span class="co"># Nombres de columna claros y profesionales</span></span>
+<span id="cb42-10"><a href="#cb42-10" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<table class="caption-top table table-sm table-striped small">
+<caption>Ejemplo de tabla HTML extraída directamente</caption>
+<thead>
+<tr class="header">
+<th style="text-align: left;">Compañía</th>
+<th style="text-align: left;">Contacto</th>
+<th style="text-align: left;">País</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">Alfreds Futterkiste</td>
+<td style="text-align: left;">Maria Anders</td>
+<td style="text-align: left;">Germany</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Centro comercial Moctezuma</td>
+<td style="text-align: left;">Francisco Chang</td>
+<td style="text-align: left;">Mexico</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Ernst Handel</td>
+<td style="text-align: left;">Roland Mendel</td>
+<td style="text-align: left;">Austria</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Island Trading</td>
+<td style="text-align: left;">Helen Bennett</td>
+<td style="text-align: left;">UK</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">Laughing Bacchus Winecellars</td>
+<td style="text-align: left;">Yoshi Tannamuri</td>
+<td style="text-align: left;">Canada</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">Magazzini Alimentari Riuniti</td>
+<td style="text-align: left;">Giovanni Rovelli</td>
+<td style="text-align: left;">Italy</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</section>
+<section id="buenas-prácticas-en-scraping-con-r" class="level1">
+<h1>12. Buenas prácticas en scraping con R</h1>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb43"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb43-1"><a href="#cb43-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Calculamos un resumen rápido para validar la calidad del scraping</span></span>
+<span id="cb43-2"><a href="#cb43-2" aria-hidden="true" tabindex="-1"></a>libros_varias_paginas <span class="sc">%&gt;%</span></span>
+<span id="cb43-3"><a href="#cb43-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarise</span>(</span>
+<span id="cb43-4"><a href="#cb43-4" aria-hidden="true" tabindex="-1"></a>    <span class="at">filas             =</span> <span class="fu">n</span>(),</span>
+<span id="cb43-5"><a href="#cb43-5" aria-hidden="true" tabindex="-1"></a>    <span class="at">titulos_unicos    =</span> <span class="fu">n_distinct</span>(titulo),</span>
+<span id="cb43-6"><a href="#cb43-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">faltantes_precio  =</span> <span class="fu">sum</span>(<span class="fu">is.na</span>(precio)),</span>
+<span id="cb43-7"><a href="#cb43-7" aria-hidden="true" tabindex="-1"></a>    <span class="at">duplicados_titulo =</span> <span class="fu">sum</span>(<span class="fu">duplicated</span>(titulo))</span>
+<span id="cb43-8"><a href="#cb43-8" aria-hidden="true" tabindex="-1"></a>  )</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 1 × 4
+  filas titulos_unicos faltantes_precio duplicados_titulo
+  &lt;int&gt;          &lt;int&gt;            &lt;int&gt;             &lt;int&gt;
+1    60             60                0                 0</code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb45"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb45-1"><a href="#cb45-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Recorremos cada URL del catálogo</span></span>
+<span id="cb45-2"><a href="#cb45-2" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> (u <span class="cf">in</span> urls_books) {</span>
+<span id="cb45-3"><a href="#cb45-3" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Hacemos una pausa de 1 segundo entre peticiones</span></span>
+<span id="cb45-4"><a href="#cb45-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">Sys.sleep</span>(<span class="dv">1</span>)</span>
+<span id="cb45-5"><a href="#cb45-5" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Mostramos en consola la URL que se está procesando</span></span>
+<span id="cb45-6"><a href="#cb45-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">print</span>(u)</span>
+<span id="cb45-7"><a href="#cb45-7" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Aquí iría la lectura de la página</span></span>
+<span id="cb45-8"><a href="#cb45-8" aria-hidden="true" tabindex="-1"></a>  <span class="co"># read_html(u)</span></span>
+<span id="cb45-9"><a href="#cb45-9" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "https://books.toscrape.com/catalogue/page-1.html"
+[1] "https://books.toscrape.com/catalogue/page-2.html"
+[1] "https://books.toscrape.com/catalogue/page-3.html"</code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb47"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb47-1"><a href="#cb47-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Guardamos las citas extraídas en un archivo CSV</span></span>
+<span id="cb47-2"><a href="#cb47-2" aria-hidden="true" tabindex="-1"></a><span class="fu">write_csv</span>(quotes_tres_paginas, <span class="st">"quotes_tres_paginas.csv"</span>)</span>
+<span id="cb47-3"><a href="#cb47-3" aria-hidden="true" tabindex="-1"></a><span class="co"># Guardamos los libros extraídos en otro archivo CSV</span></span>
+<span id="cb47-4"><a href="#cb47-4" aria-hidden="true" tabindex="-1"></a><span class="fu">write_csv</span>(libros_varias_paginas, <span class="st">"libros_varias_paginas.csv"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb48"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb48-1"><a href="#cb48-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Capturamos tanto el resultado como el error para poder diagnosticarlo</span></span>
+<span id="cb48-2"><a href="#cb48-2" aria-hidden="true" tabindex="-1"></a>scrapear_libros_seguro <span class="ot">&lt;-</span> purrr<span class="sc">::</span><span class="fu">safely</span>(scrapear_libros)</span>
+<span id="cb48-3"><a href="#cb48-3" aria-hidden="true" tabindex="-1"></a>respuestas <span class="ot">&lt;-</span> <span class="fu">map</span>(urls_books, scrapear_libros_seguro)</span>
+<span id="cb48-4"><a href="#cb48-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb48-5"><a href="#cb48-5" aria-hidden="true" tabindex="-1"></a><span class="co"># Unimos las respuestas exitosas</span></span>
+<span id="cb48-6"><a href="#cb48-6" aria-hidden="true" tabindex="-1"></a>resultado_seguro <span class="ot">&lt;-</span> respuestas <span class="sc">%&gt;%</span></span>
+<span id="cb48-7"><a href="#cb48-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">map</span>(<span class="st">"result"</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb48-8"><a href="#cb48-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">compact</span>() <span class="sc">%&gt;%</span></span>
+<span id="cb48-9"><a href="#cb48-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">list_rbind</span>()</span>
+<span id="cb48-10"><a href="#cb48-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb48-11"><a href="#cb48-11" aria-hidden="true" tabindex="-1"></a><span class="co"># Registramos la URL y el mensaje de cada error</span></span>
+<span id="cb48-12"><a href="#cb48-12" aria-hidden="true" tabindex="-1"></a>errores_scraping <span class="ot">&lt;-</span> <span class="fu">tibble</span>(</span>
+<span id="cb48-13"><a href="#cb48-13" aria-hidden="true" tabindex="-1"></a>  <span class="at">url =</span> urls_books,</span>
+<span id="cb48-14"><a href="#cb48-14" aria-hidden="true" tabindex="-1"></a>  <span class="at">error =</span> <span class="fu">map_chr</span>(</span>
+<span id="cb48-15"><a href="#cb48-15" aria-hidden="true" tabindex="-1"></a>    respuestas,</span>
+<span id="cb48-16"><a href="#cb48-16" aria-hidden="true" tabindex="-1"></a>    <span class="sc">~</span> <span class="cf">if</span> (<span class="fu">is.null</span>(.x<span class="sc">$</span>error)) <span class="cn">NA_character_</span> <span class="cf">else</span> <span class="fu">conditionMessage</span>(.x<span class="sc">$</span>error)</span>
+<span id="cb48-17"><a href="#cb48-17" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb48-18"><a href="#cb48-18" aria-hidden="true" tabindex="-1"></a>) <span class="sc">%&gt;%</span></span>
+<span id="cb48-19"><a href="#cb48-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(<span class="sc">!</span><span class="fu">is.na</span>(error))</span>
+<span id="cb48-20"><a href="#cb48-20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb48-21"><a href="#cb48-21" aria-hidden="true" tabindex="-1"></a>resultado_seguro</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 60 × 6
+   url_origen                         titulo precio disponibilidad rating enlace
+   &lt;chr&gt;                              &lt;chr&gt;   &lt;dbl&gt; &lt;chr&gt;          &lt;chr&gt;  &lt;chr&gt; 
+ 1 https://books.toscrape.com/catalo… A Lig…   51.8 In stock       Three  https…
+ 2 https://books.toscrape.com/catalo… Tippi…   53.7 In stock       One    https…
+ 3 https://books.toscrape.com/catalo… Soumi…   50.1 In stock       One    https…
+ 4 https://books.toscrape.com/catalo… Sharp…   47.8 In stock       Four   https…
+ 5 https://books.toscrape.com/catalo… Sapie…   54.2 In stock       Five   https…
+ 6 https://books.toscrape.com/catalo… The R…   22.6 In stock       One    https…
+ 7 https://books.toscrape.com/catalo… The D…   33.3 In stock       Four   https…
+ 8 https://books.toscrape.com/catalo… The C…   17.9 In stock       Three  https…
+ 9 https://books.toscrape.com/catalo… The B…   22.6 In stock       Four   https…
+10 https://books.toscrape.com/catalo… The B…   52.2 In stock       One    https…
+# ℹ 50 more rows</code></pre>
+</div>
+</div>
+</section>
+<section id="ejercicio-de-clase" class="level1">
+<h1>13. Ejercicio de clase</h1>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp('/' + window.location.host + '/');
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>

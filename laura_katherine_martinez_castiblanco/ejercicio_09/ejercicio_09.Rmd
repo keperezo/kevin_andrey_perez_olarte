@@ -1,0 +1,143 @@
+---
+title: "Clase 12: Inferencia y Estructura en Tablas de Contingencia"
+author: "Laura Katherine Martinez Castiblanco"
+output:
+  html_document:
+    theme: flatly
+    self_contained: true
+    code_folding: hide
+    mathjax: default
+    toc: true
+    toc_float: true
+#runtime: shiny
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+# 1. Carga e instalación estandarizada de paquetes requeridos
+paquetes   <- c("shiny", "bslib", "tidyverse", "DT", "knitr", "kableExtra", "DescTools", "vcd")
+instalados <- rownames(installed.packages())
+pendientes <- setdiff(paquetes, instalados)
+if (length(pendientes) > 0) install.packages(pendientes, repos = "https://cloud.r-project.org")
+
+library(shiny)
+library(bslib)
+library(tidyverse)
+library(DT)
+library(knitr)
+library(kableExtra)
+library(DescTools)
+library(vcd)
+
+# Función auxiliar para renderizado elegante de tablas HTML
+mostrar_tabla <- function(df, caption = "", n = 10) {
+  kable(
+    head(df, n),
+    format = "html",
+    caption = caption,
+    table.attr = 'class="table table-striped table-hover table-bordered table-condensed"'
+  )
+}
+```
+
+##  Generación Reproducible de Datos
+
+Simulación de la tabla de contingencia \(3 \times 3\) para la evaluación docente en modalidades Presencial y Virtual (\(N = 200\) docentes, `set.seed(2026)`).
+
+```{r generacion_datos}
+set.seed(2026)
+niveles <- c("Excelente", "Bueno", "Regular")
+p <- matrix(c(.28, .12, .04,
+              .05, .22, .08,
+              .01, .04, .16), nrow = 3, byrow = TRUE)
+
+conteos <- rmultinom(1, size = 200, prob = p)
+evaluacion <- matrix(conteos, nrow = 3,
+                     dimnames = list(Presencial = niveles, Virtual = niveles))
+
+mostrar_tabla(as.data.frame(addmargins(evaluacion)), caption = "Tabla de Contingencia 3x3: Evaluación Presencial vs Virtual")
+```
+
+---
+
+## Tarea 1: Identificar el esquema de muestreo y la unidad de análisis.
+
+```{r tarea1}
+n_docentes <- sum(evaluacion)
+cat("Número total de docentes (unidades de análisis):", n_docentes, "\n")
+cat("Número total de calificaciones registradas:", n_docentes * 2, "\n")
+```
+
+  
+Los datos responden a un diseño de medidas repetidas (pareado) sobre 200 docentes únicos, donde las respuestas están correlacionadas por pertenecer al mismo individuo evaluado en dos entornos.
+
+---
+
+## Tarea 2: Aplicar la prueba Chi-cuadrado de homogeneidad a la tabla 2×3 (modalidad × calificación) y explicar por qué es incorrecta.
+
+```{r tarea2}
+# Cálculo del Coeficiente Kappa de Cohen
+kappa_obj <- DescTools::CohenKappa(evaluacion, conf.level = 0.95)
+
+df_kappa <- data.frame(
+  Metrica = c("Concordancia Observada (Po)", 
+              "Concordancia Esperada (Pe)", 
+              "Kappa de Cohen (Unweighted)"),
+  Valor = round(c(sum(diag(evaluacion))/sum(evaluacion), 
+                  sum(rowSums(evaluacion)*colSums(evaluacion))/(sum(evaluacion)^2), 
+                  kappa_obj[1]), 4)
+)
+
+mostrar_tabla(df_kappa, caption = "Métricas de Concordancia")
+```
+
+  
+El coeficiente $\kappa = 0.4681$ refleja un acuerdo moderado ($64.5\%$ de concordancia observada frente al $33.3\%$ esperado por azar), mostrando consistencia general pero con discrepancias entre modalidades.
+
+---
+
+## Tarea 3: Probar homogeneidad marginal (Stuart-Maxwell) y simetría (Bowker) en la tabla 3×3.
+
+```{r tarea3}
+# Evaluación de homogeneidad marginal en tablas 3x3 pareadas
+sm_test <- DescTools::StuartMaxwellTest(evaluacion)
+df_sm <- data.frame(
+  Estadistico = "Stuart-Maxwell (Chi2)",
+  Valor = round(sm_test$statistic, 4),
+  GL = sm_test$parameter,
+  p_valor = format.pval(sm_test$p.value, digits = 4)
+)
+mostrar_tabla(df_sm, caption = "Prueba de Homogeneidad Marginal de Stuart-Maxwell")
+```
+
+  
+La prueba de Stuart-Maxwell ($\chi^2 = 14.450, p = 0.0007$) rechaza la homogeneidad marginal, demostrando que en presencial aumentan los "Excelente" (83 vs 66) y en virtual los "Regular" (68 vs 51).
+
+---
+
+## Tarea 4: Colapsar a Aprueba (Excelente o Bueno) / No aprueba (Regular): aplicar McNemar y calcular Kappa.
+
+```{r tarea4}
+# Construcción de la tabla marginal 2x3 tratando incorrectamente las muestras como independientes
+tab_2x3 <- matrix(c(rowSums(evaluacion), colSums(evaluacion)), nrow = 2, byrow = TRUE,
+                  dimnames = list(Modalidad = c("Presencial", "Virtual"), Calificacion = niveles))
+
+chisq_2x3 <- chisq.test(tab_2x3)
+df_2x3 <- data.frame(
+  Prueba = "Chi-cuadrado 2x3 Independiente",
+  Estadistico = round(chisq_2x3$statistic, 4),
+  GL = chisq_2x3$parameter,
+  p_valor = round(chisq_2x3$p.value, 4)
+)
+mostrar_tabla(df_2x3, caption = "Prueba Chi-cuadrado 2x3 sobre Marginales (Tratamiento Independiente Erróneo)")
+```
+
+  
+La prueba $2 \times 3$ ($p = 0.1126$) no rechaza $H_0$ porque asume independencia e infla la varianza residual, perdiendo la potencia estadística que sí aprovecha el contraste pareado.
+

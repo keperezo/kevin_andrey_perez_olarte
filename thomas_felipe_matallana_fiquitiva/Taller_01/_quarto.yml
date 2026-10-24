@@ -1,0 +1,5 @@
+project:
+  type: default
+  render:
+    - taller_1.qmd
+execute-dir: project

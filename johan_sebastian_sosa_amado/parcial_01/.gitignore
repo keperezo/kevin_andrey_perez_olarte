@@ -1,0 +1,16 @@
+# Entorno virtual y caché de Python
+.venv/
+__pycache__/
+*.pyc
+
+# Archivos temporales de Quarto y Jupyter
+.quarto/
+taller_1_files/
+.ipynb_checkpoints/
+
+# Salidas intermedias que scraper.py vuelve a crear en cada corrida
+resultados/
+
+# Archivos del sistema operativo
+.DS_Store
+Thumbs.db

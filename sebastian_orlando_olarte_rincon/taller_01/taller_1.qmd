@@ -1,0 +1,2477 @@
+---
+title: "Comparador de precios de medicamentos dermatológicos"
+subtitle: "Taller 1 — Minería de Datos (2016325)"
+author: "Sebastián Olarte"
+date: today
+lang: es
+format:
+  html:
+    theme: flatly
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    number-sections: true
+    code-fold: true
+    code-tools: true
+    code-copy: true
+    code-overflow: wrap
+    df-print: paged
+    smooth-scroll: true
+    embed-resources: true
+    link-external-newwindow: true
+    fig-align: center
+    grid:
+      body-width: 1120px
+      sidebar-width: 260px
+      margin-width: 220px
+execute:
+  echo: true
+  warning: false
+  message: false
+  freeze: false
+---
+
+# Resumen
+
+El trabajo parte de un problema sencillo de formular pero difícil de resolver bien con datos reales: **comparar el precio de la misma presentación de un medicamento entre comercios que usan nombres, categorías y fichas técnicas diferentes**. Para hacerlo reproducible trabajé con **Droguerías Cafam, Cruz Verde y La Rebaja**, guardé las respuestas originales en `raw/`, separé la extracción del análisis y llevé las observaciones a una base SQLite.
+
+La extracción no se limitó a buscar los ocho productos finales. Primero se recorrieron las categorías o ramas comerciales definidas para cada sitio; después se aplicó la delimitación académica de *Medicamentos dermatológicos*. Sobre esa base se homologaron ocho presentaciones comunes, identificadas como P01–P08, verificando marca o variante, principio activo, concentración, forma y contenido.
+
+La parte analítica responde las ocho preguntas SQL del taller y añade controles que me parecieron necesarios para revisar la calidad de la comparación: cobertura de la categoría, trazabilidad de la homologación, faltantes, dispersión de precios, precio por unidad y costo de una canasta común. Los precios se interpretan únicamente como una fotografía de la ejecución almacenada, no como valores permanentes.
+
+```{r}
+#| label: setup
+#| include: false
+
+library(DBI)
+library(RSQLite)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(knitr)
+library(scales)
+library(stringr)
+
+options(
+  dplyr.summarise.inform = FALSE,
+  scipen = 999
+)
+
+buscar_db <- function(nombre = "comparador_precios.sqlite") {
+
+  if (file.exists(nombre)) {
+    return(normalizePath(nombre))
+  }
+
+  candidatos <- list.files(
+    ".",
+    pattern = paste0("^", nombre, "$"),
+    recursive = TRUE,
+    full.names = TRUE
+  )
+
+  if (length(candidatos) > 0) {
+    return(normalizePath(candidatos[[1]]))
+  }
+
+  actual <- normalizePath(".")
+
+  for (i in seq_len(5)) {
+
+    candidato <- file.path(actual, nombre)
+
+    if (file.exists(candidato)) {
+      return(normalizePath(candidato))
+    }
+
+    superior <- dirname(actual)
+
+    if (superior == actual) {
+      break
+    }
+
+    actual <- superior
+  }
+
+  stop(
+    paste0(
+      "No se encontró '", nombre,
+      "'. Debe estar en la carpeta del taller o en una subcarpeta."
+    )
+  )
+}
+
+ruta_db <- buscar_db()
+
+con <- DBI::dbConnect(
+  RSQLite::SQLite(),
+  ruta_db
+)
+
+id_ejecucion_analisis <- DBI::dbGetQuery(
+  con,
+  "
+  SELECT ejecucion_id
+  FROM ejecuciones
+  GROUP BY ejecucion_id
+  ORDER BY MAX(fecha_hora_inicio) DESC
+  LIMIT 1;
+  "
+)$ejecucion_id[[1]]
+
+formato_cop <- function(x) {
+  ifelse(
+    is.na(x),
+    NA_character_,
+    paste0(
+      "$",
+      format(
+        round(x),
+        big.mark = ".",
+        decimal.mark = ",",
+        scientific = FALSE,
+        trim = TRUE
+      )
+    )
+  )
+}
+
+formato_pct <- function(x, digitos = 2) {
+  ifelse(
+    is.na(x),
+    NA_character_,
+    paste0(
+      format(
+        round(x, digitos),
+        decimal.mark = ",",
+        nsmall = digitos,
+        trim = TRUE
+      ),
+      "%"
+    )
+  )
+}
+
+nombre_corto <- function(x) {
+  stringr::str_wrap(x, width = 34)
+}
+
+tema_taller <- function(base_size = 12) {
+  theme_minimal(base_size = base_size) +
+    theme(
+      plot.title.position = "plot",
+      plot.title = element_text(face = "bold", size = base_size + 2),
+      plot.subtitle = element_text(size = base_size - 1),
+      axis.title = element_text(face = "bold"),
+      legend.position = "top",
+      panel.grid.minor = element_blank(),
+      panel.grid.major.y = element_blank()
+    )
+}
+```
+
+# 1. Objetivo y alcance
+
+El objetivo es construir un comparador de precios a partir de la recolección automática de productos pertenecientes a la categoría de **medicamentos dermatológicos** en comercios con venta en línea en Colombia.
+
+La categoría académica comprende, entre otros, antimicóticos cutáneos, medicamentos para acné, dermatitis, verrugas y otros tratamientos medicinales de piel, cabello o uñas. La pertenencia a una categoría comercial del sitio no se tomó como criterio suficiente: después de la extracción se aplicaron reglas de clasificación para respetar la delimitación asignada.
+
+Se excluyeron, cuando correspondía, productos cuya finalidad principal era distinta al alcance del taller, por ejemplo analgésicos o anestésicos tópicos, antisépticos para heridas, productos de uso vaginal y artículos cosméticos sin finalidad medicinal clara.
+
+# 2. Fuentes y estrategia de scraping
+
+Se utilizaron tres comercios:
+
+| Comercio | Fuente principal | Estrategia |
+|---|---|---|
+| Droguerías Cafam | VTEX / HTML de categoría y producto | Recorrido de paginación y extracción de información técnica de la ficha |
+| Cruz Verde | Salesforce Commerce Cloud | Recorrido completo de `Search-UpdateGrid` y lectura de cada ficha de producto |
+| La Rebaja | VTEX Catalog API | Consulta de ramas completas del catálogo y unión de resultados para superar la ventana de paginación |
+
+Los scrapers conservan copias crudas en carpetas separadas por comercio y ejecución. De esta forma, la limpieza y el análisis pueden repetirse sin volver a consultar los sitios.
+
+## 2.1 Módulo de extracción
+
+El código de adquisición está separado del documento en `scraper.R`. El archivo contiene una función por comercio y una función general:
+
+```{r}
+#| label: cargar-scraper
+#| eval: false
+
+source("scraper.R")
+
+# Ejecución en línea:
+resultado <- ejecutar_recoleccion(
+  modo = "online",
+  db_path = "comparador_precios.sqlite",
+  raw_root = "raw"
+)
+
+# Reprocesamiento sin conexión:
+resultado_offline <- ejecutar_recoleccion(
+  modo = "offline",
+  db_path = "comparador_precios.sqlite",
+  raw_root = "raw",
+  ejecuciones_fuente = EJECUCIONES_OFFLINE_T1
+)
+```
+
+El documento utiliza la SQLite producida por ese módulo. Se evita repetir dentro del `.qmd` el código de scraping.
+
+## 2.2 Decisiones técnicas durante la recolección
+
+No todos los sitios resolvieron el problema de la misma manera. **Cafam** expone información útil en el estado interno de VTEX y en su ficha técnica; **Cruz Verde** carga el listado de la categoría mediante `Search-UpdateGrid`; **La Rebaja** usa VTEX y requirió trabajar con ramas más amplias que la categoría académica.
+
+Durante el desarrollo probé también Farmatodo y Locatel. Ambos podían recolectarse, pero la intersección de productos comunes con los otros comercios no alcanzaba las ocho presentaciones requeridas sin forzar equivalencias. Por esa razón la terna final quedó en Cafam–Cruz Verde–La Rebaja. Esta decisión se tomó **después de recolectar y revisar cobertura**, no mediante búsquedas manuales de productos individuales.
+
+En La Rebaja apareció además una limitación práctica de VTEX: una sola ordenación no permitía recuperar de forma estable toda una rama grande. La solución fue consultar varios ordenamientos, unir los identificadores y eliminar duplicados. El resultado completo se conserva en los archivos crudos; luego se aplica un clasificador reproducible para decidir cuáles registros pertenecen a la categoría académica.
+
+Dos decisiones fueron importantes para no perder trazabilidad:
+
+- no reemplazar los nombres, marcas, presentaciones ni registros sanitarios originales por los valores estandarizados;
+- distinguir `ejecucion_id`, que identifica la corrida comparativa usada en SQLite, de `ejecucion_fuente`, que conserva la corrida propia de cada comercio.
+
+## 2.3 Cobertura de la extracción antes de filtrar la categoría
+
+```{r}
+#| label: cobertura-scraping
+
+cobertura_scraping <- DBI::dbGetQuery(
+  con,
+  "
+  SELECT
+    c.nombre AS comercio,
+    e.registros_obtenidos AS recolectados,
+    e.productos_categoria AS categoria_academica
+  FROM ejecuciones e
+  INNER JOIN comercios c
+    ON e.comercio_id = c.comercio_id
+  WHERE e.ejecucion_id = ?
+  ORDER BY c.nombre;
+  ",
+  params = list(id_ejecucion_analisis)
+) |>
+  tibble::as_tibble() |>
+  mutate(
+    fuera_del_alcance = pmax(
+      recolectados - categoria_academica,
+      0
+    ),
+    retencion_pct = round(
+      100 * categoria_academica / recolectados,
+      1
+    )
+  )
+
+cobertura_scraping |>
+  knitr::kable(
+    caption = "Registros recolectados y registros retenidos por la delimitación académica"
+  )
+```
+
+```{r}
+#| label: grafico-cobertura-scraping
+#| fig-width: 9
+#| fig-height: 5.3
+#| fig-cap: "Diferencia entre la cobertura comercial recolectada y los registros incluidos en la categoría académica."
+
+cobertura_larga <- cobertura_scraping |>
+  select(
+    comercio,
+    recolectados,
+    categoria_academica
+  ) |>
+  pivot_longer(
+    -comercio,
+    names_to = "tipo",
+    values_to = "productos"
+  ) |>
+  mutate(
+    tipo = recode(
+      tipo,
+      recolectados = "Recolectados",
+      categoria_academica = "Incluidos en categoría"
+    )
+  )
+
+ggplot(
+  cobertura_larga,
+  aes(
+    x = comercio,
+    y = productos,
+    fill = tipo
+  )
+) +
+  geom_col(
+    position = position_dodge(width = 0.8),
+    width = 0.7
+  ) +
+  scale_y_continuous(
+    labels = label_number(big.mark = ".")
+  ) +
+  labs(
+    title = "Cobertura del scraping y delimitación posterior",
+    subtitle = "La diferencia refleja la taxonomía propia de cada comercio",
+    x = NULL,
+    y = "Número de registros",
+    fill = NULL
+  ) +
+  tema_taller()
+```
+
+La diferencia es especialmente grande en La Rebaja porque la rama comercial necesaria para garantizar cobertura es mucho más amplia que la categoría académica. En esa fuente se recolectaron **`r format(cobertura_scraping$recolectados[cobertura_scraping$comercio == "La Rebaja"], big.mark = ".", scientific = FALSE, trim = TRUE)` registros**, pero después del filtrado reproducible quedan **`r cobertura_scraping$categoria_academica[cobertura_scraping$comercio == "La Rebaja"]`** dentro del alcance. Esa diferencia no debe interpretarse como pérdida de datos: corresponde a registros recolectados que no pertenecen a la delimitación académica del taller.
+
+# 3. Flujo de trabajo
+
+```{mermaid}
+flowchart LR
+    A[Categoría o rama comercial] --> B[Scraper por comercio]
+    B --> C[RAW: HTML / JSON]
+    C --> D[Parser reproducible]
+    D --> E[Campos originales]
+    E --> F[Normalización]
+    F --> G[Clasificación académica]
+    G --> H[Homologación P01-P08]
+    H --> I[(SQLite)]
+    I --> J[8 consultas SQL]
+    I --> K[Controles de calidad]
+    I --> L[Gráficos]
+    J --> M[Conclusiones]
+    K --> M
+    L --> M
+```
+
+# 4. Estructura de la base SQLite
+
+La base separa cinco conceptos:
+
+- `comercios`: identificación de las cadenas.
+- `productos_comunes`: identidad común de los ocho productos homologados.
+- `ejecuciones`: metadatos de cada corrida.
+- `anuncios`: producto tal como aparece en cada comercio, junto con sus campos originales y normalizados.
+- `observaciones`: precio observado, promoción y fecha/hora de consulta.
+
+La decisión de separar `anuncios` y `observaciones` evita repetir toda la ficha técnica cada vez que cambie un precio. Al mismo tiempo, la clave compuesta formada por ejecución, comercio y producto permite vincular cada observación con el anuncio del que provino.
+
+```{mermaid}
+erDiagram
+    COMERCIOS ||--o{ EJECUCIONES : registra
+    COMERCIOS ||--o{ ANUNCIOS : publica
+    EJECUCIONES ||--o{ ANUNCIOS : contiene
+    EJECUCIONES ||--o{ OBSERVACIONES : contiene
+    ANUNCIOS ||--o{ OBSERVACIONES : genera
+    PRODUCTOS_COMUNES ||--o{ ANUNCIOS : homologa
+
+    COMERCIOS {
+      int comercio_id PK
+      text nombre
+    }
+
+    EJECUCIONES {
+      text ejecucion_id
+      int comercio_id FK
+      text ejecucion_fuente
+      text fecha_hora_inicio
+      text estado
+    }
+
+    ANUNCIOS {
+      text ejecucion_id
+      int comercio_id FK
+      text producto_comercio_id
+      text producto_comun_id FK
+      int comparable
+      int incluido_categoria
+      text texto_original
+    }
+
+    OBSERVACIONES {
+      int observacion_id PK
+      text ejecucion_id
+      int comercio_id FK
+      text producto_comercio_id
+      real precio_cop
+      text fecha_hora_consulta
+    }
+
+    PRODUCTOS_COMUNES {
+      text producto_comun_id PK
+      text producto_comun
+    }
+```
+
+```{r}
+#| label: tablas-sqlite
+
+tablas_db <- tibble::tibble(
+  tabla = DBI::dbListTables(con)
+)
+
+knitr::kable(
+  tablas_db,
+  caption = "Tablas almacenadas en SQLite"
+)
+```
+
+## 4.1 Ejecución seleccionada
+
+```{r}
+#| label: ejecucion-seleccionada
+
+ejecuciones_actuales <- DBI::dbGetQuery(
+  con,
+  "
+  SELECT
+    e.ejecucion_id,
+    c.nombre AS comercio,
+    e.ejecucion_fuente,
+    e.fecha_hora_inicio,
+    e.fecha_hora_fin,
+    e.modo,
+    e.productos_reportados_sitio,
+    e.registros_obtenidos,
+    e.productos_categoria,
+    e.comparables_con_precio,
+    e.precios_encontrados,
+    e.precios_faltantes,
+    e.estado
+  FROM ejecuciones e
+  INNER JOIN comercios c
+    ON e.comercio_id = c.comercio_id
+  WHERE e.ejecucion_id = ?
+  ORDER BY c.nombre;
+  ",
+  params = list(id_ejecucion_analisis)
+) |>
+  tibble::as_tibble()
+
+ejecuciones_actuales |>
+  knitr::kable(
+    caption = "Resumen de la ejecución utilizada en el análisis"
+  )
+```
+
+# 5. Correspondencia de productos
+
+La comparación directa exige que los registros representen la misma presentación. La homologación no se basó únicamente en el nombre comercial. Se revisaron, según disponibilidad:
+
+\[
+\text{principio activo}
++
+\text{concentración}
++
+\text{forma farmacéutica}
++
+\text{contenido}
++
+\text{unidades}
++
+\text{marca o variante}
+\]
+
+El registro INVIMA se utilizó como evidencia adicional, pero no como única clave, ya que algunas tiendas conservan revisiones históricas distintas de un mismo registro.
+
+```{r}
+#| label: productos-comunes
+
+productos_comunes <- DBI::dbGetQuery(
+  con,
+  "
+  SELECT
+    producto_comun_id,
+    producto_comun,
+    principio_activo,
+    concentracion,
+    forma,
+    contenido,
+    unidades
+  FROM productos_comunes
+  ORDER BY producto_comun_id;
+  "
+) |>
+  tibble::as_tibble()
+
+productos_comunes |>
+  knitr::kable(
+    caption = "Productos y presentaciones homologados"
+  )
+```
+
+## 5.1 Trazabilidad de la homologación
+
+```{r}
+#| label: trazabilidad-homologacion
+
+trazabilidad <- DBI::dbGetQuery(
+  con,
+  "
+  SELECT
+    a.producto_comun_id,
+    c.nombre AS comercio,
+    a.producto_comercio_id,
+    a.producto_original,
+    a.marca_original,
+    a.principio_activo_original,
+    a.concentracion_original,
+    a.presentacion_original,
+    a.contenido_original,
+    a.invima
+  FROM anuncios a
+  INNER JOIN comercios c
+    ON a.comercio_id = c.comercio_id
+  WHERE a.ejecucion_id = ?
+    AND a.comparable = 1
+  ORDER BY
+    a.producto_comun_id,
+    c.nombre;
+  ",
+  params = list(id_ejecucion_analisis)
+) |>
+  tibble::as_tibble()
+
+trazabilidad |>
+  knitr::kable(
+    caption = "Trazabilidad entre producto común y anuncio original"
+  )
+```
+
+## 5.2 Casos que requirieron revisión
+
+No usé el nombre del producto como llave de emparejamiento. En medicamentos, pequeñas diferencias en concentración, forma o contenido cambian la presentación que se está comparando. La revisión final quedó documentada así:
+
+```{r}
+#| label: notas-homologacion
+
+notas_homologacion <- tibble::tribble(
+  ~producto_comun_id, ~revision,
+  "P01", "Misma marca, concentración, forma y 20 g. Cafam conserva una revisión INVIMA histórica distinta a Cruz Verde y La Rebaja.",
+  "P02", "Mismo producto Genfar, 5 %, ungüento y 15 g. Cafam muestra una revisión INVIMA histórica.",
+  "P03", "Virex labial 5 % de 10 g. Se separó de las presentaciones de 15 g y 30 g.",
+  "P04", "Virex ungüento 5 % de 15 g. Coincidencia de familia comercial, contenido y registro actual.",
+  "P05", "Virex ungüento 5 % de 30 g. Coincidencia de familia comercial, contenido y registro actual.",
+  "P06", "Clotrimazol 1 % de 40 g. El nombre de marca varía entre AG y Lafrancol, pero el registro sanitario y la presentación coinciden.",
+  "P07", "Clotrimazol La Santé 1 % de 40 g. Las tiendas reportan revisiones históricas diferentes del mismo registro.",
+  "P08", "Caladryl loción 8 % de 100 mL. Se excluyó Caladryl Clear porque corresponde a otra formulación."
+)
+
+notas_homologacion |>
+  knitr::kable(
+    caption = "Notas de revisión manual de los ocho emparejamientos"
+  )
+```
+
+Esta revisión es importante porque una coincidencia aproximada de texto podría unir productos que no deberían compararse. El identificador P01–P08 solo se asigna después de comprobar la identidad comercial o farmacéutica relevante para el taller.
+
+# 6. Preguntas SQL
+
+## 6.1 Pregunta 1 — Cobertura general de la base
+
+**¿Cuántos comercios, productos/presentaciones y observaciones contiene la base? ¿Cuántos productos aporta cada comercio?**
+
+```{r}
+#| label: sql-p1-general
+
+sql_p1_general <- "
+SELECT
+    COUNT(DISTINCT a.comercio_id) AS n_comercios,
+
+    COUNT(DISTINCT
+        CAST(a.comercio_id AS TEXT) || '-' ||
+        a.producto_comercio_id
+    ) AS n_productos_comercio,
+
+    COUNT(DISTINCT
+        CASE
+            WHEN a.comparable = 1
+            THEN a.producto_comun_id
+        END
+    ) AS n_productos_comparables,
+
+    COUNT(o.observacion_id) AS n_observaciones
+
+FROM anuncios a
+
+INNER JOIN observaciones o
+    ON a.ejecucion_id = o.ejecucion_id
+   AND a.comercio_id = o.comercio_id
+   AND a.producto_comercio_id = o.producto_comercio_id
+
+WHERE a.ejecucion_id = ?
+  AND a.incluido_categoria = 1;
+"
+
+p1_general <- DBI::dbGetQuery(
+  con,
+  sql_p1_general,
+  params = list(id_ejecucion_analisis)
+) |>
+  tibble::as_tibble()
+
+p1_general |>
+  knitr::kable(
+    caption = "Cobertura general de la categoría académica"
+  )
+```
+
+```{r}
+#| label: sql-p1-comercios
+
+sql_p1_comercios <- "
+SELECT
+    c.nombre AS comercio,
+
+    COUNT(DISTINCT a.producto_comercio_id)
+        AS productos_categoria,
+
+    COUNT(DISTINCT
+        CASE
+            WHEN a.comparable = 1
+            THEN a.producto_comun_id
+        END
+    ) AS productos_comparables,
+
+    COUNT(o.observacion_id)
+        AS observaciones,
+
+    SUM(
+        CASE
+            WHEN o.precio_cop IS NOT NULL
+            THEN 1 ELSE 0
+        END
+    ) AS observaciones_con_precio
+
+FROM anuncios a
+
+INNER JOIN comercios c
+    ON a.comercio_id = c.comercio_id
+
+INNER JOIN observaciones o
+    ON a.ejecucion_id = o.ejecucion_id
+   AND a.comercio_id = o.comercio_id
+   AND a.producto_comercio_id = o.producto_comercio_id
+
+WHERE a.ejecucion_id = ?
+  AND a.incluido_categoria = 1
+
+GROUP BY c.nombre
+
+ORDER BY productos_categoria DESC;
+"
+
+p1_comercios <- DBI::dbGetQuery(
+  con,
+  sql_p1_comercios,
+  params = list(id_ejecucion_analisis)
+) |>
+  tibble::as_tibble()
+
+p1_comercios |>
+  knitr::kable(
+    caption = "Productos y observaciones aportados por comercio"
+  )
+```
+
+La ejecución contiene **`r p1_general$n_comercios[[1]]` comercios**, **`r p1_general$n_productos_comercio[[1]]` productos/ofertas de comercio dentro de la categoría académica** y **`r p1_general$n_observaciones[[1]]` observaciones**. Dentro de este conjunto se identifican **`r p1_general$n_productos_comparables[[1]]` productos comparables** presentes en las tres cadenas.
+
+```{r}
+#| label: grafico-oferta
+#| fig-width: 8
+#| fig-height: 4.8
+#| fig-cap: "Número de productos clasificados dentro de la categoría académica por comercio."
+
+ggplot(
+  p1_comercios,
+  aes(
+    x = reorder(comercio, productos_categoria),
+    y = productos_categoria,
+    fill = comercio
+  )
+) +
+  geom_col(
+    width = 0.65,
+    show.legend = FALSE
+  ) +
+  geom_text(
+    aes(label = productos_categoria),
+    hjust = -0.25,
+    size = 4
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    expand = expansion(mult = c(0, 0.12))
+  ) +
+  labs(
+    title = "Tamaño de la oferta dermatológica observada",
+    x = NULL,
+    y = "Productos/ofertas"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major.y = element_blank()
+  )
+```
+
+## 6.2 Pregunta 2 — Cobertura de los ocho productos
+
+**En una misma ejecución, ¿se obtuvieron al menos 24 observaciones comparables? ¿Hay registros repetidos del mismo producto y comercio?**
+
+```{r}
+#| label: sql-p2-resumen
+
+sql_p2_resumen <- "
+SELECT
+    o.ejecucion_id,
+
+    COUNT(*) AS n_observaciones_comparables,
+
+    COUNT(DISTINCT a.producto_comun_id)
+        AS n_productos_comparables,
+
+    COUNT(DISTINCT o.comercio_id)
+        AS n_comercios,
+
+    COUNT(*) >= 24
+        AS cumple_minimo_24
+
+FROM observaciones o
+
+INNER JOIN anuncios a
+    ON o.ejecucion_id = a.ejecucion_id
+   AND o.comercio_id = a.comercio_id
+   AND o.producto_comercio_id = a.producto_comercio_id
+
+WHERE o.ejecucion_id = ?
+  AND a.comparable = 1
+  AND o.precio_cop IS NOT NULL
+
+GROUP BY o.ejecucion_id;
+"
+
+p2_resumen <- DBI::dbGetQuery(
+  con,
+  sql_p2_resumen,
+  params = list(id_ejecucion_analisis)
+) |>
+  tibble::as_tibble()
+
+p2_resumen |>
+  knitr::kable(
+    caption = "Cobertura de los productos comparables"
+  )
+```
+
+```{r}
+#| label: sql-p2-cobertura
+
+sql_p2_cobertura <- "
+SELECT
+    a.producto_comun_id,
+    pc.producto_comun,
+
+    COUNT(*) AS n_observaciones,
+
+    COUNT(DISTINCT o.comercio_id)
+        AS n_comercios,
+
+    MIN(o.precio_cop) AS precio_minimo,
+    MAX(o.precio_cop) AS precio_maximo
+
+FROM observaciones o
+
+INNER JOIN anuncios a
+    ON o.ejecucion_id = a.ejecucion_id
+   AND o.comercio_id = a.comercio_id
+   AND o.producto_comercio_id = a.producto_comercio_id
+
+INNER JOIN productos_comunes pc
+    ON a.producto_comun_id = pc.producto_comun_id
+
+WHERE o.ejecucion_id = ?
+  AND a.comparable = 1
+  AND o.precio_cop IS NOT NULL
+
+GROUP BY
+    a.producto_comun_id,
+    pc.producto_comun
+
+ORDER BY
+    a.producto_comun_id;
+"
+
+p2_cobertura <- DBI::dbGetQuery(
+  con,
+  sql_p2_cobertura,
+  params = list(id_ejecucion_analisis)
+) |>
+  tibble::as_tibble()
+
+p2_cobertura |>
+  knitr::kable(
+    caption = "Cobertura por producto comparable"
+  )
+```
+
+```{r}
+#| label: sql-p2-duplicados
+
+sql_p2_duplicados <- "
+SELECT
+    o.ejecucion_id,
+    c.nombre AS comercio,
+    a.producto_comun_id,
+    o.producto_comercio_id,
+    COUNT(*) AS n_registros
+
+FROM observaciones o
+
+INNER JOIN anuncios a
+    ON o.ejecucion_id = a.ejecucion_id
+   AND o.comercio_id = a.comercio_id
+   AND o.producto_comercio_id = a.producto_comercio_id
+
+INNER JOIN comercios c
+    ON o.comercio_id = c.comercio_id
+
+WHERE o.ejecucion_id = ?
+  AND a.comparable = 1
+
+GROUP BY
+    o.ejecucion_id,
+    c.nombre,
+    a.producto_comun_id,
+    o.producto_comercio_id
+
+HAVING COUNT(*) > 1;
+"
+
+p2_duplicados <- DBI::dbGetQuery(
+  con,
+  sql_p2_duplicados,
+  params = list(id_ejecucion_analisis)
+) |>
+  tibble::as_tibble()
+
+p2_duplicados |>
+  knitr::kable(
+    caption = "Duplicados comparables dentro de la ejecución"
+  )
+```
+
+La ejecución contiene **`r p2_resumen$n_observaciones_comparables[[1]]` observaciones comparables**, correspondientes a **`r p2_resumen$n_productos_comparables[[1]]` productos** y **`r p2_resumen$n_comercios[[1]]` comercios**. Cada producto cuenta con una observación por comercio y se encontraron **`r nrow(p2_duplicados)` duplicados** en el conjunto comparable.
+
+## 6.3 Pregunta 3 — Precio mínimo, máximo, promedio y tienda más económica
+
+**Para cada presentación comparable, ¿cuáles son el precio mínimo, máximo y promedio? ¿Qué comercio ofrece el menor precio?**
+
+```{r}
+#| label: sql-p3
+
+sql_p3 <- "
+WITH base AS (
+    SELECT
+        a.producto_comun_id,
+        pc.producto_comun,
+        c.nombre AS comercio,
+        o.precio_cop
+
+    FROM observaciones o
+
+    INNER JOIN anuncios a
+        ON o.ejecucion_id = a.ejecucion_id
+       AND o.comercio_id = a.comercio_id
+       AND o.producto_comercio_id = a.producto_comercio_id
+
+    INNER JOIN productos_comunes pc
+        ON a.producto_comun_id = pc.producto_comun_id
+
+    INNER JOIN comercios c
+        ON o.comercio_id = c.comercio_id
+
+    WHERE o.ejecucion_id = ?
+      AND a.comparable = 1
+      AND o.precio_cop IS NOT NULL
+),
+
+estadisticas AS (
+    SELECT
+        producto_comun_id,
+        producto_comun,
+        MIN(precio_cop) AS precio_minimo,
+        MAX(precio_cop) AS precio_maximo,
+        AVG(precio_cop) AS precio_promedio
+
+    FROM base
+
+    GROUP BY
+        producto_comun_id,
+        producto_comun
+),
+
+ganadores AS (
+    SELECT
+        b.producto_comun_id,
+
+        GROUP_CONCAT(
+            b.comercio,
+            ' | '
+        ) AS comercios_menor_precio,
+
+        COUNT(*) AS n_comercios_menor_precio
+
+    FROM base b
+
+    INNER JOIN estadisticas e
+        ON b.producto_comun_id = e.producto_comun_id
+       AND b.precio_cop = e.precio_minimo
+
+    GROUP BY
+        b.producto_comun_id
+)
+
+SELECT
+    e.producto_comun_id,
+    e.producto_comun,
+    e.precio_minimo,
+    e.precio_maximo,
+    ROUND(e.precio_promedio, 2)
+        AS precio_promedio,
+    g.comercios_menor_precio,
+    g.n_comercios_menor_precio
+
+FROM estadisticas e
+
+INNER JOIN ganadores g
+    ON e.producto_comun_id = g.producto_comun_id
+
+ORDER BY
+    e.producto_comun_id;
+"
+
+p3 <- DBI::dbGetQuery(
+  con,
+  sql_p3,
+  params = list(id_ejecucion_analisis)
+) |>
+  tibble::as_tibble()
+
+p3 |>
+  mutate(
+    precio_minimo = formato_cop(precio_minimo),
+    precio_maximo = formato_cop(precio_maximo),
+    precio_promedio = formato_cop(precio_promedio)
+  ) |>
+  knitr::kable(
+    caption = "Resumen de precios y comercio con el menor precio"
+  )
+```
+
+No se observaron empates en el menor precio. La consulta, sin embargo, utiliza `GROUP_CONCAT`, por lo que conservaría todos los comercios ganadores si se presentara un empate.
+
+```{r}
+#| label: base-comparables
+
+base_comparables <- DBI::dbGetQuery(
+  con,
+  "
+  SELECT
+    a.producto_comun_id,
+    pc.producto_comun,
+    c.nombre AS comercio,
+    o.precio_cop,
+    a.contenido_valor_estandar,
+    a.unidad_estandar
+  FROM observaciones o
+  INNER JOIN anuncios a
+    ON o.ejecucion_id = a.ejecucion_id
+   AND o.comercio_id = a.comercio_id
+   AND o.producto_comercio_id = a.producto_comercio_id
+  INNER JOIN productos_comunes pc
+    ON a.producto_comun_id = pc.producto_comun_id
+  INNER JOIN comercios c
+    ON o.comercio_id = c.comercio_id
+  WHERE o.ejecucion_id = ?
+    AND a.comparable = 1
+    AND o.precio_cop IS NOT NULL
+  ORDER BY a.producto_comun_id, c.nombre;
+  ",
+  params = list(id_ejecucion_analisis)
+) |>
+  tibble::as_tibble()
+```
+
+### Matriz de precios observados
+
+```{r}
+#| label: matriz-precios
+
+matriz_precios <- base_comparables |>
+  select(
+    producto_comun_id,
+    producto_comun,
+    comercio,
+    precio_cop
+  ) |>
+  pivot_wider(
+    names_from = comercio,
+    values_from = precio_cop
+  )
+
+matriz_precios |>
+  mutate(
+    across(
+      where(is.numeric),
+      formato_cop
+    )
+  ) |>
+  knitr::kable(
+    caption = "Matriz de precios de las ocho presentaciones comunes"
+  )
+```
+
+
+```{r}
+#| label: grafico-precios-comparables
+#| fig-width: 11
+#| fig-height: 7
+#| fig-cap: "Precio de las ocho presentaciones homologadas en cada comercio."
+
+ggplot(
+  base_comparables,
+  aes(
+    x = reorder(producto_comun, precio_cop),
+    y = precio_cop,
+    fill = comercio
+  )
+) +
+  geom_col(
+    position = position_dodge(width = 0.82),
+    width = 0.72
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = label_number(
+      prefix = "$",
+      big.mark = ".",
+      decimal.mark = ","
+    )
+  ) +
+  labs(
+    title = "Comparación de precios de las presentaciones homologadas",
+    x = NULL,
+    y = "Precio (COP)",
+    fill = "Comercio"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "top",
+    panel.grid.major.y = element_blank()
+  )
+```
+
+### Rango de precios y posición de cada comercio
+
+```{r}
+#| label: grafico-rango-precios
+#| fig-width: 11
+#| fig-height: 7
+#| fig-cap: "Rango mínimo–máximo de cada producto y posición de cada comercio dentro del rango."
+
+rangos_precio <- base_comparables |>
+  group_by(
+    producto_comun_id,
+    producto_comun
+  ) |>
+  summarise(
+    p_min = min(precio_cop),
+    p_max = max(precio_cop),
+    .groups = "drop"
+  )
+
+rango_detalle <- base_comparables |>
+  left_join(
+    rangos_precio,
+    by = c(
+      "producto_comun_id",
+      "producto_comun"
+    )
+  ) |>
+  mutate(
+    producto_factor = reorder(
+      producto_comun,
+      p_max - p_min
+    )
+  )
+
+ggplot(
+  rango_detalle,
+  aes(
+    y = producto_factor
+  )
+) +
+  geom_segment(
+    aes(
+      x = p_min,
+      xend = p_max,
+      yend = producto_factor
+    ),
+    linewidth = 1.1
+  ) +
+  geom_point(
+    aes(
+      x = precio_cop,
+      shape = comercio
+    ),
+    size = 3
+  ) +
+  scale_x_continuous(
+    labels = label_number(
+      prefix = "$",
+      big.mark = ".",
+      decimal.mark = ","
+    )
+  ) +
+  labs(
+    title = "Dispersión de precios por presentación",
+    subtitle = "La línea une el menor y el mayor precio; los puntos ubican a cada comercio",
+    x = "Precio (COP)",
+    y = NULL,
+    shape = "Comercio"
+  ) +
+  tema_taller()
+```
+
+### Índice relativo de precio
+
+Para comparar productos con niveles de precio muy distintos, se construyó un índice donde el comercio más barato para cada producto toma valor 100:
+
+\[
+I_{ij}=100rac{P_{ij}}{\min_j P_{ij}}
+\]
+
+Un valor de 112 significa que esa oferta cuesta 12 % más que el mínimo observado para la misma presentación.
+
+```{r}
+#| label: heatmap-indice-precio
+#| fig-width: 9
+#| fig-height: 6.2
+#| fig-cap: "Índice relativo de precio por producto y comercio. 100 corresponde al menor precio observado de cada presentación."
+
+indice_precio <- base_comparables |>
+  group_by(
+    producto_comun_id,
+    producto_comun
+  ) |>
+  mutate(
+    indice = 100 * precio_cop / min(precio_cop)
+  ) |>
+  ungroup()
+
+ggplot(
+  indice_precio,
+  aes(
+    x = comercio,
+    y = factor(
+      producto_comun_id,
+      levels = rev(sort(unique(producto_comun_id)))
+    ),
+    fill = indice
+  )
+) +
+  geom_tile(
+    linewidth = 0.7
+  ) +
+  geom_text(
+    aes(
+      label = sprintf("%.1f", indice)
+    ),
+    size = 3.7
+  ) +
+  labs(
+    title = "Índice relativo de precio",
+    subtitle = "100 = oferta más económica para esa presentación",
+    x = NULL,
+    y = "Producto",
+    fill = "Índice"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "right",
+    panel.grid = element_blank()
+  )
+```
+
+## 6.4 Pregunta 4 — Ahorro potencial
+
+**¿Cuál es el ahorro en COP y en porcentaje al elegir la oferta más económica de cada presentación?**
+
+Se utilizó:
+
+\[
+Ahorro_{COP}=P_{\max}-P_{\min}
+\]
+
+\[
+Ahorro_{\%}
+=
+100\frac{P_{\max}-P_{\min}}{P_{\max}}
+\]
+
+```{r}
+#| label: sql-p4
+
+sql_p4 <- "
+WITH precios AS (
+    SELECT
+        a.producto_comun_id,
+        pc.producto_comun,
+        o.precio_cop
+
+    FROM observaciones o
+
+    INNER JOIN anuncios a
+        ON o.ejecucion_id = a.ejecucion_id
+       AND o.comercio_id = a.comercio_id
+       AND o.producto_comercio_id = a.producto_comercio_id
+
+    INNER JOIN productos_comunes pc
+        ON a.producto_comun_id = pc.producto_comun_id
+
+    WHERE o.ejecucion_id = ?
+      AND a.comparable = 1
+      AND o.precio_cop IS NOT NULL
+),
+
+resumen AS (
+    SELECT
+        producto_comun_id,
+        producto_comun,
+        MIN(precio_cop) AS precio_minimo,
+        MAX(precio_cop) AS precio_maximo
+
+    FROM precios
+
+    GROUP BY
+        producto_comun_id,
+        producto_comun
+)
+
+SELECT
+    producto_comun_id,
+    producto_comun,
+    precio_minimo,
+    precio_maximo,
+
+    precio_maximo - precio_minimo
+        AS ahorro_cop,
+
+    ROUND(
+        100.0 *
+        (precio_maximo - precio_minimo) /
+        precio_maximo,
+        2
+    ) AS ahorro_porcentaje
+
+FROM resumen
+
+ORDER BY
+    producto_comun_id;
+"
+
+p4 <- DBI::dbGetQuery(
+  con,
+  sql_p4,
+  params = list(id_ejecucion_analisis)
+) |>
+  tibble::as_tibble()
+
+p4 |>
+  mutate(
+    precio_minimo = formato_cop(precio_minimo),
+    precio_maximo = formato_cop(precio_maximo),
+    ahorro_cop = formato_cop(ahorro_cop),
+    ahorro_porcentaje = formato_pct(ahorro_porcentaje)
+  ) |>
+  knitr::kable(
+    caption = "Ahorro potencial por presentación"
+  )
+```
+
+La mayor diferencia en pesos y la mayor diferencia porcentual no necesariamente corresponden al mismo producto. Por eso se reportan ambos indicadores.
+
+```{r}
+#| label: grafico-ahorro
+#| fig-width: 9
+#| fig-height: 6
+#| fig-cap: "Ahorro porcentual al seleccionar la oferta más económica."
+
+ggplot(
+  p4,
+  aes(
+    x = reorder(producto_comun, ahorro_porcentaje),
+    y = ahorro_porcentaje
+  )
+) +
+  geom_col(width = 0.68) +
+  geom_text(
+    aes(label = formato_pct(ahorro_porcentaje, 1)),
+    hjust = -0.15,
+    size = 3.7
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = label_number(suffix = "%"),
+    expand = expansion(mult = c(0, 0.15))
+  ) +
+  labs(
+    title = "Oportunidad de ahorro entre comercios",
+    x = NULL,
+    y = "Ahorro respecto al precio máximo"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major.y = element_blank()
+  )
+```
+
+```{r}
+#| label: grafico-ahorro-cop
+#| fig-width: 9
+#| fig-height: 6
+#| fig-cap: "Diferencia absoluta entre el mayor y el menor precio observado por presentación."
+
+ggplot(
+  p4,
+  aes(
+    x = reorder(producto_comun, ahorro_cop),
+    y = ahorro_cop
+  )
+) +
+  geom_col(width = 0.68) +
+  geom_text(
+    aes(label = formato_cop(ahorro_cop)),
+    hjust = -0.12,
+    size = 3.6
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = label_number(
+      prefix = "$",
+      big.mark = ".",
+      decimal.mark = ","
+    ),
+    expand = expansion(mult = c(0, 0.18))
+  ) +
+  labs(
+    title = "Ahorro potencial en pesos",
+    subtitle = "Diferencia entre el precio máximo y el mínimo de la misma presentación",
+    x = NULL,
+    y = "Ahorro (COP)"
+  ) +
+  tema_taller()
+```
+
+## 6.5 Pregunta 5 — Precio por unidad de contenido
+
+**Si existen tamaños comparables del mismo producto, ¿qué presentación y comercio tienen el menor precio por unidad?**
+
+Para evitar mezclar formulaciones diferentes, se compara **Virex ungüento 5 %** en presentaciones de 15 g y 30 g. El Virex labial de 10 g no se incluye en esta comparación.
+
+```{r}
+#| label: sql-p5
+
+sql_p5 <- "
+WITH unitarios AS (
+    SELECT
+        a.producto_comun_id,
+        pc.producto_comun,
+        c.nombre AS comercio,
+
+        a.contenido_valor_estandar
+            AS contenido_g,
+
+        a.unidad_estandar,
+
+        o.precio_cop,
+
+        ROUND(
+            o.precio_cop /
+            a.contenido_valor_estandar,
+            2
+        ) AS precio_por_g
+
+    FROM observaciones o
+
+    INNER JOIN anuncios a
+        ON o.ejecucion_id = a.ejecucion_id
+       AND o.comercio_id = a.comercio_id
+       AND o.producto_comercio_id = a.producto_comercio_id
+
+    INNER JOIN productos_comunes pc
+        ON a.producto_comun_id = pc.producto_comun_id
+
+    INNER JOIN comercios c
+        ON o.comercio_id = c.comercio_id
+
+    WHERE o.ejecucion_id = ?
+      AND a.producto_comun_id IN ('P04', 'P05')
+      AND a.contenido_valor_estandar IS NOT NULL
+      AND a.contenido_valor_estandar > 0
+      AND LOWER(a.unidad_estandar) = 'g'
+      AND o.precio_cop IS NOT NULL
+),
+
+comparacion AS (
+    SELECT
+        *,
+        MIN(precio_por_g) OVER ()
+            AS menor_precio_por_g
+
+    FROM unitarios
+)
+
+SELECT
+    producto_comun_id,
+    producto_comun,
+    comercio,
+    contenido_g,
+    precio_cop,
+    precio_por_g,
+
+    CASE
+        WHEN precio_por_g = menor_precio_por_g
+        THEN 1
+        ELSE 0
+    END AS mejor_precio_unitario
+
+FROM comparacion
+
+ORDER BY
+    precio_por_g ASC;
+"
+
+p5 <- DBI::dbGetQuery(
+  con,
+  sql_p5,
+  params = list(id_ejecucion_analisis)
+) |>
+  tibble::as_tibble()
+
+p5 |>
+  mutate(
+    precio_cop = formato_cop(precio_cop),
+    precio_por_g = formato_cop(precio_por_g)
+  ) |>
+  knitr::kable(
+    caption = "Precio por gramo de Virex ungüento 5 %"
+  )
+```
+
+```{r}
+#| label: grafico-precio-unitario
+#| fig-width: 9
+#| fig-height: 5.7
+#| fig-cap: "Costo por gramo de Virex ungüento 5 % según presentación y comercio."
+
+ggplot(
+  p5,
+  aes(
+    x = interaction(
+      comercio,
+      contenido_g,
+      sep = " — "
+    ),
+    y = precio_por_g,
+    fill = factor(contenido_g)
+  )
+) +
+  geom_col(width = 0.7) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = label_number(
+      prefix = "$",
+      big.mark = ".",
+      decimal.mark = ","
+    )
+  ) +
+  labs(
+    title = "Precio unitario: Virex ungüento 5 %",
+    subtitle = "Comparación de presentaciones de 15 g y 30 g",
+    x = "Comercio — contenido (g)",
+    y = "COP por gramo",
+    fill = "Contenido (g)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "top",
+    panel.grid.major.y = element_blank()
+  )
+```
+
+La presentación de mayor contenido puede exigir un mayor desembolso total y, al mismo tiempo, ofrecer un menor costo por gramo. Por esta razón se distinguen explícitamente ambas conclusiones.
+
+## 6.6 Pregunta 6 — Mayores diferencias de precio
+
+**¿Cuáles son las mayores diferencias de precio entre comercios?**
+
+```{r}
+#| label: sql-p6
+
+sql_p6 <- "
+WITH base AS (
+    SELECT
+        a.producto_comun_id,
+        pc.producto_comun,
+        o.precio_cop
+
+    FROM observaciones o
+
+    INNER JOIN anuncios a
+        ON o.ejecucion_id = a.ejecucion_id
+       AND o.comercio_id = a.comercio_id
+       AND o.producto_comercio_id = a.producto_comercio_id
+
+    INNER JOIN productos_comunes pc
+        ON a.producto_comun_id = pc.producto_comun_id
+
+    WHERE o.ejecucion_id = ?
+      AND a.comparable = 1
+      AND o.precio_cop IS NOT NULL
+),
+
+resumen AS (
+    SELECT
+        producto_comun_id,
+        producto_comun,
+        MIN(precio_cop) AS precio_minimo,
+        MAX(precio_cop) AS precio_maximo
+
+    FROM base
+
+    GROUP BY
+        producto_comun_id,
+        producto_comun
+)
+
+SELECT
+    producto_comun_id,
+    producto_comun,
+    precio_minimo,
+    precio_maximo,
+
+    precio_maximo - precio_minimo
+        AS diferencia_cop,
+
+    ROUND(
+        100.0 *
+        (precio_maximo - precio_minimo) /
+        precio_maximo,
+        2
+    ) AS ahorro_porcentaje
+
+FROM resumen
+
+ORDER BY
+    ahorro_porcentaje DESC,
+    diferencia_cop DESC;
+"
+
+p6 <- DBI::dbGetQuery(
+  con,
+  sql_p6,
+  params = list(id_ejecucion_analisis)
+) |>
+  tibble::as_tibble()
+
+p6 |>
+  mutate(
+    precio_minimo = formato_cop(precio_minimo),
+    precio_maximo = formato_cop(precio_maximo),
+    diferencia_cop = formato_cop(diferencia_cop),
+    ahorro_porcentaje = formato_pct(ahorro_porcentaje)
+  ) |>
+  knitr::kable(
+    caption = "Ranking de diferencias de precio entre comercios"
+  )
+```
+
+El ranking permite identificar qué productos justifican con mayor claridad comparar precios antes de comprar. En esta ejecución, las diferencias relativas más altas se concentran en las primeras posiciones de la tabla, mientras que otras presentaciones muestran precios más próximos entre cadenas.
+
+## 6.7 Pregunta 7 — Datos faltantes e inconsistentes
+
+**¿Qué datos faltantes o inconsistentes afectan la comparación y cuántos son?**
+
+```{r}
+#| label: sql-p7
+
+sql_p7 <- "
+SELECT
+    c.nombre AS comercio,
+
+    COUNT(*) AS n_productos_categoria,
+
+    SUM(
+        CASE
+            WHEN a.marca_estandar IS NULL
+              OR TRIM(a.marca_estandar) = ''
+            THEN 1 ELSE 0
+        END
+    ) AS falta_marca,
+
+    SUM(
+        CASE
+            WHEN a.subcategoria_estandar IS NULL
+              OR TRIM(a.subcategoria_estandar) = ''
+            THEN 1 ELSE 0
+        END
+    ) AS falta_subcategoria,
+
+    SUM(
+        CASE
+            WHEN a.contenido_valor_estandar IS NULL
+              OR a.unidad_estandar IS NULL
+              OR TRIM(a.unidad_estandar) = ''
+            THEN 1 ELSE 0
+        END
+    ) AS falta_contenido_o_unidad,
+
+    SUM(
+        CASE
+            WHEN a.descripcion_original IS NULL
+              OR TRIM(a.descripcion_original) = ''
+            THEN 1 ELSE 0
+        END
+    ) AS falta_descripcion,
+
+    SUM(
+        CASE
+            WHEN a.texto_original IS NULL
+              OR TRIM(a.texto_original) = ''
+            THEN 1 ELSE 0
+        END
+    ) AS falta_texto_original,
+
+    SUM(
+        CASE
+            WHEN a.url IS NULL
+              OR TRIM(a.url) = ''
+            THEN 1 ELSE 0
+        END
+    ) AS falta_url,
+
+    SUM(
+        CASE
+            WHEN o.precio_cop IS NULL
+            THEN 1 ELSE 0
+        END
+    ) AS falta_precio,
+
+    SUM(
+        CASE
+            WHEN o.precio_cop <= 0
+            THEN 1 ELSE 0
+        END
+    ) AS precio_no_positivo,
+
+    SUM(
+        CASE
+            WHEN o.fecha_hora_consulta IS NULL
+              OR TRIM(o.fecha_hora_consulta) = ''
+            THEN 1 ELSE 0
+        END
+    ) AS falta_fecha_hora,
+
+    SUM(
+        CASE
+            WHEN o.precio_antes_cop IS NOT NULL
+             AND o.precio_cop IS NOT NULL
+             AND o.precio_antes_cop < o.precio_cop
+            THEN 1 ELSE 0
+        END
+    ) AS precio_anterior_menor_actual
+
+FROM anuncios a
+
+INNER JOIN comercios c
+    ON a.comercio_id = c.comercio_id
+
+LEFT JOIN observaciones o
+    ON a.ejecucion_id = o.ejecucion_id
+   AND a.comercio_id = o.comercio_id
+   AND a.producto_comercio_id = o.producto_comercio_id
+
+WHERE a.ejecucion_id = ?
+  AND a.incluido_categoria = 1
+
+GROUP BY c.nombre
+
+ORDER BY c.nombre;
+"
+
+p7 <- DBI::dbGetQuery(
+  con,
+  sql_p7,
+  params = list(id_ejecucion_analisis)
+) |>
+  tibble::as_tibble()
+
+p7 |>
+  knitr::kable(
+    caption = "Datos faltantes e inconsistencias por comercio"
+  )
+```
+
+Los campos esenciales para la comparación directa presentan una cobertura alta: las observaciones incluidas conservan precio, URL, texto original y fecha/hora. Los faltantes se concentran principalmente en atributos descriptivos y de contenido, que afectan sobre todo la posibilidad de calcular precios por unidad para todo el catálogo.
+
+```{r}
+#| label: grafico-faltantes
+#| fig-width: 9
+#| fig-height: 5.8
+#| fig-cap: "Principales faltantes detectados en los productos clasificados dentro de la categoría."
+
+faltantes_plot <- p7 |>
+  select(
+    comercio,
+    falta_contenido_o_unidad,
+    falta_descripcion,
+    falta_marca,
+    falta_subcategoria
+  ) |>
+  pivot_longer(
+    -comercio,
+    names_to = "campo",
+    values_to = "faltantes"
+  ) |>
+  mutate(
+    campo = recode(
+      campo,
+      falta_contenido_o_unidad = "Contenido/unidad",
+      falta_descripcion = "Descripción",
+      falta_marca = "Marca",
+      falta_subcategoria = "Subcategoría"
+    )
+  )
+
+ggplot(
+  faltantes_plot,
+  aes(
+    x = comercio,
+    y = faltantes,
+    fill = campo
+  )
+) +
+  geom_col(
+    position = "dodge"
+  ) +
+  labs(
+    title = "Faltantes por comercio",
+    x = NULL,
+    y = "Número de registros",
+    fill = "Campo"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "top"
+  )
+```
+
+```{r}
+#| label: heatmap-faltantes
+#| fig-width: 9
+#| fig-height: 4.8
+#| fig-cap: "Porcentaje de faltantes en los principales atributos por comercio."
+
+faltantes_pct <- p7 |>
+  transmute(
+    comercio,
+    `Contenido/unidad` =
+      100 * falta_contenido_o_unidad / n_productos_categoria,
+    Descripción =
+      100 * falta_descripcion / n_productos_categoria,
+    Marca =
+      100 * falta_marca / n_productos_categoria,
+    Subcategoría =
+      100 * falta_subcategoria / n_productos_categoria,
+    Precio =
+      100 * falta_precio / n_productos_categoria
+  ) |>
+  pivot_longer(
+    -comercio,
+    names_to = "campo",
+    values_to = "pct_faltante"
+  )
+
+ggplot(
+  faltantes_pct,
+  aes(
+    x = campo,
+    y = comercio,
+    fill = pct_faltante
+  )
+) +
+  geom_tile(
+    linewidth = 0.7
+  ) +
+  geom_text(
+    aes(
+      label = sprintf("%.1f%%", pct_faltante)
+    ),
+    size = 3.6
+  ) +
+  labs(
+    title = "Mapa de faltantes",
+    subtitle = "Porcentaje calculado sobre los productos incluidos en la categoría académica",
+    x = NULL,
+    y = NULL,
+    fill = "% faltante"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "right",
+    panel.grid = element_blank(),
+    axis.text.x = element_text(angle = 25, hjust = 1)
+  )
+```
+
+## 6.8 Pregunta 8 — Tamaño de la oferta y cobertura de atributos
+
+**¿Cuántos productos de la categoría se obtuvieron por comercio y ejecución? ¿Qué proporción tiene descripción, marca y contenido identificables?**
+
+```{r}
+#| label: sql-p8
+
+sql_p8 <- "
+SELECT
+    a.ejecucion_id,
+    c.nombre AS comercio,
+
+    e.productos_reportados_sitio,
+
+    e.registros_obtenidos
+        AS registros_scraping,
+
+    COUNT(DISTINCT
+        CASE
+            WHEN a.incluido_categoria = 1
+            THEN a.producto_comercio_id
+        END
+    ) AS productos_categoria_academica,
+
+    ROUND(
+        100.0 *
+        SUM(
+            CASE
+                WHEN a.incluido_categoria = 1
+                 AND a.descripcion_original IS NOT NULL
+                 AND TRIM(a.descripcion_original) <> ''
+                THEN 1 ELSE 0
+            END
+        ) /
+        NULLIF(
+            SUM(
+                CASE
+                    WHEN a.incluido_categoria = 1
+                    THEN 1 ELSE 0
+                END
+            ),
+            0
+        ),
+        2
+    ) AS pct_con_descripcion,
+
+    ROUND(
+        100.0 *
+        SUM(
+            CASE
+                WHEN a.incluido_categoria = 1
+                 AND a.marca_estandar IS NOT NULL
+                 AND TRIM(a.marca_estandar) <> ''
+                THEN 1 ELSE 0
+            END
+        ) /
+        NULLIF(
+            SUM(
+                CASE
+                    WHEN a.incluido_categoria = 1
+                    THEN 1 ELSE 0
+                END
+            ),
+            0
+        ),
+        2
+    ) AS pct_con_marca,
+
+    ROUND(
+        100.0 *
+        SUM(
+            CASE
+                WHEN a.incluido_categoria = 1
+                 AND a.contenido_valor_estandar IS NOT NULL
+                 AND a.unidad_estandar IS NOT NULL
+                 AND TRIM(a.unidad_estandar) <> ''
+                THEN 1 ELSE 0
+            END
+        ) /
+        NULLIF(
+            SUM(
+                CASE
+                    WHEN a.incluido_categoria = 1
+                    THEN 1 ELSE 0
+                END
+            ),
+            0
+        ),
+        2
+    ) AS pct_con_contenido,
+
+    e.estado
+
+FROM anuncios a
+
+INNER JOIN comercios c
+    ON a.comercio_id = c.comercio_id
+
+INNER JOIN ejecuciones e
+    ON a.ejecucion_id = e.ejecucion_id
+   AND a.comercio_id = e.comercio_id
+
+WHERE a.ejecucion_id = ?
+
+GROUP BY
+    a.ejecucion_id,
+    c.nombre,
+    e.productos_reportados_sitio,
+    e.registros_obtenidos,
+    e.estado
+
+ORDER BY
+    productos_categoria_academica DESC;
+"
+
+p8 <- DBI::dbGetQuery(
+  con,
+  sql_p8,
+  params = list(id_ejecucion_analisis)
+) |>
+  tibble::as_tibble()
+
+p8 |>
+  mutate(
+    pct_con_descripcion = formato_pct(pct_con_descripcion),
+    pct_con_marca = formato_pct(pct_con_marca),
+    pct_con_contenido = formato_pct(pct_con_contenido)
+  ) |>
+  knitr::kable(
+    caption = "Cobertura de la categoría y de los principales atributos"
+  )
+```
+
+En La Rebaja el campo `productos_reportados_sitio` puede permanecer ausente porque no existe un único total agregado equivalente para las ramas combinadas utilizadas en la extracción. Se conserva como `NULL/NA` en lugar de imputar un valor que no fue reportado directamente por una única fuente.
+
+```{r}
+#| label: grafico-cobertura-atributos
+#| fig-width: 9
+#| fig-height: 5.6
+#| fig-cap: "Porcentaje de productos con marca, contenido y descripción identificables."
+
+cobertura_atributos <- p8 |>
+  select(
+    comercio,
+    pct_con_descripcion,
+    pct_con_marca,
+    pct_con_contenido
+  ) |>
+  pivot_longer(
+    -comercio,
+    names_to = "atributo",
+    values_to = "porcentaje"
+  ) |>
+  mutate(
+    atributo = recode(
+      atributo,
+      pct_con_descripcion = "Descripción",
+      pct_con_marca = "Marca",
+      pct_con_contenido = "Contenido"
+    )
+  )
+
+ggplot(
+  cobertura_atributos,
+  aes(
+    x = comercio,
+    y = porcentaje,
+    fill = atributo
+  )
+) +
+  geom_col(
+    position = position_dodge(width = 0.8),
+    width = 0.7
+  ) +
+  scale_y_continuous(
+    limits = c(0, 100),
+    labels = label_number(suffix = "%")
+  ) +
+  labs(
+    title = "Cobertura de atributos por comercio",
+    x = NULL,
+    y = "Cobertura",
+    fill = "Atributo"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "top"
+  )
+```
+
+# 7. Análisis complementario
+
+## 7.1 ¿Cuántas veces tiene cada comercio el menor precio?
+
+```{r}
+#| label: victorias-comercio
+
+victorias <- p3 |>
+  count(
+    comercios_menor_precio,
+    name = "productos_con_menor_precio"
+  ) |>
+  arrange(
+    desc(productos_con_menor_precio)
+  )
+
+victorias |>
+  knitr::kable(
+    caption = "Número de productos con menor precio por comercio"
+  )
+```
+
+```{r}
+#| label: grafico-victorias
+#| fig-width: 7.5
+#| fig-height: 4.5
+
+ggplot(
+  victorias,
+  aes(
+    x = reorder(
+      comercios_menor_precio,
+      productos_con_menor_precio
+    ),
+    y = productos_con_menor_precio
+  )
+) +
+  geom_col(width = 0.65) +
+  geom_text(
+    aes(label = productos_con_menor_precio),
+    hjust = -0.25,
+    size = 4.2
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    breaks = 0:8,
+    expand = expansion(mult = c(0, 0.12))
+  ) +
+  labs(
+    title = "Frecuencia del menor precio",
+    x = NULL,
+    y = "Productos"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+## 7.2 Costo de la canasta en una sola tienda
+
+```{r}
+#| label: canasta-completa
+
+canasta <- base_comparables |>
+  group_by(comercio) |>
+  summarise(
+    costo_canasta = sum(precio_cop),
+    .groups = "drop"
+  ) |>
+  arrange(costo_canasta)
+
+costo_mixto <- base_comparables |>
+  group_by(producto_comun_id) |>
+  summarise(
+    minimo = min(precio_cop),
+    .groups = "drop"
+  ) |>
+  summarise(
+    costo = sum(minimo)
+  ) |>
+  pull(costo)
+
+canasta_mostrar <- canasta |>
+  mutate(
+    ahorro_vs_mixto = costo_canasta - costo_mixto
+  )
+
+canasta_mostrar |>
+  mutate(
+    costo_canasta = formato_cop(costo_canasta),
+    ahorro_vs_mixto = formato_cop(ahorro_vs_mixto)
+  ) |>
+  knitr::kable(
+    caption = "Costo de la canasta completa y diferencia frente a la compra mixta"
+  )
+```
+
+```{r}
+#| label: grafico-canasta
+#| fig-width: 8
+#| fig-height: 5
+
+ggplot(
+  canasta,
+  aes(
+    x = reorder(comercio, costo_canasta),
+    y = costo_canasta,
+    fill = comercio
+  )
+) +
+  geom_col(
+    width = 0.65,
+    show.legend = FALSE
+  ) +
+  geom_hline(
+    yintercept = costo_mixto,
+    linetype = 2
+  ) +
+  geom_text(
+    aes(label = formato_cop(costo_canasta)),
+    vjust = -0.4,
+    size = 4
+  ) +
+  scale_y_continuous(
+    labels = label_number(
+      prefix = "$",
+      big.mark = ".",
+      decimal.mark = ","
+    ),
+    expand = expansion(mult = c(0, 0.12))
+  ) +
+  labs(
+    title = "Costo de comprar los ocho productos en una sola tienda",
+    subtitle = paste0(
+      "Línea discontinua: compra mixta = ",
+      formato_cop(costo_mixto)
+    ),
+    x = NULL,
+    y = "Costo (COP)"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+La canasta permite contestar una pregunta distinta a la comparación individual. Si el consumidor quiere comprar todo en un único comercio, interesa el costo agregado de las mismas ocho presentaciones. Si puede dividir la compra entre cadenas, la referencia es la suma de los ocho precios mínimos.
+
+## 7.3 Índice de competitividad sobre la canasta común
+
+No es correcto comparar promedios de todo el surtido porque cada cadena ofrece productos diferentes. Sí es posible comparar un índice usando **exactamente las mismas ocho presentaciones**.
+
+```{r}
+#| label: indice-comercio
+
+indice_comercio <- indice_precio |>
+  group_by(comercio) |>
+  summarise(
+    indice_medio = mean(indice),
+    indice_mediano = median(indice),
+    peor_posicion = max(indice),
+    .groups = "drop"
+  ) |>
+  arrange(indice_medio)
+
+indice_comercio |>
+  mutate(
+    across(
+      c(
+        indice_medio,
+        indice_mediano,
+        peor_posicion
+      ),
+      ~ round(.x, 2)
+    )
+  ) |>
+  knitr::kable(
+    caption = "Índice relativo de precio sobre las ocho presentaciones comunes"
+  )
+```
+
+```{r}
+#| label: grafico-indice-comercio
+#| fig-width: 7.5
+#| fig-height: 4.7
+
+ggplot(
+  indice_comercio,
+  aes(
+    x = reorder(comercio, indice_medio),
+    y = indice_medio
+  )
+) +
+  geom_col(width = 0.65) +
+  geom_hline(
+    yintercept = 100,
+    linetype = 2
+  ) +
+  geom_text(
+    aes(
+      label = sprintf("%.1f", indice_medio)
+    ),
+    vjust = -0.4,
+    size = 4
+  ) +
+  coord_cartesian(
+    ylim = c(
+      0,
+      max(indice_comercio$indice_medio) * 1.12
+    )
+  ) +
+  labs(
+    title = "Índice medio sobre la canasta común",
+    subtitle = "100 sería igualar el mínimo en todos los productos",
+    x = NULL,
+    y = "Índice relativo medio"
+  ) +
+  tema_taller()
+```
+
+Este índice no pretende describir cuál comercio es más barato en todo su catálogo. Solo resume la posición relativa de cada cadena sobre **las ocho presentaciones exactamente comparables**.
+
+## 7.4 Recomendación por presentación
+
+```{r}
+#| label: recomendacion-producto
+
+recomendacion_producto <- p3 |>
+  select(
+    producto_comun_id,
+    producto_comun,
+    comercio_recomendado = comercios_menor_precio,
+    precio_minimo
+  ) |>
+  left_join(
+    p4 |>
+      select(
+        producto_comun_id,
+        ahorro_cop,
+        ahorro_porcentaje
+      ),
+    by = "producto_comun_id"
+  )
+
+recomendacion_producto |>
+  mutate(
+    precio_minimo = formato_cop(precio_minimo),
+    ahorro_cop = formato_cop(ahorro_cop),
+    ahorro_porcentaje = formato_pct(ahorro_porcentaje)
+  ) |>
+  knitr::kable(
+    caption = "Comercio con menor precio y ahorro potencial por presentación"
+  )
+```
+
+Esta tabla es la salida más directa para el consumidor: mantiene fija la presentación y reporta dónde se observó el menor precio en la ejecución analizada.
+
+# 8. Principales hallazgos
+
+```{r}
+#| label: hallazgos-dinamicos
+#| results: asis
+
+ganador_frecuencia <- victorias |>
+  slice(1)
+
+mejor_canasta <- canasta |>
+  slice(1)
+
+mayor_relativo <- p6 |>
+  slice(1)
+
+mayor_absoluto <- p6 |>
+  arrange(desc(diferencia_cop)) |>
+  slice(1)
+
+mejor_unitario <- p5 |>
+  filter(mejor_precio_unitario == 1) |>
+  slice(1)
+
+cat(
+  paste0(
+    "- **",
+    ganador_frecuencia$comercios_menor_precio[[1]],
+    "** registra el menor precio en **",
+    ganador_frecuencia$productos_con_menor_precio[[1]],
+    " de los ocho productos comparables**.\n",
+    "- La canasta completa más económica en un solo comercio corresponde a **",
+    mejor_canasta$comercio[[1]],
+    "** por **",
+    formato_cop(mejor_canasta$costo_canasta[[1]]),
+    "**.\n",
+    "- Si se compra cada producto donde registra su mínimo, el costo de referencia es **",
+    formato_cop(costo_mixto),
+    "**.\n",
+    "- La mayor oportunidad de ahorro porcentual corresponde a **",
+    mayor_relativo$producto_comun[[1]],
+    "** con **",
+    formato_pct(mayor_relativo$ahorro_porcentaje[[1]]),
+    "**.\n",
+    "- La mayor diferencia absoluta corresponde a **",
+    mayor_absoluto$producto_comun[[1]],
+    "** con **",
+    formato_cop(mayor_absoluto$diferencia_cop[[1]]),
+    "**.\n",
+    "- Entre las presentaciones comparadas de Virex ungüento 5 %, el menor costo unitario se observa en **",
+    mejor_unitario$comercio[[1]],
+    "** para la presentación de **",
+    mejor_unitario$contenido_g[[1]],
+    " g**, con aproximadamente **",
+    formato_cop(mejor_unitario$precio_por_g[[1]]),
+    " por gramo**."
+  )
+)
+```
+
+# 9. Discusión
+
+## 9.1 No existe una única tienda más barata para todo
+
+Aunque una cadena registra el menor precio en la mayoría de las presentaciones comparables, existen productos específicos para los cuales otra farmacia ofrece un precio menor. Por ello, afirmar que una cadena es globalmente más barata a partir de promedios de surtidos diferentes sería incorrecto.
+
+La comparación válida se realiza sobre las mismas presentaciones y cantidades.
+
+## 9.2 El ahorro absoluto y el ahorro relativo responden preguntas distintas
+
+Una diferencia elevada en pesos puede aparecer en un producto costoso sin representar la mayor reducción porcentual. Por esta razón se calcularon ambos indicadores.
+
+El ahorro porcentual se midió respecto al mayor precio observado:
+
+\[
+100\frac{P_{\max}-P_{\min}}{P_{\max}}
+\]
+
+## 9.3 El precio unitario requiere equivalencia real
+
+El precio por gramo o mililitro solo tiene sentido cuando se comparan presentaciones de la misma formulación. En medicamentos no sería correcto utilizar el costo por gramo para sugerir sustitución entre productos diferentes.
+
+La comparación de Virex 15 g y 30 g se incluyó precisamente porque las dos presentaciones pertenecen a la misma formulación comercial analizada.
+
+## 9.4 La taxonomía de los comercios no es homogénea
+
+Los tres sitios organizan los productos de forma diferente. En particular, La Rebaja ubica una parte importante de los medicamentos de interés dentro de una categoría amplia de medicamentos con fórmula médica.
+
+Por esta razón se separaron dos conceptos:
+
+1. la categoría comercial desde la cual se recolectó el producto;
+2. la clasificación académica aplicada posteriormente.
+
+Esta separación permite conservar la información original y justificar por qué un registro fue incluido o excluido.
+
+# 10. Limitaciones
+
+La comparación es una **fotografía temporal**. Los precios, promociones y disponibilidad pueden cambiar incluso el mismo día, por lo que los resultados no deben presentarse como precios permanentes.
+
+Hay cuatro limitaciones concretas del conjunto analizado. Primero, los comercios no exponen la misma cantidad de metadatos: La Rebaja, por ejemplo, no entregó un campo separado de descripción para los registros analizados, aunque sí se conservó el texto original disponible. Segundo, no todos los productos del catálogo completo tienen contenido y unidad identificables; esos registros pueden compararse por precio del empaque, pero no por precio unitario. Tercero, algunas fuentes reportan revisiones históricas diferentes del registro INVIMA, por lo que el registro sanitario se usó como evidencia y no como única llave. Cuarto, la ejecución comparativa actual agrupa tres ejecuciones fuente conservando sus marcas de tiempo originales; una nueva corrida en línea puede añadirse sin sobrescribir esta observación.
+
+Además, el análisis de canasta se restringe a las ocho presentaciones comunes. No se generaliza a todo el surtido de una cadena y tampoco incorpora costos de envío, membresías, descuentos condicionados o sustitución terapéutica.
+
+# 11. Conclusiones para el consumidor
+
+La principal conclusión es que **no conviene resumir la comparación con una sola farmacia ganadora**. En esta ejecución Cruz Verde registra el menor precio en seis de los ocho productos, Cafam en uno y La Rebaja en uno. Para una compra concreta, la tabla de recomendación por presentación es más informativa que un promedio general.
+
+El ahorro potencial tampoco es uniforme. Hay presentaciones donde la diferencia entre comercios es cercana al 9 %, mientras que en otras se aproxima al 18 %. Por eso comparar precios aporta más valor en unos productos que en otros.
+
+En Virex ungüento 5 %, la presentación de 30 g tiene menor costo por gramo que la de 15 g en los tres comercios. La conclusión económica es clara, pero debe separarse de cualquier recomendación de tratamiento: **menor precio por gramo no significa sustitución terapéutica ni necesidad de comprar una cantidad mayor**.
+
+Desde el punto de vista de datos, el resultado más importante es que la comparación puede reconstruirse: cada observación conserva su comercio, producto original, URL, fecha/hora, ejecución y respuesta cruda; los ocho emparejamientos están documentados; y las preguntas del análisis se resuelven directamente desde SQLite.
+
+# 12. Validación final
+
+```{r}
+#| label: validacion-final
+
+control_final <- tibble::tibble(
+  criterio = c(
+    "Comercios",
+    "Productos comparables",
+    "Observaciones comparables",
+    "Duplicados comparables",
+    "Productos con cobertura de 3 comercios"
+  ),
+  valor = c(
+    p2_resumen$n_comercios[[1]],
+    p2_resumen$n_productos_comparables[[1]],
+    p2_resumen$n_observaciones_comparables[[1]],
+    nrow(p2_duplicados),
+    sum(p2_cobertura$n_comercios == 3)
+  ),
+  esperado = c(
+    "3",
+    "8",
+    "24",
+    "0",
+    "8"
+  )
+)
+
+control_final |>
+  knitr::kable(
+    caption = "Control de requisitos mínimos del conjunto comparable"
+  )
+```
+
+# 13. Diccionario mínimo de variables
+
+Para facilitar la revisión, los campos más importantes utilizados en el análisis son:
+
+| Campo | Tabla | Uso |
+|---|---|---|
+| `ejecucion_id` | ejecuciones/anuncios/observaciones | identifica la corrida comparativa |
+| `ejecucion_fuente` | ejecuciones/anuncios/observaciones | conserva la corrida original de cada comercio |
+| `producto_comercio_id` | anuncios/observaciones | identificador del producto dentro del sitio |
+| `producto_comun_id` | anuncios/productos_comunes | llave P01–P08 usada para homologar |
+| `incluido_categoria` | anuncios | indica pertenencia a la categoría académica |
+| `comparable` | anuncios | identifica las 24 observaciones usadas en la comparación |
+| `producto_original` | anuncios | nombre publicado por el comercio |
+| `texto_original` | anuncios | texto conservado sin sustituirlo por la versión limpia |
+| `contenido_valor_estandar` | anuncios | cantidad usada en comparaciones unitarias |
+| `unidad_estandar` | anuncios | unidad normalizada (`g`, `ml`, etc.) |
+| `precio_cop` | observaciones | precio observado en pesos colombianos |
+| `precio_antes_cop` | observaciones | precio anterior cuando el sitio lo informa |
+| `promocion` | observaciones | indicador de promoción |
+| `fecha_hora_consulta` | observaciones | instante ISO 8601 de la observación |
+
+# 14. Reproducibilidad
+
+El proyecto se entrega con:
+
+```text
+taller_01/
+├── taller_1.qmd
+├── scraper.R
+├── comparador_precios.sqlite
+├── README.md
+├── renv.lock
+└── raw/
+    ├── cafam/
+    ├── cruz_verde/
+    └── la_rebaja/
+```
+
+Las dependencias de R se fijan mediante `renv.lock`. La carpeta `raw/` permite comprobar el procesamiento aun si alguno de los sitios cambia su estructura después de la entrega.
+
+# 15. Información de sesión
+
+```{r}
+#| label: session-info
+
+sessionInfo()
+```
+
+```{r}
+#| label: cerrar-conexion
+#| include: false
+
+DBI::dbDisconnect(con)
+```

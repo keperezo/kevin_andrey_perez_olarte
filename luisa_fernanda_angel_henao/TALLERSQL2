@@ -1,0 +1,693 @@
+install.packages("DBI")
+install.packages("RSQLite")
+install.packages("dplyr")
+
+library(DBI)
+library(RSQLite)
+library(dplyr)
+
+download.file(
+  "https://github.com/lerocha/chinook-database/raw/master/ChinookDatabase/DataSources/Chinook_Sqlite.sqlite",
+  "chinook.db",
+  mode = "wb"
+)
+
+file.exists("chinook.db")
+
+con <- dbConnect(
+  RSQLite::SQLite(),
+  "chinook.db"
+)
+
+dbListTables(con)
+
+
+## punto 1
+
+resultado1 <- dbGetQuery(con, "
+  SELECT
+    c.FirstName || ' ' || c.LastName AS cliente,
+    e.FirstName || ' ' || e.LastName AS empleado_soporte,
+    COALESCE(
+      j.FirstName || ' ' || j.LastName,
+      'Sin jefe'
+    ) AS jefe
+  FROM Customer c
+  INNER JOIN Employee e
+    ON c.SupportRepId = e.EmployeeId
+  LEFT JOIN Employee j
+    ON e.ReportsTo = j.EmployeeId
+  ORDER BY cliente;
+")
+
+resultado1
+
+
+## punto 2
+
+resultado2 <- dbGetQuery(con, "
+  WITH gasto_cliente AS (
+    SELECT
+      c.CustomerId,
+      c.FirstName || ' ' || c.LastName AS cliente,
+      c.SupportRepId,
+      SUM(i.Total) AS gasto_total
+    FROM Customer c
+    INNER JOIN Invoice i
+      ON c.CustomerId = i.CustomerId
+    GROUP BY c.CustomerId
+  )
+
+  SELECT
+    g.cliente,
+    e.FirstName || ' ' || e.LastName AS empleado_soporte,
+    ROUND(g.gasto_total, 2) AS gasto_total,
+    ROUND(
+      (
+        SELECT AVG(g2.gasto_total)
+        FROM gasto_cliente g2
+        WHERE g2.SupportRepId = g.SupportRepId
+          AND g2.CustomerId <> g.CustomerId
+      ),
+      2
+    ) AS promedio_otros_clientes
+  FROM gasto_cliente g
+  INNER JOIN Employee e
+    ON g.SupportRepId = e.EmployeeId
+  WHERE g.gasto_total >
+    (
+      SELECT AVG(g2.gasto_total)
+      FROM gasto_cliente g2
+      WHERE g2.SupportRepId = g.SupportRepId
+        AND g2.CustomerId <> g.CustomerId
+    )
+  ORDER BY g.gasto_total DESC;
+")
+
+resultado2
+
+
+## punto 3
+
+resultado3 <- dbGetQuery(con, "
+  SELECT
+    e.EmployeeId,
+    e.FirstName || ' ' || e.LastName AS empleado
+  FROM Employee e
+
+  EXCEPT
+
+  SELECT DISTINCT
+    e.EmployeeId,
+    e.FirstName || ' ' || e.LastName AS empleado
+  FROM Employee e
+  INNER JOIN Customer c
+    ON e.EmployeeId = c.SupportRepId
+
+  ORDER BY empleado;
+")
+
+resultado3
+
+
+## punto 4
+
+resultado4 <- dbGetQuery(con, "
+  WITH resumen_empleado AS (
+    SELECT
+      e.EmployeeId,
+      e.FirstName || ' ' || e.LastName AS empleado,
+      COUNT(DISTINCT c.CustomerId) AS cantidad_clientes,
+      COALESCE(SUM(i.Total), 0) AS ingreso_total
+    FROM Employee e
+    LEFT JOIN Customer c
+      ON e.EmployeeId = c.SupportRepId
+    LEFT JOIN Invoice i
+      ON c.CustomerId = i.CustomerId
+    GROUP BY e.EmployeeId
+  )
+
+  SELECT
+    EmployeeId,
+    empleado,
+    cantidad_clientes,
+    ROUND(ingreso_total, 2) AS ingreso_total
+  FROM resumen_empleado
+  ORDER BY ingreso_total DESC;
+")
+
+resultado4
+
+
+empleado_mas_clientes <- resultado4[
+  which.max(resultado4$cantidad_clientes),
+]
+
+empleado_mas_ingresos <- resultado4[
+  which.max(resultado4$ingreso_total),
+]
+
+cat(
+  "Empleado con más clientes:",
+  empleado_mas_clientes$empleado,
+  "-",
+  empleado_mas_clientes$cantidad_clientes,
+  "clientes\n"
+)
+
+cat(
+  "Empleado con mayores ingresos:",
+  empleado_mas_ingresos$empleado,
+  "- $",
+  empleado_mas_ingresos$ingreso_total,
+  "\n"
+)
+
+if (
+  empleado_mas_clientes$EmployeeId ==
+  empleado_mas_ingresos$EmployeeId
+) {
+
+  cat(
+    "El empleado que atiende más clientes también es el que genera más ingresos.\n"
+  )
+
+} else {
+
+  cat(
+    "El empleado que atiende más clientes NO es el mismo que genera más ingresos.\n"
+  )
+}
+
+
+## punto 1
+
+resultado5 <- dbGetQuery(con, "
+  WITH ventas_mes AS (
+    SELECT
+      SUBSTR(InvoiceDate, 1, 7) AS anio_mes,
+      SUM(Total) AS ventas
+    FROM Invoice
+    GROUP BY SUBSTR(InvoiceDate, 1, 7)
+  ),
+
+  cambios AS (
+    SELECT
+      anio_mes,
+      ROUND(ventas, 2) AS ventas,
+      ROUND(
+        LAG(ventas) OVER (
+          ORDER BY anio_mes
+        ),
+        2
+      ) AS ventas_mes_anterior,
+      ROUND(
+        LEAD(ventas) OVER (
+          ORDER BY anio_mes
+        ),
+        2
+      ) AS ventas_mes_siguiente
+    FROM ventas_mes
+  )
+
+  SELECT
+    anio_mes,
+    ventas,
+    ventas_mes_anterior,
+    ventas_mes_siguiente,
+    ROUND(
+      (ventas - ventas_mes_anterior)
+      * 100.0
+      / ventas_mes_anterior,
+      2
+    ) AS variacion_porcentual
+  FROM cambios
+  ORDER BY anio_mes;
+")
+
+resultado5
+
+
+## punto 2
+
+resultado6 <- dbGetQuery(con, "
+  WITH ventas_mes AS (
+    SELECT
+      SUBSTR(InvoiceDate, 1, 7) AS anio_mes,
+      SUBSTR(InvoiceDate, 1, 4) AS anio,
+      SUM(Total) AS ventas
+    FROM Invoice
+    GROUP BY SUBSTR(InvoiceDate, 1, 7)
+  ),
+
+  rankings AS (
+    SELECT
+      anio,
+      anio_mes,
+      ventas,
+      RANK() OVER (
+        PARTITION BY anio
+        ORDER BY ventas DESC
+      ) AS ranking_mayor,
+      RANK() OVER (
+        PARTITION BY anio
+        ORDER BY ventas ASC
+      ) AS ranking_menor
+    FROM ventas_mes
+  )
+
+  SELECT
+    anio,
+    MAX(
+      CASE
+        WHEN ranking_mayor = 1
+        THEN anio_mes
+      END
+    ) AS mes_mayor_venta,
+    MAX(
+      CASE
+        WHEN ranking_menor = 1
+        THEN anio_mes
+      END
+    ) AS mes_menor_venta
+  FROM rankings
+  GROUP BY anio
+  ORDER BY anio;
+")
+
+resultado6
+
+
+## punto 3
+
+resultado7 <- dbGetQuery(con, "
+  WITH ingresos_genero AS (
+    SELECT
+      SUBSTR(i.InvoiceDate, 1, 4) AS anio,
+      g.Name AS genero,
+      SUM(il.UnitPrice * il.Quantity) AS ingresos
+    FROM Invoice i
+    INNER JOIN InvoiceLine il
+      ON i.InvoiceId = il.InvoiceId
+    INNER JOIN Track t
+      ON il.TrackId = t.TrackId
+    INNER JOIN Genre g
+      ON t.GenreId = g.GenreId
+    GROUP BY
+      SUBSTR(i.InvoiceDate, 1, 4),
+      g.GenreId
+  ),
+
+  rankings AS (
+    SELECT
+      anio,
+      genero,
+      ROUND(ingresos, 2) AS ingresos,
+      RANK() OVER (
+        PARTITION BY anio
+        ORDER BY ingresos DESC
+      ) AS ranking
+    FROM ingresos_genero
+  )
+
+  SELECT
+    anio,
+    genero,
+    ingresos
+  FROM rankings
+  WHERE ranking = 1
+  ORDER BY anio;
+")
+
+resultado7
+
+
+## punto 4
+
+resultado8 <- dbGetQuery(con, "
+  WITH gasto_cliente AS (
+    SELECT
+      c.CustomerId,
+      c.FirstName || ' ' || c.LastName AS cliente,
+      SUM(i.Total) AS gasto_total
+    FROM Customer c
+    INNER JOIN Invoice i
+      ON c.CustomerId = i.CustomerId
+    GROUP BY c.CustomerId
+  ),
+
+  cuartiles AS (
+    SELECT
+      cliente,
+      gasto_total,
+      NTILE(4) OVER (
+        ORDER BY gasto_total
+      ) AS cuartil
+    FROM gasto_cliente
+  ),
+
+  resumen_cuartil AS (
+    SELECT
+      cuartil,
+      SUM(gasto_total) AS ingreso_cuartil
+    FROM cuartiles
+    GROUP BY cuartil
+  ),
+
+  total_tienda AS (
+    SELECT
+      SUM(ingreso_cuartil) AS ingreso_total
+    FROM resumen_cuartil
+  )
+
+  SELECT
+    rc.cuartil,
+    ROUND(rc.ingreso_cuartil, 2) AS ingreso_cuartil,
+    ROUND(
+      rc.ingreso_cuartil
+      * 100.0
+      / tt.ingreso_total,
+      2
+    ) AS porcentaje_ingreso
+  FROM resumen_cuartil rc
+  CROSS JOIN total_tienda tt
+  ORDER BY rc.cuartil;
+")
+
+resultado8
+
+
+comparacion_q4 <- dbGetQuery(con, "
+  WITH gasto_cliente AS (
+    SELECT
+      c.CustomerId,
+      SUM(i.Total) AS gasto_total
+    FROM Customer c
+    INNER JOIN Invoice i
+      ON c.CustomerId = i.CustomerId
+    GROUP BY c.CustomerId
+  ),
+
+  cuartiles AS (
+    SELECT
+      gasto_total,
+      NTILE(4) OVER (
+        ORDER BY gasto_total
+      ) AS cuartil
+    FROM gasto_cliente
+  ),
+
+  total AS (
+    SELECT
+      SUM(gasto_total) AS total_tienda
+    FROM cuartiles
+  )
+
+  SELECT
+    ROUND(
+      SUM(
+        CASE
+          WHEN cuartil = 4
+          THEN gasto_total
+          ELSE 0
+        END
+      ),
+      2
+    ) AS ingreso_Q4,
+    ROUND(
+      SUM(
+        CASE
+          WHEN cuartil < 4
+          THEN gasto_total
+          ELSE 0
+        END
+      ),
+      2
+    ) AS ingreso_Q1_Q2_Q3,
+    ROUND(
+      SUM(
+        CASE
+          WHEN cuartil = 4
+          THEN gasto_total
+          ELSE 0
+        END
+      )
+      * 100.0
+      / MAX(total_tienda),
+      2
+    ) AS porcentaje_Q4,
+    ROUND(
+      SUM(
+        CASE
+          WHEN cuartil < 4
+          THEN gasto_total
+          ELSE 0
+        END
+      )
+      * 100.0
+      / MAX(total_tienda),
+      2
+    ) AS porcentaje_Q1_Q2_Q3
+  FROM cuartiles
+  CROSS JOIN total;
+")
+
+comparacion_q4
+
+cat(
+  "El cuartil superior Q4 representa el ",
+  comparacion_q4$porcentaje_Q4,
+  "% del ingreso total de la tienda, mientras que los cuartiles Q1, Q2 y Q3 juntos representan el ",
+  comparacion_q4$porcentaje_Q1_Q2_Q3,
+  "%.\n"
+)
+
+
+## punto 1
+
+fecha_maxima <- dbGetQuery(con, "
+  SELECT
+    MAX(InvoiceDate) AS fecha_maxima
+  FROM Invoice;
+")
+
+fecha_maxima
+
+
+## punto 2
+
+resultado9 <- dbGetQuery(con, "
+  WITH fecha_maxima AS (
+    SELECT
+      MAX(InvoiceDate) AS fecha_maxima
+    FROM Invoice
+  ),
+
+  ultima_compra AS (
+    SELECT
+      c.CustomerId,
+      c.FirstName || ' ' || c.LastName AS cliente,
+      MAX(i.InvoiceDate) AS ultima_compra
+    FROM Customer c
+    LEFT JOIN Invoice i
+      ON c.CustomerId = i.CustomerId
+    GROUP BY
+      c.CustomerId,
+      c.FirstName,
+      c.LastName
+  )
+
+  SELECT
+    u.CustomerId,
+    u.cliente,
+    u.ultima_compra,
+    f.fecha_maxima,
+    ROUND(
+      (
+        JULIANDAY(f.fecha_maxima)
+        -
+        JULIANDAY(u.ultima_compra)
+      ) / 30.0,
+      2
+    ) AS meses_transcurridos
+  FROM ultima_compra u
+  CROSS JOIN fecha_maxima f
+  ORDER BY meses_transcurridos DESC;
+")
+
+resultado9
+
+
+## punto 3
+
+resultado10 <- dbGetQuery(con, "
+  WITH fecha_maxima AS (
+    SELECT
+      MAX(InvoiceDate) AS fecha_maxima
+    FROM Invoice
+  ),
+
+  ultima_compra AS (
+    SELECT
+      c.CustomerId,
+      c.FirstName || ' ' || c.LastName AS cliente,
+      MAX(i.InvoiceDate) AS ultima_compra
+    FROM Customer c
+    LEFT JOIN Invoice i
+      ON c.CustomerId = i.CustomerId
+    GROUP BY
+      c.CustomerId,
+      c.FirstName,
+      c.LastName
+  )
+
+  SELECT
+    u.CustomerId,
+    u.cliente,
+    u.ultima_compra,
+    ROUND(
+      (
+        JULIANDAY(f.fecha_maxima)
+        -
+        JULIANDAY(u.ultima_compra)
+      ) / 30.0,
+      2
+    ) AS meses_transcurridos,
+    CASE
+      WHEN u.ultima_compra IS NULL
+        THEN 'inactivo'
+      WHEN (
+        JULIANDAY(f.fecha_maxima)
+        -
+        JULIANDAY(u.ultima_compra)
+      ) / 30.0 <= 6
+        THEN 'activo'
+      WHEN (
+        JULIANDAY(f.fecha_maxima)
+        -
+        JULIANDAY(u.ultima_compra)
+      ) / 30.0 <= 12
+        THEN 'en riesgo'
+      ELSE 'inactivo'
+    END AS segmento
+  FROM ultima_compra u
+  CROSS JOIN fecha_maxima f
+  ORDER BY meses_transcurridos DESC;
+")
+
+resultado10
+
+
+## punto 4
+
+resultado11 <- dbGetQuery(con, "
+  WITH fecha_maxima AS (
+    SELECT
+      MAX(InvoiceDate) AS fecha_maxima
+    FROM Invoice
+  ),
+
+  clientes AS (
+    SELECT
+      c.CustomerId,
+      c.FirstName || ' ' || c.LastName AS cliente,
+      MAX(i.InvoiceDate) AS ultima_compra,
+      COALESCE(
+        SUM(i.Total),
+        0
+      ) AS gasto_historico
+    FROM Customer c
+    LEFT JOIN Invoice i
+      ON c.CustomerId = i.CustomerId
+    GROUP BY
+      c.CustomerId,
+      c.FirstName,
+      c.LastName
+  ),
+
+  segmentados AS (
+    SELECT
+      cl.CustomerId,
+      cl.cliente,
+      cl.ultima_compra,
+      cl.gasto_historico,
+      CASE
+        WHEN cl.ultima_compra IS NULL
+          THEN 'inactivo'
+        WHEN (
+          JULIANDAY(f.fecha_maxima)
+          -
+          JULIANDAY(cl.ultima_compra)
+        ) / 30.0 <= 6
+          THEN 'activo'
+        WHEN (
+          JULIANDAY(f.fecha_maxima)
+          -
+          JULIANDAY(cl.ultima_compra)
+        ) / 30.0 <= 12
+          THEN 'en riesgo'
+        ELSE 'inactivo'
+      END AS segmento
+    FROM clientes cl
+    CROSS JOIN fecha_maxima f
+  ),
+
+  resumen_segmento AS (
+    SELECT
+      segmento,
+      COUNT(*) AS cantidad_clientes,
+      ROUND(AVG(gasto_historico), 2) AS gasto_promedio,
+      ROUND(SUM(gasto_historico), 2) AS gasto_total
+    FROM segmentados
+    GROUP BY segmento
+  ),
+
+  ranking_clientes AS (
+    SELECT
+      CustomerId,
+      cliente,
+      segmento,
+      ROUND(gasto_historico, 2) AS gasto_historico,
+      RANK() OVER (
+        PARTITION BY segmento
+        ORDER BY gasto_historico DESC
+      ) AS ranking_gasto
+    FROM segmentados
+  )
+
+  SELECT
+    r.segmento,
+    r.cantidad_clientes,
+    r.gasto_promedio,
+    r.gasto_total,
+    c.ranking_gasto,
+    c.cliente,
+    c.gasto_historico
+  FROM resumen_segmento r
+  INNER JOIN ranking_clientes c
+    ON r.segmento = c.segmento
+  WHERE c.ranking_gasto <= 3
+  ORDER BY
+    CASE r.segmento
+      WHEN 'activo' THEN 1
+      WHEN 'en riesgo' THEN 2
+      WHEN 'inactivo' THEN 3
+    END,
+    c.ranking_gasto;
+")
+
+resultado11
+
+cat("
+INTERPRETACIÓN:
+El segmento 'en riesgo' debe ser considerado prioritario para una
+campaña de retención, debido a que corresponde a clientes que llevan
+entre 6 y 12 meses sin realizar una compra. Dentro de este segmento,
+los clientes con mayor gasto histórico representan los clientes de
+mayor valor que podrían perderse.
+")
+
+
+dbDisconnect(con)
+
+cat("Conexión cerrada.\n")

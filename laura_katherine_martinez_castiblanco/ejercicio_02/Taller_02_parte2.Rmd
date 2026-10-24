@@ -1,0 +1,704 @@
+---
+title: "Taller 2 - Taller práctico de SQL Parte 2"
+author: "Laura Katherine Martinez Castiblanco"
+output:
+  html_document:
+    theme: flatly
+    toc: false
+    self_contained: true
+    code_folding: hide
+    mathjax: default
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r librerias y conexion, include=FALSE}
+# Instalamos los paquetes necesarios
+paquetes  <- c("DBI", "RSQLite", "dplyr", "knitr")
+instalados <- rownames(installed.packages())
+pendientes <- setdiff(paquetes, instalados)
+if (length(pendientes) > 0) install.packages(pendientes)
+
+library(DBI)
+library(RSQLite)
+library(dplyr)
+library(knitr)
+library(kableExtra) 
+
+```
+
+
+
+# Ejercicio 1: JOINs avanzados, subconsultas correlacionadas y operadores de conjunto
+
+Usando las tablas `Customer`, `Employee`, `Invoice`, `InvoiceLine`, `Track` y `Album` de Chinook:
+
+```{r BaseDatos1}
+# Crear conexión a la base de datos
+con <- dbConnect(RSQLite::SQLite(), "Chinook.db")
+```
+
+```{r sql-quer, include=FALSE}
+# Ejemplo de ejecución
+dbGetQuery(con, "SELECT * FROM Customer LIMIT 5;")
+```
+
+```{r exploracion_esquema_html, echo=TRUE, results='asis'}
+# Tablas de interés para los ejercicios
+tablas_analisis <- c("Customer", "Employee", "Invoice", "InvoiceLine", "Track", "Genre")
+
+# Muestra una vista previa (primeras 3 filas) de cada tabla clave
+for (tabla in tablas_analisis) {
+  # Título de sección (los saltos \n\n antes y después son indispensables)
+  cat("\n\n### Vista previa de la tabla:", tabla, "\n\n")
+  
+  query <- paste0("SELECT * FROM ", tabla, " LIMIT 5;")
+  df_preview <- dbGetQuery(con, query)
+  
+  # Imprimir la tabla renderizada directamente en HTML
+  print(
+    kable(
+      df_preview, 
+      format = "html",
+      caption = paste("Tabla:", tabla),
+      table.attr = 'class="table table-striped table-hover table-bordered table-condensed"'
+    )
+  )
+}
+```
+
+## 1.1 
+
+Cada cliente tiene un empleado de soporte asignado (`Customer.SupportRepId` referencia a `Employee.EmployeeId`), y cada empleado puede tener un jefe (`Employee.ReportsTo`, que también referencia a `Employee.EmployeeId`). 
+
+Escribe una consulta que combine `Customer` con `Employee` mediante **INNER JOIN** y luego una **segunda vez** la tabla `Employee` (con alias distinto, es decir un **SELF JOIN**) para mostrar: nombre del cliente, nombre del empleado de soporte y nombre del jefe de ese empleado. Usa `COALESCE` para mostrar 'Sin jefe' cuando el empleado no tenga uno registrado.
+
+```{r consulta_clientes_jefes, echo=TRUE}
+# 1. Definición de la consulta SQL
+query_jefes <- "
+SELECT 
+    c.FirstName || ' ' || c.LastName AS Cliente,
+    e.FirstName || ' ' || e.LastName AS Empleado_Soporte,
+    COALESCE(j.FirstName || ' ' || j.LastName, 'Sin jefe') AS Jefe_Empleado
+FROM Customer c
+INNER JOIN Employee e ON c.SupportRepId = e.EmployeeId
+LEFT JOIN Employee j ON e.ReportsTo = j.EmployeeId
+ORDER BY c.FirstName;
+"
+
+# 2. Ejecución de la consulta
+df_jefes <- dbGetQuery(con, query_jefes)
+
+# 3. Renderizado de la tabla en HTML
+knitr::kable(
+  df_jefes, 
+  caption = "Relación entre Clientes, Empleados de Soporte y sus Jefes",
+  format = "html",
+  table.attr = 'class="table table-striped table-hover table-bordered table-condensed"'
+)
+```
+## 1.2
+
+Con una **subconsulta correlacionada**, encuentra los clientes cuyo gasto total (`SUM(Invoice.Total)`) sea mayor al gasto promedio de **los demás clientes atendidos por el mismo empleado de soporte** (no el promedio general, ni del país: el de su propio representante).
+
+```{r consulta_promedio_soporte, echo=TRUE}
+# 1. Definición de la consulta SQL con subconsulta correlacionada
+query_correlacionada <- "
+SELECT 
+    c.CustomerId,
+    c.FirstName || ' ' || c.LastName AS Cliente,
+    c.SupportRepId,
+    SUM(i.Total) AS Gasto_Total
+FROM Customer c
+INNER JOIN Invoice i ON c.CustomerId = i.CustomerId
+GROUP BY c.CustomerId, c.FirstName, c.LastName, c.SupportRepId
+HAVING SUM(i.Total) > (
+    SELECT AVG(subtotal.Gasto)
+    FROM (
+        SELECT SUM(i2.Total) AS Gasto
+        FROM Customer c2
+        INNER JOIN Invoice i2 ON c2.CustomerId = i2.CustomerId
+        WHERE c2.SupportRepId = c.SupportRepId
+          AND c2.CustomerId <> c.CustomerId  -- Excluye al cliente actual del promedio
+        GROUP BY c2.CustomerId
+    ) AS subtotal
+);
+"
+
+# 2. Ejecución en SQLite
+df_resultado <- dbGetQuery(con, query_correlacionada)
+
+# 3. Renderizado de la tabla HTML
+knitr::kable(
+  df_resultado, 
+  caption = "Clientes cuyo gasto supera el promedio de los demás clientes de su mismo representante",
+  format = "html",
+  table.attr = 'class="table table-striped table-hover table-bordered table-condensed"'
+)
+
+```
+
+## 1.3
+
+Usando **EXCEPT**, identifica los empleados que **nunca han sido asignados como soporte de ningún cliente** (aparecen en `Employee` pero jamás en `Customer.SupportRepId`).
+
+```sql
+SELECT EmployeeId, FirstName || ' ' || LastName AS Empleado
+FROM Employee
+EXCEPT
+SELECT DISTINCT SupportRepId, 
+       (SELECT FirstName || ' ' || LastName FROM Employee e2 
+        WHERE e2.EmployeeId = Customer.SupportRepId) AS Empleado
+FROM Customer
+ORDER BY EmployeeId;
+```
+
+```{r consulta_empleados_sin_clientes, echo=TRUE}
+# 1. Consulta SQL optimizada utilizando EXCEPT
+query_except <- "
+SELECT EmployeeId, FirstName || ' ' || LastName AS Empleado
+FROM Employee
+EXCEPT
+SELECT e.EmployeeId, e.FirstName || ' ' || e.LastName AS Empleado
+FROM Customer c
+INNER JOIN Employee e ON c.SupportRepId = e.EmployeeId
+ORDER BY EmployeeId;
+"
+
+# 2. Ejecución de la consulta
+df_sin_clientes <- dbGetQuery(con, query_except)
+
+# 3. Renderizado de la tabla en HTML
+knitr::kable(
+  df_sin_clientes, 
+  caption = "Empleados que jamás han sido asignados como soporte de un cliente",
+  format = "html",
+  table.attr = 'class="table table-striped table-hover table-bordered table-condensed"'
+)
+
+```
+
+
+## 1.4
+
+Con una **CTE**, calcula cuántos clientes atiende cada empleado y el ingreso total generado por esos clientes. Ordena de mayor a menor ingreso e interpreta: 
+
+¿el empleado que atiende más clientes es también el que genera más ingresos?
+
+En efecto, en la tabla se observa que el empleado Jane Peacock es el que atiende más clientes (21), y a su vez genera más ingresos, en comparación con los demas.
+
+```{r consulta_cte_empleados, echo=TRUE}
+# 1. Definición de la consulta SQL utilizando CTE
+query_cte <- "
+WITH Clientes_Por_Empleado AS (
+    SELECT 
+        e.EmployeeId,
+        e.FirstName || ' ' || e.LastName AS Empleado,
+        COUNT(DISTINCT c.CustomerId) AS Num_Clientes,
+        COALESCE(SUM(i.Total), 0) AS Ingreso_Total
+    FROM Employee e
+    LEFT JOIN Customer c ON e.EmployeeId = c.SupportRepId
+    LEFT JOIN Invoice i ON c.CustomerId = i.CustomerId
+    GROUP BY e.EmployeeId, e.FirstName, e.LastName
+)
+SELECT 
+    EmployeeId,
+    Empleado,
+    Num_Clientes,
+    ROUND(Ingreso_Total, 2) AS Ingreso_Total
+FROM Clientes_Por_Empleado
+ORDER BY Ingreso_Total DESC;
+"
+
+# 2. Ejecución de la consulta
+df_cte_empleados <- dbGetQuery(con, query_cte)
+
+# 3. Renderizado de la tabla en HTML
+knitr::kable(
+  df_cte_empleados, 
+  caption = "Rendimiento por Empleado: Clientes Atendidos vs. Ingreso Total Generado",
+  format = "html",
+  table.attr = 'class="table table-striped table-hover table-bordered table-condensed"'
+)
+
+```
+
+---
+
+
+
+
+# Ejercicio 2: Funciones de ventana y CTEs encadenadas de varios niveles 
+
+Usando las tablas `Invoice`, `InvoiceLine`, `Track` y `Genre`:
+
+## 2.1
+
+Calcula el total de ventas por **año y mes** (`SUBSTR(InvoiceDate, 1, 7)`). Con `LAG` y `LEAD` en la misma fila, agrega tanto las ventas del mes anterior como las del mes siguiente, y calcula la **variación porcentual** (no absoluta) respecto al mes anterior.
+
+```{r ejercicio2.1, echo=TRUE}
+# 1. Consulta SQL con CTE y Funciones de Ventana (LAG / LEAD)
+query_variacion_mensual <- "
+WITH Ventas_Mensuales AS (
+    SELECT 
+        SUBSTR(InvoiceDate, 1, 7) AS Anio_Mes,
+        ROUND(SUM(Total), 2) AS Ventas_Totales
+    FROM Invoice
+    GROUP BY SUBSTR(InvoiceDate, 1, 7)
+)
+SELECT 
+    Anio_Mes,
+    Ventas_Totales,
+    LAG(Ventas_Totales) OVER (ORDER BY Anio_Mes) AS Ventas_Mes_Anterior,
+    LEAD(Ventas_Totales) OVER (ORDER BY Anio_Mes) AS Ventas_Mes_Siguiente,
+    ROUND(
+        ((Ventas_Totales - LAG(Ventas_Totales) OVER (ORDER BY Anio_Mes)) 
+        / LAG(Ventas_Totales) OVER (ORDER BY Anio_Mes)) * 100.0, 
+        2
+    ) AS Variacion_Porcentual
+FROM Ventas_Mensuales
+ORDER BY Anio_Mes;
+"
+
+# 2. Ejecución de la consulta
+df_variacion <- dbGetQuery(con, query_variacion_mensual)
+
+# 3. Renderizado HTML de la tabla
+knitr::kable(
+  df_variacion, 
+  caption = "Tabla 1: Ventas mensuales, contexto temporal (LAG/LEAD) y variación porcentual",
+  format = "html",
+  table.attr = 'class="table table-striped table-hover table-bordered table-condensed"'
+)
+```
+
+## 2.2
+
+Construye una CTE con las ventas por año y mes, y a partir de ella genera **dos rankings** con `RANK() OVER (PARTITION BY año ORDER BY ventas ...)`: uno para identificar el mes de **mayor** venta de cada año y otro para el de **menor** venta. Muestra en una sola tabla final, por año, el mes top y el mes más bajo.
+
+```{r ejercicio2.2, echo=TRUE}
+# 1. Consulta SQL con CTEs encadenadas, Funciones de Ventana y Pivoteo
+query_rankings_meses <- "
+WITH Ventas_Anio_Mes AS (
+    SELECT 
+        SUBSTR(InvoiceDate, 1, 4) AS Anio,
+        SUBSTR(InvoiceDate, 1, 7) AS Anio_Mes,
+        ROUND(SUM(Total), 2) AS Ventas_Totales
+    FROM Invoice
+    GROUP BY Anio, Anio_Mes
+),
+Rankings AS (
+    SELECT 
+        Anio,
+        Anio_Mes,
+        Ventas_Totales,
+        RANK() OVER (PARTITION BY Anio ORDER BY Ventas_Totales DESC) AS Ranking_Mayor,
+        RANK() OVER (PARTITION BY Anio ORDER BY Ventas_Totales ASC) AS Ranking_Menor
+    FROM Ventas_Anio_Mes
+)
+SELECT 
+    Anio,
+    MAX(CASE WHEN Ranking_Mayor = 1 THEN Anio_Mes END) AS Mes_Mayor_Venta,
+    MAX(CASE WHEN Ranking_Mayor = 1 THEN Ventas_Totales END) AS Venta_Maxima,
+    MAX(CASE WHEN Ranking_Menor = 1 THEN Anio_Mes END) AS Mes_Menor_Venta,
+    MAX(CASE WHEN Ranking_Menor = 1 THEN Ventas_Totales END) AS Venta_Minima
+FROM Rankings
+GROUP BY Anio
+ORDER BY Anio;
+"
+
+# 2. Ejecución de la consulta
+df_rankings_meses <- dbGetQuery(con, query_rankings_meses)
+
+# 3. Renderizado HTML de la tabla
+knitr::kable(
+  df_rankings_meses, 
+  caption = "Tabla 2: Meses de mayor y menor desempeño comercial por año",
+  format = "html",
+  table.attr = 'class="table table-striped table-hover table-bordered table-condensed"'
+)
+
+```
+
+
+## 2.3
+
+Encadena una segunda CTE para calcular, por **año**, cuál fue el género musical con mayores ingresos (`UnitPrice × Quantity` vía `InvoiceLine → Track → Genre`). Usa `RANK() OVER (PARTITION BY año ORDER BY ingresos DESC)` y filtra solo la posición 1 de cada año con un `WHERE` sobre el resultado de la CTE.
+
+```{r ejercicio2.3, echo=TRUE}
+# 1. Consulta SQL con CTEs encadenadas y Función de Ventana
+query_top_genero_anio <- "
+WITH Ingresos_Genero_Anio AS (
+    SELECT 
+        SUBSTR(i.InvoiceDate, 1, 4) AS Anio,
+        g.Name AS Genero,
+        SUM(il.UnitPrice * il.Quantity) AS Ingresos_Totales
+    FROM Invoice i
+    INNER JOIN InvoiceLine il ON i.InvoiceId = il.InvoiceId
+    INNER JOIN Track t ON il.TrackId = t.TrackId
+    INNER JOIN Genre g ON t.GenreId = g.GenreId
+    GROUP BY Anio, Genero
+),
+Ranking_Generos AS (
+    SELECT 
+        Anio,
+        Genero,
+        Ingresos_Totales,
+        RANK() OVER (PARTITION BY Anio ORDER BY Ingresos_Totales DESC) AS Posicion
+    FROM Ingresos_Genero_Anio
+)
+SELECT 
+    Anio,
+    Genero,
+    ROUND(Ingresos_Totales, 2) AS Ingresos_Totales
+FROM Ranking_Generos
+WHERE Posicion = 1
+ORDER BY Anio;
+"
+
+# 2. Ejecución de la consulta
+df_top_genero <- dbGetQuery(con, query_top_genero_anio)
+
+# 3. Renderizado HTML de la tabla
+knitr::kable(
+  df_top_genero, 
+  caption = "Tabla 3: Género musical con mayores ingresos por año",
+  format = "html",
+  table.attr = 'class="table table-striped table-hover table-bordered table-condensed"'
+)
+
+```
+
+
+### Diagrama de Relaciones
+
+```
+Invoice → InvoiceLine → Track → Genre
+   (i)        (il)       (t)      (g)
+   
+Ingresos = UnitPrice × Quantity
+```
+
+## 2.4
+
+Sobre el gasto total por cliente, usa `NTILE(4)` para dividirlos en cuartiles y luego, con una CTE adicional que agregue por cuartil, calcula qué **porcentaje del ingreso total de la tienda** representa el cuartil superior (Q4) frente a los otros tres cuartiles combinados.
+
+```{r ejercicio4_distribucion, echo=TRUE}
+# 1. Consulta SQL: Distribución completa de ingresos por cuartil
+query_cuartiles <- "
+WITH Gasto_Por_Cliente AS (
+    SELECT 
+        CustomerId,
+        SUM(Total) AS Gasto_Total
+    FROM Invoice
+    GROUP BY CustomerId
+),
+Clientes_Cuartiles AS (
+    SELECT 
+        CustomerId,
+        Gasto_Total,
+        NTILE(4) OVER (ORDER BY Gasto_Total ASC) AS Cuartil
+    FROM Gasto_Por_Cliente
+),
+Agregado_Por_Cuartil AS (
+    SELECT 
+        Cuartil,
+        COUNT(*) AS Num_Clientes,
+        SUM(Gasto_Total) AS Ingreso_Cuartil
+    FROM Clientes_Cuartiles
+    GROUP BY Cuartil
+),
+Total_Tienda AS (
+    SELECT SUM(Ingreso_Cuartil) AS Ingreso_Total
+    FROM Agregado_Por_Cuartil
+)
+SELECT 
+    a.Cuartil,
+    a.Num_Clientes,
+    ROUND(a.Ingreso_Cuartil, 2) AS Ingreso_Cuartil,
+    ROUND((a.Ingreso_Cuartil / t.Ingreso_Total) * 100.0, 2) AS Porcentaje_Del_Total
+FROM Agregado_Por_Cuartil a
+CROSS JOIN Total_Tienda t
+ORDER BY a.Cuartil;
+"
+
+# 2. Ejecución de la consulta
+df_cuartiles <- dbGetQuery(con, query_cuartiles)
+
+# 3. Renderizado HTML de la tabla general
+knitr::kable(
+  df_cuartiles, 
+  caption = "Tabla 4: Distribución de ingresos acumulados por cuartil de clientes",
+  format = "html",
+  table.attr = 'class="table table-striped table-hover table-bordered table-condensed"'
+)
+
+```
+
+```{r ejercicio4_comparacion_q4, echo=TRUE}
+# 1. Consulta SQL: Comparación relativa entre Q4 vs Q1-Q3 combinados
+query_q4_vs_resto <- "
+WITH Gasto_Por_Cliente AS (
+    SELECT 
+        CustomerId, 
+        SUM(Total) AS Gasto_Total
+    FROM Invoice
+    GROUP BY CustomerId
+),
+Clientes_Cuartiles AS (
+    SELECT 
+        CustomerId, 
+        Gasto_Total,
+        NTILE(4) OVER (ORDER BY Gasto_Total ASC) AS Cuartil
+    FROM Gasto_Por_Cliente
+),
+Agregado_Por_Cuartil AS (
+    SELECT 
+        Cuartil, 
+        COUNT(*) AS Num_Clientes, 
+        SUM(Gasto_Total) AS Ingreso_Cuartil
+    FROM Clientes_Cuartiles
+    GROUP BY Cuartil
+),
+Total_Tienda AS (
+    SELECT SUM(Ingreso_Cuartil) AS Ingreso_Total 
+    FROM Agregado_Por_Cuartil
+)
+SELECT 
+    'Q4 (Superior)' AS Segmento,
+    a.Num_Clientes,
+    ROUND(a.Ingreso_Cuartil, 2) AS Ingreso_Q4,
+    ROUND((a.Ingreso_Cuartil / t.Ingreso_Total) * 100.0, 2) AS Porcentaje_Q4,
+    ROUND(((t.Ingreso_Total - a.Ingreso_Cuartil) / t.Ingreso_Total) * 100.0, 2) AS Porcentaje_Q1_Q3_Combinados
+FROM Agregado_Por_Cuartil a
+CROSS JOIN Total_Tienda t
+WHERE a.Cuartil = 4;
+"
+
+# 2. Ejecución de la consulta
+df_q4_vs_resto <- dbGetQuery(con, query_q4_vs_resto)
+
+# 3. Renderizado HTML del análisis concentrado de Q4
+knitr::kable(
+  df_q4_vs_resto, 
+  caption = "Tabla 5: Peso relativo del cuartil superior (Q4) frente a los demás cuartiles",
+  format = "html",
+  table.attr = 'class="table table-striped table-hover table-bordered table-condensed"'
+)
+
+```
+
+# Ejercicio 3: (reto integrador, opcional): clientes en riesgo de abandono
+
+
+Este ejercicio combina todo lo visto en la clase: JOINs, subconsultas, CTEs y funciones de ventana en una sola consulta analítica.
+
+## 3.1
+
+Encuentra la fecha de la **última factura** registrada en toda la base de datos (el "presente" del análisis, ya que los datos son históricos).
+
+```{r ejercicio3.1, echo=TRUE}
+# Consulta para obtener la fecha máxima de factura
+query_fecha_maxima <- "
+SELECT MAX(InvoiceDate) AS Fecha_Maxima_Factura
+FROM Invoice;
+"
+
+df_fecha_maxima <- dbGetQuery(con, query_fecha_maxima)
+
+knitr::kable(
+  df_fecha_maxima,
+  caption = "Tabla 1: Fecha máxima de factura en la base de datos",
+  format = "html",
+  table.attr = 'class="table table-striped table-hover table-bordered table-condensed"'
+)
+```
+
+## 3.2
+
+Con una CTE, calcula para cada cliente la fecha de su última compra y el número de meses transcurridos entre esa fecha y la fecha máxima del punto anterior `((JULIANDAY(fecha_maxima) - JULIANDAY(ultima_compra)) / 30)`.
+
+```{r ejercicio3.2, echo=TRUE}
+# CTE para calcular última compra y meses transcurridos
+query_ultima_compra <- "
+WITH Fecha_Maxima AS (
+    SELECT MAX(InvoiceDate) AS fecha_maxima
+    FROM Invoice
+),
+Ultima_Compra_Cliente AS (
+    SELECT 
+        c.CustomerId,
+        c.FirstName || ' ' || c.LastName AS Nombre_Cliente,
+        c.Country,
+        MAX(i.InvoiceDate) AS ultima_compra,
+        ROUND(SUM(i.Total), 2) AS gasto_total_historico,
+        ROUND(
+            (JULIANDAY((SELECT fecha_maxima FROM Fecha_Maxima)) - JULIANDAY(MAX(i.InvoiceDate))) / 30.0, 
+            1
+        ) AS meses_desde_ultima_compra
+    FROM Customer c
+    INNER JOIN Invoice i ON c.CustomerId = i.CustomerId
+    GROUP BY c.CustomerId, c.FirstName, c.LastName, c.Country
+)
+SELECT * FROM Ultima_Compra_Cliente
+ORDER BY meses_desde_ultima_compra DESC;
+"
+
+df_ultima_compra <- dbGetQuery(con, query_ultima_compra)
+
+knitr::kable(
+  head(df_ultima_compra, 15),
+  caption = "Tabla 2: Última compra por cliente y meses transcurridos",
+  format = "html",
+  table.attr = 'class="table table-striped table-hover table-bordered table-condensed"',
+  align = c("l", "l", "l", "c", "c", "c")
+)
+```
+
+## 3.3
+
+Clasifica a cada cliente en una columna `segmento` usando CASE: `'activo'` si compró en los últimos 6 meses respecto al máximo, `'en riesgo'` entre 6 y 12 meses, y `'inactivo'` si lleva más de 12 meses sin comprar.
+
+```{r ejercicio3.3, echo=TRUE}
+# Clasificación de clientes por segmento
+query_segmentacion <- "
+WITH Fecha_Maxima AS (
+    SELECT MAX(InvoiceDate) AS fecha_maxima
+    FROM Invoice
+),
+Cliente_Segmento AS (
+    SELECT 
+        c.CustomerId,
+        c.FirstName || ' ' || c.LastName AS Nombre_Cliente,
+        c.Country,
+        MAX(i.InvoiceDate) AS ultima_compra,
+        ROUND(SUM(i.Total), 2) AS gasto_total_historico,
+        ROUND(
+            (JULIANDAY((SELECT fecha_maxima FROM Fecha_Maxima)) - JULIANDAY(MAX(i.InvoiceDate))) / 30.0, 
+            1
+        ) AS meses_desde_ultima_compra,
+        CASE 
+            WHEN ROUND((JULIANDAY((SELECT fecha_maxima FROM Fecha_Maxima)) - JULIANDAY(MAX(i.InvoiceDate))) / 30.0, 1) <= 6 
+                THEN 'activo'
+            WHEN ROUND((JULIANDAY((SELECT fecha_maxima FROM Fecha_Maxima)) - JULIANDAY(MAX(i.InvoiceDate))) / 30.0, 1) BETWEEN 6 AND 12 
+                THEN 'en riesgo'
+            ELSE 'inactivo'
+        END AS segmento
+    FROM Customer c
+    INNER JOIN Invoice i ON c.CustomerId = i.CustomerId
+    GROUP BY c.CustomerId, c.FirstName, c.LastName, c.Country
+)
+SELECT * FROM Cliente_Segmento
+ORDER BY segmento, meses_desde_ultima_compra DESC;
+"
+
+df_segmentacion <- dbGetQuery(con, query_segmentacion)
+
+knitr::kable(
+  df_segmentacion,
+  caption = "Tabla 3: Clasificación de clientes por segmento de actividad",
+  format = "html",
+  table.attr = 'class="table table-striped table-hover table-bordered table-condensed"',
+  align = c("l", "l", "l", "c", "c", "c", "l")
+)
+```
+
+## 3.4
+
+Para cada `segmento`, calcula el número de clientes, el gasto histórico promedio y el gasto histórico total. Adicionalmente, dentro de cada segmento, usa `RANK()` para identificar a los 3 clientes de mayor gasto histórico (los que más valor perdería la tienda si se van). Interpreta el resultado: ¿qué segmento debería priorizar una campaña de retención?
+
+```{r ejercicio3.4, echo=TRUE}
+# Análisis completo con RANK() por segmento
+query_analisis_completo <- "
+WITH Fecha_Maxima AS (
+    SELECT MAX(InvoiceDate) AS fecha_maxima
+    FROM Invoice
+),
+Cliente_Segmento AS (
+    SELECT 
+        c.CustomerId,
+        c.FirstName || ' ' || c.LastName AS Nombre_Cliente,
+        c.Country,
+        MAX(i.InvoiceDate) AS ultima_compra,
+        ROUND(SUM(i.Total), 2) AS gasto_total_historico,
+        ROUND(
+            (JULIANDAY((SELECT fecha_maxima FROM Fecha_Maxima)) - JULIANDAY(MAX(i.InvoiceDate))) / 30.0, 
+            1
+        ) AS meses_desde_ultima_compra,
+        CASE 
+            WHEN ROUND((JULIANDAY((SELECT fecha_maxima FROM Fecha_Maxima)) - JULIANDAY(MAX(i.InvoiceDate))) / 30.0, 1) <= 6 
+                THEN 'activo'
+            WHEN ROUND((JULIANDAY((SELECT fecha_maxima FROM Fecha_Maxima)) - JULIANDAY(MAX(i.InvoiceDate))) / 30.0, 1) BETWEEN 6 AND 12 
+                THEN 'en riesgo'
+            ELSE 'inactivo'
+        END AS segmento
+    FROM Customer c
+    INNER JOIN Invoice i ON c.CustomerId = i.CustomerId
+    GROUP BY c.CustomerId, c.FirstName, c.LastName, c.Country
+),
+Resumen_Segmento AS (
+    SELECT 
+        segmento,
+        COUNT(*) AS numero_clientes,
+        ROUND(AVG(gasto_total_historico), 2) AS gasto_promedio,
+        ROUND(SUM(gasto_total_historico), 2) AS gasto_total_segmento
+    FROM Cliente_Segmento
+    GROUP BY segmento
+),
+Clientes_Top_por_Segmento AS (
+    SELECT 
+        cs.segmento,
+        cs.Nombre_Cliente,
+        cs.Country,
+        cs.gasto_total_historico,
+        cs.meses_desde_ultima_compra,
+        RANK() OVER (PARTITION BY cs.segmento ORDER BY cs.gasto_total_historico DESC) AS rank_gasto
+    FROM Cliente_Segmento cs
+)
+SELECT 
+    rs.segmento,
+    rs.numero_clientes,
+    rs.gasto_promedio,
+    rs.gasto_total_segmento,
+    cts.Nombre_Cliente AS top_cliente,
+    cts.gasto_total_historico AS gasto_top_cliente,
+    cts.rank_gasto
+FROM Resumen_Segmento rs
+LEFT JOIN Clientes_Top_por_Segmento cts 
+    ON rs.segmento = cts.segmento AND cts.rank_gasto <= 3
+ORDER BY 
+    CASE rs.segmento
+        WHEN 'activo' THEN 1
+        WHEN 'en riesgo' THEN 2
+        WHEN 'inactivo' THEN 3
+    END,
+    cts.rank_gasto;
+"
+
+df_analisis_final <- dbGetQuery(con, query_analisis_completo)
+
+knitr::kable(
+  df_analisis_final,
+  caption = "Tabla 4: Resumen por segmento con top 3 clientes por gasto histórico",
+  format = "html",
+  table.attr = 'class="table table-striped table-hover table-bordered table-condensed"',
+  align = c("l", "c", "c", "c", "l", "c", "c")
+)
+
+```
+
+
+
+
+
+```{r cerrar_conexion}
+dbDisconnect(con)
+cat("Conexión a la base de datos cerrada correctamente.\n")
+```
+

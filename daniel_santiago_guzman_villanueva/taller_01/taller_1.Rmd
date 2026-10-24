@@ -1,0 +1,484 @@
+---
+title: "Taller 1 — Comparador de precios: Salud visual y lentes de contacto"
+author: "Daniel Santiago Guzman Villanueva"
+date: "`r format(Sys.time(), '%Y-%m-%d %H:%M', tz = 'America/Bogota')` (hora de Colombia)"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    df_print: kable
+params:
+  modo: "sin_conexion"   # "en_linea" vuelve a consultar los tres sitios
+  corrida: ""            # vacío = la corrida más reciente
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 9, fig.height = 5.5, max.print = 200)
+source("scraper.R")            # módulo de extracción: aquí no se duplica su código
+library(ggplot2)
+library(knitr)
+
+corrida_param <- if (nzchar(params$corrida)) params$corrida else NULL
+```
+
+# Introducción
+
+**Categoría registrada:** *Salud visual y lentes de contacto*. Según la planilla, incluye lentes de lectura, lentes de contacto, estuches y soluciones para limpieza y conservación de lentes; **excluye medicamentos y lágrimas artificiales**.
+
+El objetivo es comparar, con datos obtenidos por *web scraping*, el precio de las mismas presentaciones en tres comercios con venta en línea en Colombia (Locatel, Farmatodo y Droguerías Colsubsidio), identificar dónde es más barato comprar cada una y qué tamaño ofrece el menor precio por mL cuando hay varios tamaños de la misma solución.
+
+# Fuentes y scraping
+
+## Comercios, páginas y equivalencia con la categoría
+
+| Comercio | Página de la categoría | Servicio consultado | Equivalencia con la planilla |
+|------------------|------------------|------------------|------------------|
+| Locatel | `/salud-y-medicamentos-salud-visual` | VTEX `api/catalog_system/pub/products/search?fq=productClusterIds:4147` | La página es una *colección* (id 4147) que mezcla gafas de lectura, gafas de sol, soluciones, gotas y medicamentos oftálmicos. |
+| Farmatodo | `/categorias/salud-y-medicamentos/cuidado-de-la-vista` | Algolia, índice `products-colombia`, filtro `categorie:"Cuidado de la vista" AND status:"A"` | Subcategorías del sitio: gafas de lectura, gafas de sol, lentes de contacto, solución para lentes y gotas/lágrimas. |
+| Droguerías Colsubsidio | `/salud-visual` | VTEX `api/catalog_system/pub/products/search?fq=C:/13/` | Categoría de primer nivel 13 con *Gafas y accesorios*, *Soluciones y gotas* y *Suplementos*. |
+
+Ningún sitio tiene una sección idéntica a la delimitación, así que **se descargó la sección completa de cada uno** y la delimitación se aplicó después, en `clasificar_productos()`:
+
+- **Incluidos**: lentes de lectura (gafas con graduación +), lentes de contacto, soluciones para lentes de contacto (multipropósito, peróxido, removedores de proteínas), estuches y limpiadores de gafas.
+- **Excluidos**: medicamentos oftálmicos, lágrimas artificiales y lubricantes (incluidas las gotas humectantes para usuarios de lentes de contacto, que son lubricantes oculares y no soluciones de conservación), gafas de sol, gafas de luz azul sin graduación, parches y apósitos oculares, cordones y suplementos.
+
+## Cómo se identificaron los servicios y estrategia de extracción
+
+Los tres sitios dibujan el listado con JavaScript, por lo que el HTML que devuelve `read_html()` no trae productos. Se inspeccionaron las peticiones de red y el estado que cada página deja en `window.__STATE__`:
+
+- **Locatel** guarda en el estado la consulta `"query":"/4147"` con la faceta `productClusterIds`; con ese identificador se usa la API pública de catálogo de VTEX en páginas de 50. El encabezado `resources` (`0-49/237`) informa el total.
+- **Colsubsidio** usa la categoría 13 del árbol `api/catalog_system/pub/category/tree/3`. Su servicio responde a veces *500 – The operation was canceled*; por eso `solicitar()` reintenta hasta 5 veces ante 429/5xx. Sin reintento, una página de 50 se pierde en silencio (se observó en las pruebas).
+- **Farmatodo** consulta Algolia desde el navegador con una clave pública de solo búsqueda incluida en el JavaScript de la página; se replica esa petición (100 por página, `nbHits` da el total).
+
+Librerías: `httr2` (peticiones, reintentos, *user-agent* de navegador, pausa de 1,5 s), `jsonlite`, `dplyr`/`purrr`/`stringr`/`tidyr`, `DBI` + `RSQLite`. Cada respuesta se guarda comprimida en `raw/<comercio>/<corrida>/` con la hora de consulta en el nombre del archivo, y `totales.json` conserva el total que informa el sitio. Con `offline = TRUE` todo se reprocesa desde esas copias.
+
+**Condiciones de uso.** Solo se consultan servicios públicos que el propio sitio usa para mostrar su catálogo, sin iniciar sesión, con una petición cada 1,5 s y sin datos personales. La clave de Algolia es la clave pública de búsqueda que Farmatodo entrega a cualquier visitante; no es una credencial privada.
+
+## Ejecución de la recolección
+
+```{r recoleccion}
+if (params$modo == "en_linea") {
+  resumen <- ejecutar_recoleccion(corrida = corrida_param)
+} else {
+  # Modo sin conexión: reprocesa las copias crudas. No duplica observaciones
+  # gracias a la restricción UNIQUE(comercio, sku, fecha_hora_consulta).
+  resumen <- ejecutar_recoleccion(corrida = corrida_param, offline = TRUE)
+}
+con <- dbConnect(RSQLite::SQLite(), DB_PATH)
+
+# Ejecución de referencia: la más reciente en la que los tres comercios quedaron completos
+ejec <- dbGetQuery(con, "
+  SELECT id_ejecucion FROM ejecuciones
+  GROUP BY id_ejecucion
+  HAVING SUM(estado = 'completa') = 3
+  ORDER BY id_ejecucion DESC LIMIT 1")$id_ejecucion
+if (length(ejec) == 0) ejec <- max(dbGetQuery(con, "SELECT id_ejecucion FROM ejecuciones")$id_ejecucion)
+ejec
+```
+
+```{r tabla-ejecuciones}
+dbGetQuery(con, "SELECT id_ejecucion, comercio, inicio, modo, n_registros, total_sitio,
+                        n_en_categoria, estado FROM ejecuciones ORDER BY id_ejecucion, comercio")
+```
+
+La columna `total_sitio` es la cifra que informa el propio servicio de cada comercio y `n_registros` lo que se obtuvo; una ejecución queda *completa* cuando coinciden.
+
+**Totales visibles en la página.** La página de Locatel muestra solo productos con inventario (*hideUnavailableItems*), por eso su contador web puede ser menor que el del servicio, que también incluye los agotados; aquí se conservan todos y la columna `disponible` los distingue. En Colsubsidio la página y el servicio pueden diferir en uno o dos productos por lo mismo.
+
+# Preparación de los datos
+
+```{r reglas, echo=FALSE}
+data.frame(
+  Paso = c("Precios", "Contenido", "Unidades", "Marca", "Subcategoría",
+           "Correspondencia", "Duplicados", "Texto original"),
+  Regla = c(
+    "Numéricos en COP. Precio 0 o ausente queda NULL (nunca 0). Precio = oferta si existe; precio_lista = precio antes del descuento; promocion = 1 si lista > precio.",
+    "Del nombre (Locatel, Farmatodo) o de la especificación 'Presentación' (Colsubsidio). Se normaliza a mL o g (1 L = 1000 mL). Gafas = 1 und; lentes de contacto = unidades de la caja.",
+    "'x 30 und', 'CAJA X 6 UN' -> n_unidades.",
+    "Los sitios mezclan fabricante (ALCON, HUMAX, TECNOQUIMICAS) y línea (Opti-Free, ReNu). marca_std usa la línea cuando el nombre la identifica.",
+    "Reglas de texto sobre nombre + subcategoría del sitio (función clasificar_productos); en_categoria y motivo_exclusion quedan en la base.",
+    "Regla 1: mismo EAN normalizado (sin ceros a la izquierda; en Farmatodo también barcodeList). Regla 2: equivalencias manuales revisadas (CORRESPONDENCIA_MANUAL).",
+    "Una fila por SKU y comercio en cada ejecución (distinct); UNIQUE(comercio, sku, fecha_hora_consulta) en SQLite.",
+    "texto_original guarda nombre | presentación | descripción tal como llegan; los campos *_std son aparte."
+  )
+)
+```
+
+**Correspondencia manual.** Locatel publica *Multi Solution 1 x 360 mL* con el código 7703197050089, mientras Farmatodo y Colsubsidio usan 7702057707767. Se revisó que coinciden marca, línea, formulación, contenido y número de unidades, y se registró la equivalencia. No se emparejaron *Multi Solution Plus 360 mL* (en Farmatodo es un *prepack* con removedor de proteínas) ni el *Kit Multi Solution Oxi* de Colsubsidio, porque el empaque no es el mismo.
+
+```{r correspondencia}
+dbGetQuery(con, "
+  SELECT p.id_producto, p.nombre_std, p.linea, p.marca_std, p.contenido, p.unidad,
+         p.regla_correspondencia,
+         GROUP_CONCAT(a.comercio || ': ' || a.nombre_original, ' || ') AS anuncios
+  FROM productos p JOIN anuncios a ON a.id_producto = p.id_producto
+  GROUP BY p.id_producto ORDER BY p.linea, p.contenido")
+```
+
+Productos excluidos por no pertenecer a la delimitación:
+
+```{r excluidos}
+dbGetQuery(con, "
+  SELECT comercio, COALESCE(motivo_exclusion, 'Incluido: ' || subcategoria_std) AS clasificacion,
+         COUNT(*) AS anuncios
+  FROM anuncios GROUP BY 1, 2 ORDER BY 1, 3 DESC")
+```
+
+# Base SQLite
+
+Tablas (ver `crear_esquema()` en `scraper.R`):
+
+- `comercios` — comercio, nombre y URL de la categoría.
+- `ejecuciones` — una fila por corrida y comercio: inicio, fin, modo, registros obtenidos, total del sitio, anuncios dentro de la categoría y estado (completa / parcial / fallida).
+- `anuncios` — cada producto tal como aparece en un comercio (PK `comercio, sku`), con sus campos estandarizados, `en_categoria`, `motivo_exclusion`, `id_producto` y `comparable`.
+- `productos` — identificador común (`SV-<EAN>`) de las presentaciones presentes en los tres comercios, con su línea, contenido y regla de correspondencia.
+- `observaciones` — precio en un momento dado: ejecución, precio, precio de lista, promoción, disponibilidad, URL, texto original y fecha-hora ISO 8601. Restricción `UNIQUE(comercio, sku, fecha_hora_consulta)`; las corridas nuevas se agregan sin sobrescribir.
+- Vista `v_observaciones` — une todo y calcula `precio_por_unidad`.
+
+```{r validaciones}
+dbGetQuery(con, "
+  SELECT
+    (SELECT COUNT(*) FROM observaciones WHERE fecha_hora_consulta IS NULL
+                                           OR fecha_hora_consulta NOT LIKE '____-__-__T__:__:__-05:00') AS obs_sin_fecha_iso,
+    (SELECT COUNT(*) FROM observaciones WHERE precio = 0)          AS precios_en_cero,
+    (SELECT COUNT(*) FROM observaciones o LEFT JOIN anuncios a USING (comercio, sku)
+      WHERE a.sku IS NULL)                                          AS obs_sin_anuncio,
+    (SELECT COUNT(*) FROM observaciones)                            AS observaciones_totales")
+```
+
+# Consultas SQL
+
+## P1. Tamaño de la base
+
+```{sql, connection=con, output.var="p1"}
+SELECT COUNT(DISTINCT comercio)                                     AS comercios,
+       (SELECT COUNT(*) FROM productos)                              AS presentaciones_comparables,
+       (SELECT COUNT(*) FROM anuncios WHERE en_categoria = 1)        AS anuncios_en_categoria,
+       COUNT(*)                                                      AS observaciones,
+       COUNT(DISTINCT id_ejecucion)                                  AS ejecuciones
+FROM observaciones
+```
+
+```{r}
+p1
+```
+
+```{sql, connection=con, output.var="p1b"}
+SELECT a.comercio,
+       COUNT(*)                                        AS anuncios_descargados,
+       SUM(a.en_categoria)                             AS anuncios_en_categoria,
+       SUM(a.comparable)                               AS anuncios_comparables
+FROM anuncios a
+GROUP BY a.comercio
+ORDER BY anuncios_en_categoria DESC
+```
+
+```{r}
+p1b
+```
+
+La base tiene `r p1$comercios` comercios, `r p1$presentaciones_comparables` presentaciones comparables y `r p1$observaciones` observaciones de precio. `r p1b$comercio[1]` es el que más anuncios aporta dentro de la delimitación (`r p1b$anuncios_en_categoria[1]`). La diferencia entre anuncios descargados y anuncios en la categoría corresponde a lo que cada sitio incluye en su sección y la planilla excluye (gotas, medicamentos, gafas de sol); en `r p1b$comercio[which.min(p1b$anuncios_en_categoria / p1b$anuncios_descargados)]` esa parte excluida es la mayor proporción de la sección.
+
+## P2. Cobertura de la ejecución de referencia y repetidos
+
+```{sql, connection=con, output.var="p2"}
+SELECT id_ejecucion,
+       COUNT(*)                         AS obs_comparables,
+       COUNT(DISTINCT id_producto)      AS productos,
+       COUNT(DISTINCT comercio)         AS comercios,
+       COUNT(precio)                    AS con_precio,
+       CASE WHEN COUNT(DISTINCT id_producto || comercio) >= 24 THEN 'Sí' ELSE 'No' END AS cumple_8x3
+FROM v_observaciones
+WHERE comparable = 1 AND id_ejecucion = ?ejec
+GROUP BY id_ejecucion
+```
+
+```{r}
+p2
+```
+
+```{sql, connection=con, output.var="p2b"}
+SELECT id_producto, comercio, COUNT(*) AS veces
+FROM v_observaciones
+WHERE comparable = 1 AND id_ejecucion = ?ejec
+GROUP BY id_producto, comercio
+HAVING COUNT(*) > 1
+```
+
+```{r}
+if (nrow(p2b) == 0) cat("No hay registros repetidos del mismo producto y comercio en la ejecución.") else p2b
+```
+
+En la ejecución `r ejec` hay `r p2$obs_comparables` observaciones comparables (`r p2$productos` presentaciones × `r p2$comercios` comercios), por encima del mínimo de 24.
+
+## P3. Mínimo, máximo, promedio y comercio más barato (con empates)
+
+```{sql, connection=con, output.var="p3"}
+WITH obs AS (
+  SELECT id_producto, producto, comercio, precio
+  FROM v_observaciones
+  WHERE comparable = 1 AND id_ejecucion = ?ejec AND precio IS NOT NULL
+),
+res AS (
+  SELECT id_producto, producto,
+         MIN(precio) AS precio_min, MAX(precio) AS precio_max,
+         ROUND(AVG(precio)) AS precio_promedio, COUNT(*) AS n_comercios
+  FROM obs GROUP BY id_producto, producto
+)
+SELECT r.producto, r.precio_min, r.precio_max, r.precio_promedio, r.n_comercios,
+       GROUP_CONCAT(o.comercio, ', ') AS comercio_mas_barato,
+       COUNT(o.comercio) AS n_empatados
+FROM res r
+JOIN obs o ON o.id_producto = r.id_producto AND o.precio = r.precio_min
+GROUP BY r.id_producto
+ORDER BY r.producto
+```
+
+```{r}
+p3
+```
+
+```{r, include=FALSE}
+gana <- table(unlist(strsplit(p3$comercio_mas_barato, ", ")))
+```
+
+Se lista **cada** comercio que alcanza el mínimo, de modo que los empates quedan visibles (`n_empatados > 1`). En la ejecución de referencia, el comercio con más presentaciones al menor precio es `r names(gana)[which.max(gana)]` (`r max(gana)` de `r nrow(p3)`, contando empates); hay `r sum(p3$n_empatados > 1)` presentaciones con empate en el mínimo.
+
+## P4. Ahorro al elegir la oferta más económica
+
+```{sql, connection=con, output.var="p4"}
+SELECT producto,
+       MAX(precio) - MIN(precio)                                   AS ahorro_cop,
+       ROUND(100.0 * (MAX(precio) - MIN(precio)) / MAX(precio), 1) AS ahorro_pct
+FROM v_observaciones
+WHERE comparable = 1 AND id_ejecucion = ?ejec AND precio IS NOT NULL
+GROUP BY id_producto, producto
+ORDER BY ahorro_cop DESC
+```
+
+```{r}
+p4
+```
+
+El ahorro va de `r scales::comma(min(p4$ahorro_cop), big.mark = ".", decimal.mark = ",")` a `r scales::comma(max(p4$ahorro_cop), big.mark = ".", decimal.mark = ",")` COP por empaque. Se calcula solo entre precios de la misma presentación y de la misma ejecución.
+
+## P5. Menor precio por mL entre tamaños del mismo producto
+
+Solo se comparan tamaños de la **misma línea y formulación** (columna `linea`) y en la misma unidad (mL). Gafas de lectura (und) no entran en este ranking.
+
+```{sql, connection=con, output.var="p5"}
+WITH u AS (
+  SELECT p.linea, p.nombre_std, p.contenido, o.comercio, o.precio,
+         ROUND(o.precio / p.contenido, 1) AS cop_por_ml
+  FROM v_observaciones o JOIN productos p ON p.id_producto = o.id_producto
+  WHERE o.comparable = 1 AND o.id_ejecucion = ?ejec AND p.unidad = 'mL'
+    AND o.precio IS NOT NULL
+),
+lineas AS (SELECT linea FROM u GROUP BY linea HAVING COUNT(DISTINCT contenido) > 1)
+SELECT u.linea, u.contenido AS ml, u.comercio, u.precio, u.cop_por_ml,
+       RANK() OVER (PARTITION BY u.linea ORDER BY u.cop_por_ml) AS puesto_en_linea
+FROM u JOIN lineas USING (linea)
+ORDER BY u.linea, u.cop_por_ml
+```
+
+```{r}
+p5
+```
+
+```{r, include=FALSE}
+p5_best <- p5[p5$puesto_en_linea == 1, ]
+```
+
+En `r paste(sprintf("%s el menor precio por mL es la presentación de %s mL en %s (%s COP/mL)", p5_best$linea, p5_best$ml, p5_best$comercio, p5_best$cop_por_ml), collapse = "; en ")`. El frasco grande exige un desembolso mayor, pero cada mL sale más barato; para quien usa la solución a diario esa diferencia se acumula, mientras que para un viaje el frasco pequeño evita pagar por producto que vencerá antes de usarse (las soluciones abiertas suelen tener un plazo de uso limitado).
+
+## P6. Mayores diferencias entre comercios
+
+```{sql, connection=con, output.var="p6"}
+SELECT producto,
+       MIN(precio) AS precio_min, MAX(precio) AS precio_max,
+       ROUND(100.0 * (MAX(precio) - MIN(precio)) / MAX(precio), 1) AS ahorro_pct,
+       SUM(promocion) AS obs_en_promocion
+FROM v_observaciones
+WHERE comparable = 1 AND id_ejecucion = ?ejec AND precio IS NOT NULL
+GROUP BY id_producto, producto
+ORDER BY ahorro_pct DESC
+```
+
+```{r}
+p6
+```
+
+La mayor diferencia es la de *`r p6$producto[1]`* (`r p6$ahorro_pct[1]` %). De las cinco presentaciones con mayor diferencia, `r sum(head(p6$obs_en_promocion, 5) > 0)` tienen al menos un comercio con precio promocional (`obs_en_promocion`), así que parte de la brecha depende de descuentos vigentes en el momento de la captura y puede no repetirse.
+
+## P7. Datos faltantes o inconsistentes
+
+```{sql, connection=con, output.var="p7"}
+SELECT 'Anuncios en categoría sin precio publicado'      AS problema, COUNT(*) AS n
+  FROM v_observaciones WHERE en_categoria = 1 AND id_ejecucion = ?ejec AND precio IS NULL
+UNION ALL
+SELECT 'Anuncios en categoría no disponibles (agotados)', COUNT(*)
+  FROM v_observaciones WHERE en_categoria = 1 AND id_ejecucion = ?ejec AND disponible = 0
+UNION ALL
+SELECT 'Anuncios en categoría sin EAN',                   COUNT(*)
+  FROM anuncios WHERE en_categoria = 1 AND (ean IS NULL OR ean = '')
+UNION ALL
+SELECT 'Anuncios en categoría sin contenido identificable', COUNT(*)
+  FROM anuncios WHERE en_categoria = 1 AND contenido IS NULL
+UNION ALL
+SELECT 'Anuncios en categoría sin marca',                 COUNT(*)
+  FROM anuncios WHERE en_categoria = 1 AND marca_std IS NULL
+UNION ALL
+SELECT 'Comparables sin precio en la ejecución',          COUNT(*)
+  FROM v_observaciones WHERE comparable = 1 AND id_ejecucion = ?ejec AND precio IS NULL
+UNION ALL
+SELECT 'Comparables agotados en la ejecución',            COUNT(*)
+  FROM v_observaciones WHERE comparable = 1 AND id_ejecucion = ?ejec AND disponible = 0
+UNION ALL
+SELECT 'Productos comunes con contenido distinto entre comercios', COUNT(*) FROM (
+  SELECT id_producto FROM anuncios WHERE comparable = 1
+  GROUP BY id_producto HAVING COUNT(DISTINCT contenido) > 1)
+UNION ALL
+SELECT 'Precio de oferta mayor que el de lista',          COUNT(*)
+  FROM observaciones WHERE precio > precio_lista
+```
+
+```{r}
+p7
+```
+
+Los productos agotados conservan su precio publicado, pero un consumidor no podría comprarlos en ese momento; en las conclusiones se señalan aparte. Que ningún producto común tenga contenido distinto entre comercios confirma que la correspondencia por EAN no mezcló tamaños.
+
+## P8. Oferta de la categoría por comercio y ejecución
+
+```{sql, connection=con, output.var="p8"}
+SELECT o.id_ejecucion, o.comercio,
+       COUNT(*)                                             AS anuncios_en_categoria,
+       SUM(a.subcategoria_std = 'Lentes de lectura')        AS lectura,
+       SUM(a.subcategoria_std = 'Lentes de contacto')       AS contacto,
+       SUM(a.subcategoria_std LIKE 'Soluci%')               AS soluciones,
+       SUM(a.subcategoria_std IN ('Estuches', 'Limpieza de gafas')) AS accesorios,
+       ROUND(100.0 * AVG(a.tiene_descripcion), 1)           AS pct_con_descripcion,
+       ROUND(100.0 * AVG(a.marca_std IS NOT NULL), 1)       AS pct_con_marca,
+       ROUND(100.0 * AVG(a.contenido IS NOT NULL), 1)       AS pct_con_contenido
+FROM observaciones o JOIN anuncios a USING (comercio, sku)
+WHERE a.en_categoria = 1
+GROUP BY o.id_ejecucion, o.comercio
+ORDER BY o.id_ejecucion, anuncios_en_categoria DESC
+```
+
+```{r}
+p8
+```
+
+```{r, include=FALSE}
+p8u <- p8[p8$id_ejecucion == ejec, ]
+```
+
+En la ejecución `r ejec`, `r p8u$comercio[which.max(p8u$lectura)]` tiene la mayor oferta de gafas de lectura (`r max(p8u$lectura)`) y `r if (sum(p8u$contacto > 0) == 1) paste("solo", p8u$comercio[p8u$contacto > 0], "vende lentes de contacto en línea") else paste(sum(p8u$contacto > 0), "comercios venden lentes de contacto")`. Las soluciones son el grupo más parejo entre comercios (`r paste(p8u$comercio, p8u$soluciones, sep = ": ", collapse = "; ")`), y por eso aportan la mayoría de los productos comparables. La marca y el contenido se identifican en casi todos los anuncios; la descripción depende del sitio: `r paste0(p8u$comercio, " ", p8u$pct_con_descripcion, " %", collapse = ", ")` de anuncios con descripción de al menos 10 caracteres.
+
+# Visualizaciones
+
+```{r datos-graficos}
+colores <- c(locatel = "#1f77b4", farmatodo = "#d62728", colsubsidio = "#2ca02c")
+obs <- dbGetQuery(con, "
+  SELECT o.producto, o.comercio, o.precio, o.promocion, o.disponible,
+         p.linea, p.contenido, p.unidad
+  FROM v_observaciones o JOIN productos p USING (id_producto)
+  WHERE o.comparable = 1 AND o.id_ejecucion = ? AND o.precio IS NOT NULL",
+  params = list(ejec))
+```
+
+## Precio de la misma presentación en cada comercio
+
+```{r graf-precios, fig.height=6}
+orden <- obs |> group_by(producto) |> summarise(m = min(precio)) |> arrange(m)
+ggplot(obs, aes(x = precio, y = factor(producto, levels = orden$producto), colour = comercio)) +
+  geom_line(aes(group = producto), colour = "grey75", linewidth = 1) +
+  geom_point(aes(shape = ifelse(promocion == 1, "En promoción", "Precio normal")),
+             size = 3.5, alpha = .9) +
+  scale_colour_manual(values = colores) +
+  scale_x_continuous(labels = scales::label_dollar(prefix = "$", big.mark = ".", decimal.mark = ",")) +
+  labs(x = "Precio del empaque (COP)", y = NULL, colour = "Comercio", shape = NULL,
+       title = "Precio por presentación idéntica",
+       subtitle = paste("Ejecución", ejec)) +
+  theme_minimal(base_size = 12) + theme(legend.position = "bottom")
+```
+
+Cada fila es una presentación idéntica (mismo EAN); la línea gris marca el rango entre el precio más bajo y el más alto, y los puntos superpuestos son precios iguales. Las mayores separaciones aparecen en las soluciones grandes y en los productos que un comercio tiene en promoción. Limitación: son precios de un solo momento y, en Farmatodo, del precio general publicado, que puede variar por ciudad.
+
+## Precio por mL según tamaño
+
+```{r graf-ppu}
+ppu <- obs |> filter(unidad == "mL") |>
+  group_by(linea) |> filter(n_distinct(contenido) > 1) |> ungroup() |>
+  mutate(cop_ml = precio / contenido)
+ggplot(ppu, aes(x = contenido, y = cop_ml, colour = comercio)) +
+  geom_line(linewidth = 1) + geom_point(size = 3) +
+  facet_wrap(~ linea, scales = "free_x") +
+  scale_colour_manual(values = colores) +
+  labs(x = "Tamaño del frasco (mL)", y = "COP por mL", colour = "Comercio",
+       title = "Precio por mL de distintos tamaños de la misma solución") +
+  theme_minimal(base_size = 12) + theme(legend.position = "bottom")
+```
+
+```{r ppu-texto, include=FALSE}
+# ¿El frasco más grande es el más barato por mL en cada línea y comercio?
+chequeo <- ppu |> group_by(linea, comercio) |>
+  summarise(grande_mas_barato = cop_ml[which.max(contenido)] == min(cop_ml),
+            mejor_ml = contenido[which.min(cop_ml)], .groups = "drop")
+excepciones <- chequeo |> filter(!grande_mas_barato)
+```
+
+Líneas superpuestas indican el mismo precio en dos comercios. En `r sum(chequeo$grande_mas_barato)` de `r nrow(chequeo)` combinaciones línea-comercio el frasco más grande es el de menor precio por mL. `r if (nrow(excepciones) > 0) paste0("Las excepciones son ", paste0(excepciones$linea, " en ", excepciones$comercio, " (el menor precio por mL está en el frasco de ", excepciones$mejor_ml, " mL)", collapse = "; "), ": allí comprar el tamaño grande no ahorra por mL y solo aumenta el desembolso.") else "No hay excepciones: el frasco grande siempre tiene menor costo unitario."` Solo se grafican tamaños de una misma línea y en la misma unidad; no se mezclan gafas (und) con soluciones (mL).
+
+## Oportunidades de ahorro
+
+```{r graf-ahorro}
+ah <- obs |> group_by(producto) |>
+  summarise(ahorro = max(precio) - min(precio),
+            pct = 100 * ahorro / max(precio),
+            donde = paste(comercio[precio == min(precio)], collapse = " / "), .groups = "drop") |>
+  arrange(pct)
+ggplot(ah, aes(x = pct, y = factor(producto, levels = producto))) +
+  geom_col(fill = "#6b7c93") +
+  geom_text(aes(label = paste0(scales::comma(ahorro, big.mark = ".", decimal.mark = ","), " COP · ", donde)),
+            hjust = -0.05, size = 3.3) +
+  scale_x_continuous(expand = expansion(mult = c(0, .55))) +
+  labs(x = "Ahorro frente al precio más alto (%)", y = NULL,
+       title = "Ahorro al comprar en el comercio más barato") +
+  theme_minimal(base_size = 12)
+```
+
+La barra muestra el ahorro porcentual y la etiqueta el ahorro en pesos y el comercio donde se consigue. Un mismo porcentaje pesa distinto según el precio: un ahorro alto en COP en una solución de 300–355 mL importa más que el mismo porcentaje en un frasco de 60 mL.
+
+# Limitaciones y conclusiones
+
+**Limitaciones.**
+
+- Los precios corresponden al momento de la captura (`fecha_hora_consulta`) y a las condiciones de ese momento; no son permanentes.
+- Las promociones (`promocion = 1`) explican buena parte de las diferencias; algunas ofertas de Colsubsidio son descuentos temporales sobre el precio de lista.
+- Farmatodo publica precios por ciudad; se usa el precio general (`fullPrice` u `offerPrice`). Locatel y Colsubsidio publican un único precio en línea.
+- No se incluyen costos de envío ni pedidos mínimos, que pueden cambiar la decisión en compras pequeñas.
+- Los lentes de contacto solo se venden en línea en Farmatodo, por lo que no entran en la comparación entre los tres comercios; lo mismo ocurre con la mayoría de modelos de gafas de lectura, que cada cadena trae de proveedores distintos (solo una referencia Foster Grant coincide por EAN en los tres).
+- Los productos agotados (`disponible = 0`) conservan su precio publicado; se marcan, pero el consumidor no podría comprarlos en ese momento.
+
+**Conclusiones para el consumidor.**
+
+```{r conclusion, echo=FALSE}
+ah |> arrange(desc(pct)) |>
+  transmute(Producto = producto,
+            `Dónde comprar` = donde,
+            `Ahorro (COP)` = scales::comma(ahorro, big.mark = ".", decimal.mark = ","),
+            `Ahorro (%)` = round(pct, 1))
+```
+
+- **Dónde comprar.** La tabla anterior indica, para cada presentación, el comercio con el menor precio observado en la ejecución `r ejec`. Cuando aparecen varios comercios, el precio es idéntico (empate).
+- **Tamaño.** `r if (nrow(excepciones) == 0) "En todas las líneas comparadas el frasco más grande tiene el menor precio por mL" else paste0("El frasco más grande no siempre es el más barato por mL: ", paste0(excepciones$linea, " en ", excepciones$comercio, " sale mejor en ", excepciones$mejor_ml, " mL", collapse = "; "), ". En las demás combinaciones sí lo es")`. El tamaño grande conviene si se usa a diario y se termina dentro del plazo que indica el fabricante tras abrirlo; para viaje o uso ocasional, el frasco pequeño implica menor desembolso aunque cada mL cueste más.
+- **Ahorro unitario vs. desembolso total.** El ahorro por mL no siempre compensa: comprar el frasco grande en el comercio más caro puede costar más por mL que el mediano en el más barato; ver la gráfica de precio por mL antes de decidir.
+- **Condiciones.** Verificar que el producto esté disponible y si la promoción sigue vigente; los precios aquí reportados no incluyen envío.
+
+```{r cierre, include=FALSE}
+dbDisconnect(con)
+```

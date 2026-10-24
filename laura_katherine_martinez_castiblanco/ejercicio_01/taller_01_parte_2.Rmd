@@ -1,0 +1,631 @@
+---
+title: "Taller 1 - Parte 2"
+author: "Laura Katherine Martinez Castiblanco"
+output:
+  html_document:
+    theme: flatly
+    toc: false
+    self_contained: true
+    code_folding: hide
+    mathjax: default
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 7.2 Ejercicio propuesto para clase
+
+Los supermercados Éxito, Carulla y Jumbo publican su catálogo en línea, pero al igual que ocurrió con Amazon, los resultados de búsqueda de estos tres sitios se terminan de armar con JavaScript después de la carga inicial: si se descarga el HTML con read_html() solo se obtienen bloques vacíos de “carga” (skeletons), sin ningún producto. Por eso, para resolver este ejercicio es obligatorio usar read_html_live().
+
+Construya un script en R que obtenga los precios de las cervezas michelob, Stella Artois y club colombia entre los supermercados https://www.exito.com, https://www.carulla.com y https://www.tiendasjumbo.co. Usted debe:
+
+* consultar el buscador de cada uno de los tres supermercados para cada cerveza;
+* por cada producto encontrado, extraer su presentación (nombre/formato tal como aparece en el sitio), su precio y el supermercado de origen;
+* consolidar todos los resultados en una sola tabla y guardarla en un archivo .csv;
+* manejar errores por sitio sin interrumpir todo el proceso (si un supermercado falla, los demás deben poder completarse), e incluir una pausa entre solicitudes.
+
+
+```{r librerias}
+paquetes <- c(
+  "rvest", "xml2", "httr2", "dplyr", "stringr",
+  "purrr", "tibble", "janitor", "readr", "knitr", "chromote"
+)
+
+instalados <- rownames(installed.packages())
+pendientes <- setdiff(paquetes, instalados)
+
+if (length(pendientes) > 0) {
+  tryCatch(
+    install.packages(pendientes),
+    error = function(e) stop(
+      "No fue posible instalar: ", paste(pendientes, collapse = ", "),
+      ". Solicite apoyo al docente. Detalle: ", conditionMessage(e)
+    )
+  )
+}
+
+if (requireNamespace("rvest", quietly = TRUE) && packageVersion("rvest") < "1.0.5") {
+  install.packages("rvest")
+}
+
+invisible(lapply(paquetes, library, character.only = TRUE))
+
+
+mostrar_tabla <- function(tabla, n = 10, caption = NULL, digits = 2, ...) {
+  # 1. Filtrar número de filas
+  datos <- if (!is.null(n) && is.finite(n)) head(tabla, n) else tabla
+
+  # 2. Renderizado para HTML en R Markdown
+  if (knitr::is_html_output()) {
+    
+    # Asegurar que htmltools esté disponible
+    if (!requireNamespace("htmltools", quietly = TRUE)) {
+      stop("El paquete 'htmltools' es necesario para renderizar en HTML.")
+    }
+
+    # Generar la tabla HTML base con kable
+    tabla_html <- knitr::kable(
+      datos,
+      format = "html",
+      caption = caption,
+      digits = digits,
+      table.attr = 'class="table table-striped table-hover table-condensed table-bordered"',
+      ...
+    )
+
+    # Definir el estilo CSS
+    estilo_css <- htmltools::tags$style(htmltools::HTML("
+      .table-container-custom {
+        overflow-x: auto;
+        margin: 1.5em 0;
+        border-radius: 8px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.08);
+      }
+      .table-container-custom table {
+        margin-bottom: 0 !important;
+        font-size: 0.9em;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+      .table-container-custom th {
+        background-color: #f8f9fa;
+        color: #212529;
+        font-weight: 600;
+        border-bottom: 2px solid #dee2e6 !important;
+        text-align: inherit;
+      }
+      .table-container-custom caption {
+        caption-side: top;
+        font-weight: bold;
+        color: #495057;
+        font-size: 1em;
+        padding: 8px 12px;
+      }
+    "))
+
+    # Crear el contenedor div con la tabla
+    contenedor <- htmltools::div(
+      class = "table-container-custom",
+      htmltools::HTML(as.character(tabla_html))
+    )
+
+    # browsable() le fuerza a R Markdown a renderizar HTML nativo
+    return(htmltools::browsable(htmltools::tagList(estilo_css, contenedor)))
+
+  # 3. Renderizado para PDF / LaTeX
+  } else if (knitr::is_latex_output()) {
+    return(knitr::kable(
+      datos,
+      format = "latex",
+      caption = caption,
+      digits = digits,
+      booktabs = TRUE,
+      ...
+    ))
+
+  # 4. Modo consola / RStudio interactivo
+  } else {
+    if (!is.null(caption)) cat("\n=== ", caption, " ===\n\n")
+    print(datos)
+  }
+}
+
+
+diagnostico <- tibble(
+  elemento = c("Sistema operativo", "Versión de R", "Versión de rvest", "Versión de chromote"),
+  valor = c(
+    Sys.info()[["sysname"]],
+    R.version.string,
+    as.character(packageVersion("rvest")),
+    as.character(packageVersion("chromote"))
+  )
+)
+
+mostrar_tabla(diagnostico, n = nrow(diagnostico), caption = "Entorno de ejecución")
+
+
+
+if (packageVersion("rvest") < "1.0.5") {
+  stop("Se necesita rvest 1.0.5 o posterior. Ejecute install.packages('rvest') y reinicie RStudio.")
+}
+
+chrome_disponible <- tryCatch({
+  chromote::chromote_info()
+  TRUE
+}, error = function(e) FALSE)
+
+chrome_disponible
+```
+
+## Extracción de datos del supermercado Éxito:
+
+```{r}
+
+# ============================================================
+# 1. Extractor de Volumen Corregido (Soporta 1.980 ml y 7.920 ml)
+# ============================================================
+extraer_ml_estricto <- function(texto) {
+  if (is.na(texto) || texto == "") return(NA_real_)
+  
+  # Remover puntos o comas que actúan como separadores de miles en el volumen
+  # Ej: "1.980 ml" -> "1980 ml" | "7.920 ml" -> "7920 ml"
+  texto_limpio <- str_replace_all(texto, "(?<=\\d)[.,](?=\\d{3}\\b)", "")
+  
+  # A. Evaluación en Litros (ej: "1.5 L", "1 Litro")
+  match_litros <- str_extract(texto_limpio, "(?i)\\b\\d+(\\.\\d+)?\\s*(l|lt|litro|litros)\\b")
+  if (!is.na(match_litros)) {
+    val <- str_extract(match_litros, "\\d+(\\.\\d+)?") %>% as.numeric()
+    return(val * 1000)
+  }
+  
+  # B. Evaluación en Mililitros (ej: "1980 ml", "7920 ml", "330ml")
+  match_ml <- str_extract(texto_limpio, "(?i)\\d+\\s*(ml|cc)")
+  if (!is.na(match_ml)) {
+    val <- str_extract(match_ml, "\\d+") %>% as.numeric()
+    return(val)
+  }
+  
+  return(NA_real_)
+}
+
+# ============================================================
+# 2. Extractor de Precio Robusto (Sin depender de oferta)
+# ============================================================
+extraer_precio_estricto <- function(nodo) {
+  texto_nodo <- html_text2(nodo)
+  if (is.na(texto_nodo) || texto_nodo == "") return(NA_real_)
+  
+  # Extraer todos los patrones monetarios ($ 18.900, $ 103.200, $18900)
+  precios <- str_extract_all(texto_nodo, "\\$\\s*[0-9]{1,3}(\\.[0-9]{3})+|\\$\\s*[0-9]{4,6}")[[1]]
+  if (length(precios) == 0) return(NA_real_)
+  
+  valores <- precios %>% str_remove_all("[^0-9]") %>% as.numeric()
+  
+  # Filtrar precios que correspondan al producto (excluyendo unitarios pequeños < $3.000)
+  valores_producto <- valores[valores >= 3000]
+  
+  if (length(valores_producto) > 0) {
+    # Retorna el último precio válido (corresponde al precio final a pagar)
+    return(tail(valores_producto, 1))
+  }
+  
+  return(NA_real_)
+}
+
+# ============================================================
+# 3. Función Principal de Scraping
+# ============================================================
+scrapear_cervezas_exito <- function(marcas, b) {
+  
+  resultados_totales <- map_dfr(marcas, function(marca) {
+    url <- paste0("https://www.exito.com/s?q=", URLencode(paste("cerveza", marca)), "&sort=score_desc")
+    cat("\n🌐 Buscando cerveza:", marca, "...\n")
+    
+    b$Page$navigate(url)
+    Sys.sleep(5)
+    
+    for(i in 1:3) {
+      b$Runtime$evaluate("window.scrollBy(0, 1000);")
+      Sys.sleep(1.5)
+    }
+    
+    res <- b$Runtime$evaluate("document.documentElement.outerHTML")
+    html_doc <- read_html(res$result$value)
+    
+    nodos <- html_elements(html_doc, "[class*='productCard_contentInfo']")
+    if (length(nodos) == 0) nodos <- html_elements(html_doc, "article")
+    
+    if (length(nodos) == 0) return(tibble())
+    
+    map_dfr(nodos, function(nodo) {
+      nombre <- nodo %>% html_element("h3[class*='styles_name']") %>% html_text2()
+      
+      tibble(
+        presentacion = nombre,
+        precio = extraer_precio_estricto(nodo),
+        marca = str_to_title(marca),
+        ml = extraer_ml_estricto(nombre)
+      )
+    })
+  })
+  
+  # Limpieza y cálculo métrico
+  cervezas_limpias <- resultados_totales %>%
+    filter(!is.na(precio), !is.na(ml), !is.na(presentacion)) %>%
+    filter(precio >= 3000) %>%
+    filter(str_detect(tolower(presentacion), "cerveza|ultra|sixpack|pack|lata|botella|nrb")) %>%
+    filter(!str_detect(tolower(presentacion), "llanta|moto|carro|pirelli|kontrol|michelin")) %>%
+    mutate(
+      precio_por_ml = round(precio / ml, 2),
+      precio_por_litro = round((precio / ml) * 1000, 2)
+    ) %>%
+    arrange(precio_por_ml) %>%
+    distinct(presentacion, .keep_all = TRUE)
+    
+  return(cervezas_limpias)
+}
+
+# ============================================================
+# 4. Ejecución
+# ============================================================
+b <- ChromoteSession$new()
+b$view()
+
+marcas_objetivo <- c("michelob", "stella artois", "club colombia")
+df_cervezas <- scrapear_cervezas_exito(marcas_objetivo, b)
+
+b$close()
+
+# Visualización limpia de la tabla
+df_cervezas %>% 
+  select(
+    Marca = marca, 
+    Presentación = presentacion, 
+    `Precio Total ($)` = precio, 
+    `Volumen (ml)` = ml, 
+    `Precio/ml ($)` = precio_por_ml, 
+    `Precio/L ($)` = precio_por_litro
+  ) %>% 
+  mostrar_tabla(
+    n = 15, 
+    caption = "🛒 Supermercados Éxito: Benchmark de Precios por Unidad de Volumen",
+    digits = 2
+  )
+```
+
+## Extracción de datos del supermercado Carulla:
+
+```{r extraccion_carulla}
+
+# ============================================================
+# 1. Extractor de Volumen Robusto (Maneja "1.980 ml" y "7.920 ml")
+# ============================================================
+extraer_ml_estricto <- function(texto) {
+  if (is.na(texto) || texto == "") return(NA_real_)
+  
+  # Eliminar puntos de miles dentro del texto de volumen para evitar lecturas truncadas
+  texto_limpio <- str_replace_all(texto, "(?<=\\d)[.,](?=\\d{3}\\b)", "")
+  
+  # A. Evaluación en Litros (ej: "1.5 L", "1 Litro")
+  match_litros <- str_extract(texto_limpio, "(?i)\\b\\d+(\\.\\d+)?\\s*(l|lt|litro|litros)\\b")
+  if (!is.na(match_litros)) {
+    val <- str_extract(match_litros, "\\d+(\\.\\d+)?") %>% as.numeric()
+    return(val * 1000)
+  }
+  
+  # B. Evaluación en Mililitros (ej: "1980 ml", "7920 ml", "330 ml")
+  match_ml <- str_extract(texto_limpio, "(?i)\\d+\\s*(ml|cc)")
+  if (!is.na(match_ml)) {
+    val <- str_extract(match_ml, "\\d+") %>% as.numeric()
+    return(val)
+  }
+  
+  return(NA_real_)
+}
+
+# ============================================================
+# 2. Extractor de Precio Total (Evita capturar "Ml a $ 10,35")
+# ============================================================
+extraer_precio_estricto <- function(nodo) {
+  # Apuntar prioritariamente al contenedor del botón de oferta / precio final
+  nodo_precio <- nodo %>% html_element("[class*='priceOfferButton']")
+  if (is.na(nodo_precio)) nodo_precio <- nodo
+  
+  texto_nodo <- html_text2(nodo_precio)
+  if (is.na(texto_nodo) || texto_nodo == "") return(NA_real_)
+  
+  # Buscar todos los montos de dinero ($ 16.700, $ 22.600)
+  precios <- str_extract_all(texto_nodo, "\\$\\s*[0-9]{1,3}(\\.[0-9]{3})+|\\$\\s*[0-9]{4,6}")[[1]]
+  if (length(precios) == 0) return(NA_real_)
+  
+  valores <- precios %>% str_remove_all("[^0-9]") %>% as.numeric()
+  
+  # Descartar valores de precio unitario o inferiores al costo real de un paquete/cerveza
+  valores_validos <- valores[valores >= 3000]
+  
+  if (length(valores_validos) > 0) {
+    # El último valor corresponde al precio de oferta / precio final a pagar
+    return(tail(valores_validos, 1))
+  }
+  
+  return(NA_real_)
+}
+
+# ============================================================
+# 3. Función Principal de Scraping para Carulla
+# ============================================================
+scrapear_cervezas_carulla <- function(marcas, b) {
+  
+  resultados_totales <- map_dfr(marcas, function(marca) {
+    url <- paste0("https://www.carulla.com/s?q=", URLencode(paste("cerveza", marca)), "&sort=score_desc")
+    cat("\n🌐 Buscando en Carulla:", marca, "...\n")
+    
+    b$Page$navigate(url)
+    Sys.sleep(5) # Carga inicial de JS
+    
+    # Scroll para disparar Lazy Loading
+    for(i in 1:3) {
+      b$Runtime$evaluate("window.scrollBy(0, 1000);")
+      Sys.sleep(1.5)
+    }
+    
+    res <- b$Runtime$evaluate("document.documentElement.outerHTML")
+    html_doc <- read_html(res$result$value)
+    
+    nodos <- html_elements(html_doc, "[class*='productCard_contentInfo']")
+    if (length(nodos) == 0) nodos <- html_elements(html_doc, "article")
+    
+    if (length(nodos) == 0) return(tibble())
+    
+    map_dfr(nodos, function(nodo) {
+      nombre <- nodo %>% html_element("h3[class*='styles_name']") %>% html_text2()
+      
+      tibble(
+        presentacion = nombre,
+        precio = extraer_precio_estricto(nodo),
+        supermercado = "Carulla",
+        marca = str_to_title(marca),
+        ml = extraer_ml_estricto(nombre)
+      )
+    })
+  })
+  
+  # Limpieza y generación de métricas unitarias con decimales
+  cervezas_limpias <- resultados_totales %>%
+    filter(!is.na(precio), !is.na(ml), !is.na(presentacion)) %>%
+    filter(precio >= 3000) %>%
+    filter(str_detect(tolower(presentacion), "cerveza|ultra|sixpack|pack|lata|botella|nrb")) %>%
+    filter(!str_detect(tolower(presentacion), "llanta|moto|carro|pirelli|michelin")) %>%
+    mutate(
+      precio_por_ml = round(precio / ml, 2),
+      precio_por_litro = round((precio / ml) * 1000, 2)
+    ) %>%
+    arrange(precio_por_ml) %>%
+    distinct(presentacion, .keep_all = TRUE)
+    
+  return(cervezas_limpias)
+}
+
+# ============================================================
+# 4. Ejecución Interactiva
+# ============================================================
+b <- ChromoteSession$new()
+b$view() # Visualiza la navegación en tiempo real en una pestaña de Chrome
+
+marcas_objetivo <- c("michelob", "stella artois", "club colombia")
+df_carulla <- scrapear_cervezas_carulla(marcas_objetivo, b)
+
+b$close()
+
+# Visualizar dataframe corregido
+df_carulla %>% 
+  select(
+    Marca = marca, 
+    Presentación = presentacion, 
+    `Precio Total ($)` = precio, 
+    `Volumen (ml)` = ml, 
+    `Precio/ml ($)` = precio_por_ml, 
+    `Precio/L ($)` = precio_por_litro
+  ) %>% 
+  mostrar_tabla(
+    n = 15, 
+    caption = "🛒 Supermercados Carulla: Benchmark de Precios por Unidad de Volumen",
+    digits = 2
+  )
+```
+
+## Extracción de datos del supermercado Jumbo:
+
+```{r extraccion_jumbo}
+
+# ============================================================
+# 1. Extractor de Volumen Universal
+# ============================================================
+extraer_ml_estricto <- function(texto) {
+  if (is.na(texto) || texto == "") return(NA_real_)
+  
+  texto_limpio <- str_replace_all(texto, "(?<=\\d)[.,](?=\\d{3}\\b)", "")
+  texto_lower <- str_to_lower(texto_limpio)
+  
+  # A. Multiplicación: "x6 Und x269ml", "6x269ml", "x6 unds x 269 ml"
+  mult_1 <- str_match(texto_lower, "x?\\s*(\\d+)\\s*(?:und|unds|unidades|latas|botellas)?\\s*x\\s*(\\d+)\\s*ml")
+  if (!is.na(mult_1[1, 1])) {
+    return(as.numeric(mult_1[1, 2]) * as.numeric(mult_1[1, 3]))
+  }
+  
+  # B. Multiplicación inversa: "330 ml x6", "330ml x 6"
+  mult_2 <- str_match(texto_lower, "(\\d+)\\s*ml\\s*x\\s*(\\d+)")
+  if (!is.na(mult_2[1, 1])) {
+    return(as.numeric(mult_2[1, 2]) * as.numeric(mult_2[1, 3]))
+  }
+  
+  # C. Expresión en Litros: "1.5 L", "1 Litro"
+  match_litros <- str_extract(texto_limpio, "(?i)\\b\\d+(\\.\\d+)?\\s*(l|lt|litro|litros)\\b")
+  if (!is.na(match_litros)) {
+    val <- str_extract(match_litros, "\\d+(\\.\\d+)?") %>% as.numeric()
+    return(val * 1000)
+  }
+  
+  # D. Mililitros simples: "1980 ml", "269ml"
+  match_ml <- str_extract(texto_limpio, "(?i)\\d+\\s*(ml|cc)")
+  if (!is.na(match_ml)) {
+    return(str_extract(match_ml, "\\d+") %>% as.numeric())
+  }
+  
+  return(NA_real_)
+}
+
+# ============================================================
+# 2. Extractor de Precio Aislado de PUM
+# ============================================================
+extraer_precio_estricto <- function(texto_tarjeta) {
+  if (is.na(texto_tarjeta) || texto_tarjeta == "") return(NA_real_)
+  
+  lineas <- unlist(str_split(texto_tarjeta, "\n"))
+  
+  # Omitir líneas de PUM ($10 x ml, Ml a $, etc.)
+  lineas_limpias <- lineas[!str_detect(tolower(lineas), "x\\s*ml|/ml|pum|\\$10")]
+  texto_unificado <- paste(lineas_limpias, collapse = " ")
+  
+  precios <- str_extract_all(texto_unificado, "\\$\\s*[0-9]{1,3}(\\.[0-9]{3})+|\\$\\s*[0-9]{4,6}")[[1]]
+  if (length(precios) == 0) return(NA_real_)
+  
+  valores <- precios %>% str_remove_all("[^0-9]") %>% as.numeric()
+  valores_validos <- valores[valores >= 2000]
+  
+  if (length(valores_validos) > 0) {
+    return(tail(valores_validos, 1)) # Retorna el precio final de venta
+  }
+  
+  return(NA_real_)
+}
+
+# ============================================================
+# 3. Función Principal de Scraping para Jumbo
+# ============================================================
+scrapear_cervezas_jumbo <- function(marcas, b) {
+  
+  resultados_totales <- map_dfr(marcas, function(marca) {
+    url <- paste0("https://www.jumbocolombia.com/busca?ft=", URLencode(paste("cerveza", marca)))
+    cat("\n🌐 Buscando en Jumbo:", marca, "...\n")
+    
+    b$Page$navigate(url)
+    Sys.sleep(8) # Tiempo para renderizado de VTEX React
+    
+    for(i in 1:3) {
+      b$Runtime$evaluate("window.scrollBy(0, 800);")
+      Sys.sleep(2)
+    }
+    
+    res <- b$Runtime$evaluate("document.documentElement.outerHTML")
+    html_doc <- read_html(res$result$value)
+    
+    # Capturar nodos de tarjetas de producto en VTEX IO
+    nodos <- html_elements(html_doc, "[class*='vtex-search-result-3-x-galleryItem'], [class*='vtex-product-summary-2-x-container']")
+    
+    if (length(nodos) == 0) return(tibble())
+    
+    map_dfr(nodos, function(nodo) {
+      texto_tarjeta <- html_text2(nodo)
+      
+      # Intentar construir el nombre uniendo la marca y la descripción si existen
+      lineas_texto <- unlist(str_split(texto_tarjeta, "\n"))
+      lineas_nombre <- lineas_texto[str_detect(tolower(lineas_texto), "cerveza|michelob|stella|club|lata|botella|pack|ultra")]
+      
+      nombre_completo <- if (length(lineas_nombre) > 0) {
+        paste(unique(lineas_nombre), collapse = " ")
+      } else {
+        texto_tarjeta
+      }
+      
+      tibble(
+        presentacion = str_squish(nombre_completo),
+        precio = extraer_precio_estricto(texto_tarjeta),
+        supermercado = "Jumbo",
+        marca = str_to_title(marca),
+        ml = extraer_ml_estricto(texto_tarjeta)
+      )
+    })
+  })
+  
+  cervezas_limpias <- resultados_totales %>%
+    filter(!is.na(precio), !is.na(ml), !is.na(presentacion)) %>%
+    filter(precio >= 2000) %>%
+    filter(str_detect(tolower(presentacion), "cerveza|ultra|sixpack|pack|lata|botella|nrb")) %>%
+    filter(!str_detect(tolower(presentacion), "llanta|moto|carro|pirelli|michelin")) %>%
+    mutate(
+      precio_por_ml = round(precio / ml, 2),
+      precio_por_litro = round((precio / ml) * 1000, 2)
+    ) %>%
+    arrange(precio_por_ml) %>%
+    distinct(presentacion, .keep_all = TRUE)
+    
+  return(cervezas_limpias)
+}
+
+# ============================================================
+# 4. Ejecución y Visualización
+# ============================================================
+b <- ChromoteSession$new()
+b$view()
+
+marcas_objetivo <- c("michelob", "stella artois", "club colombia")
+df_jumbo <- scrapear_cervezas_jumbo(marcas_objetivo, b)
+
+b$close()
+
+# Visualización usando tu función personalizada
+df_jumbo %>% 
+  select(
+    Marca = marca, 
+    Presentación = presentacion, 
+    `Precio Total ($)` = precio, 
+    `Volumen (ml)` = ml, 
+    `Precio/ml ($)` = precio_por_ml, 
+    `Precio/L ($)` = precio_por_litro
+  ) %>% 
+  mostrar_tabla(
+    n = 15, 
+    caption = "🛒 Supermercados Jumbo: Benchmark de Precios por Unidad de Volumen",
+    digits = 2
+  )
+```
+
+
+
+```{r}
+
+```
+
+
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+
+
+A partir de los resultados obtenidos, responda las siguientes preguntas:

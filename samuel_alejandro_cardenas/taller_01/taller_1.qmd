@@ -1,0 +1,225 @@
+---
+title: "Taller 1 — Comparador de precios en salud sexual y reproductiva"
+subtitle: "Cafam, Locatel y Cruz Verde | Captura del 10 de octubre de 2026"
+lang: es
+format:
+  html:
+    toc: true
+    number-sections: true
+    theme: cosmo
+    code-fold: false
+execute:
+  echo: true
+  message: false
+  warning: false
+---
+
+# Introducción
+
+Se analizaron **preservativos, lubricantes sexuales, pruebas de embarazo y pruebas de ovulación** ofertados en tres comercios colombianos: Cafam, Locatel y Cruz Verde. Se excluyen medicamentos anticonceptivos, juguetes sexuales e higiene íntima no relacionada. El objetivo es identificar precios mínimos para una **presentación idéntica** y evaluar el costo por unidad cuando existe más de un tamaño del mismo producto.
+
+La extracción se implementó en R (`scraper.R`), con respuestas originales en `raw/` y persistencia en SQLite. El informe toma **la última ejecución con ocho grupos formalmente validados**, no una mezcla de fechas distintas. Las ofertas y precios corresponden al momento de la captura; no son cotizaciones permanentes.
+
+```{r}
+#| label: preparar-analisis
+library(DBI)
+library(RSQLite)
+library(ggplot2)
+library(knitr)
+# Cargar las funciones independientes sin ejecutar el scraper ni modificar SQLite.
+source('scraper.R')
+con <- DBI::dbConnect(RSQLite::SQLite(), 'comparador_precios.sqlite')
+q <- function(sql, params=NULL) {
+  if (is.null(params)) DBI::dbGetQuery(con,sql) else DBI::dbGetQuery(con,sql,params=params)
+}
+ids <- q("SELECT id_ejecucion FROM observaciones WHERE comparable=1 AND precio>0 AND id_comun IS NOT NULL GROUP BY id_ejecucion HAVING COUNT(*)=24 AND COUNT(DISTINCT id_comun)=8 AND COUNT(DISTINCT comercio)=3 ORDER BY id_ejecucion DESC LIMIT 1")
+if (nrow(ids)!=1L) stop('No hay una ejecucion validada con 24 ofertas: revise los SKU y use validar_ultima_ejecucion() tras cargar scraper.R')
+ej <- ids$id_ejecucion[[1]]
+precio_cop <- function(x) paste0('$',formatC(round(x),format='f',digits=0,big.mark='.'))
+labels <- c(
+ durex_placer_prolongado_3='Durex Placer Prolongado ×3',
+ durex_real_feel_3='Durex Real Feel ×3',
+ ky_lubricante_100_g='K-Y lubricante 100 g',
+ ky_lubricante_50_g='K-Y lubricante 50 g',
+ today_long_action_6='Today Long Action ×6',
+ today_real_sensation_6='Today Real Sensation ×6',
+ today_triple_pleasure_6='Today Triple Pleasure ×6',
+ today_triple_pleasure_8='Today Triple Pleasure ×8 (promoción)')
+cat('Ejecucion analizada: ',ej,'\n')
+cat('Integridad SQLite: ',q('PRAGMA integrity_check')[[1]],'\n')
+```
+
+# Fuentes, extracción y preparación
+
+El código operativo está centralizado en `scraper.R`. Para una nueva captura y
+validación, utilice en la consola de RStudio las funciones `extraer_en_vivo()` y
+`validar_ultima_ejecucion()` después de revisar las correspondencias. No se
+vuelven a ejecutar automáticamente cuando se renderiza este informe.
+
+- **Cafam y Locatel:** API JSON de catálogo VTEX, recorrida por lotes; se conservaron respuestas en `raw/`.
+- **Cruz Verde:** HTML de tarjetas de producto y paginación basada en `Search-UpdateGrid`, además de tres secciones equivalentes a la categoría.
+- **Limpieza:** estandarización de marcas, categorías, cantidades y unidades; los nombres y descripciones originales se conservaron. El precio normal y el eventual precio Club se almacenan en campos distintos.
+- **Correspondencia:** se identificaron ocho presentaciones con **24 parejas (comercio, SKU)** documentadas en `config/equivalencias_revisar.csv`. Se exige coincidencia de marca, variante y contenido, no solo similitud de nombres. `validaciones_comparables` registra el criterio aplicado.
+
+En particular, las fichas de Cruz Verde **Durex Placer Prolongado ×3** y **Today Sin Lubricante ×3** se reclasificaron como preservativos, conservando sus textos originales. La palabra «lubricante» en sus nombres no convierte el artículo en gel lubricante.
+
+# Validación y cobertura
+
+```{r}
+#| label: fuentes-y-cobertura
+cobertura <- q('SELECT comercio,seccion,esperados,capturados,paginas,estado,detalle FROM cobertura WHERE id_ejecucion=? ORDER BY comercio,seccion',params=list(ej))
+knitr::kable(cobertura,caption='Secciones recorridas durante la ejecución')
+```
+
+Las cifras «esperados» de Cafam/Locatel corresponden a productos **brutos de la ruta**, mientras «capturados» descuenta productos excluidos por delimitación; en Cruz Verde son los contadores publicados en la sección. `ruta_recorrida` **no prueba por sí solo** que la selección de rutas cubra todo el inventario de la categoría. La correspondencia 8 × 3 sí se evalúa directamente sobre los datos de una misma ejecución.
+
+# Preguntas resueltas con SQL
+
+## 1. Comercios, productos y observaciones
+
+```{r}
+consulta_1a <- "SELECT COUNT(DISTINCT comercio) AS comercios, COUNT(*) AS observaciones_historicas, COUNT(DISTINCT comercio || ':' || sku) AS sku_por_comercio FROM observaciones"
+consulta_1b <- "SELECT comercio, COUNT(*) AS observaciones, COUNT(DISTINCT sku) AS sku, COUNT(DISTINCT producto_original) AS nombres_originales FROM observaciones WHERE id_ejecucion=? GROUP BY comercio ORDER BY comercio"
+knitr::kable(q(consulta_1a),caption='Contenido total de la base (todas las ejecuciones)')
+knitr::kable(q(consulta_1b,list(ej)),caption='Ofertas de la ejecución analizada')
+```
+
+El número de SKU no debe confundirse automáticamente con el número de productos equivalentes entre comercios.
+
+## 2. Ocho presentaciones y duplicados en una ejecución
+
+```{r}
+consulta_2 <- "SELECT id_comun, COUNT(*) AS observaciones, COUNT(DISTINCT comercio) AS comercios, COUNT(DISTINCT comercio || ':' || sku) AS sku_por_comercio FROM observaciones WHERE id_ejecucion=? AND comparable=1 AND precio>0 GROUP BY id_comun ORDER BY id_comun"
+res_2 <- q(consulta_2,list(ej))
+knitr::kable(res_2,caption='Verificación de las ocho ternas')
+repetidos <- q("SELECT comercio,sku,COUNT(*) AS duplicados FROM observaciones WHERE id_ejecucion=? GROUP BY comercio,sku HAVING COUNT(*)>1",list(ej))
+cat('Registros repetidos por comercio/SKU en la ejecución:',nrow(repetidos),'\n')
+stopifnot(nrow(res_2)==8L,all(res_2$observaciones==3L),all(res_2$comercios==3L),nrow(repetidos)==0L)
+```
+
+Se validaron **ocho presentaciones diferentes, tres comercios por presentación (24 observaciones)**. La base utiliza los SKU y las variantes documentadas para permitir auditoría.
+
+## 3. Mínimo, máximo, promedio y comercio con menor precio
+
+```{r}
+consulta_3 <- "WITH r AS (SELECT id_comun,MIN(precio) AS minimo,MAX(precio) AS maximo,AVG(precio) AS promedio FROM observaciones WHERE id_ejecucion=? AND comparable=1 GROUP BY id_comun) SELECT r.id_comun,ROUND(r.minimo,2) AS minimo_cop,ROUND(r.maximo,2) AS maximo_cop,ROUND(r.promedio,2) AS promedio_cop,GROUP_CONCAT(o.comercio,', ') AS comercios_minimo FROM r JOIN observaciones o ON o.id_ejecucion=? AND o.id_comun=r.id_comun AND o.comparable=1 AND o.precio=r.minimo GROUP BY r.id_comun ORDER BY r.id_comun"
+res_3 <- q(consulta_3,list(ej,ej))
+res_3$producto <- unname(labels[res_3$id_comun])
+knitr::kable(res_3[,c('producto','minimo_cop','maximo_cop','promedio_cop','comercios_minimo')],caption='Ofertas más económicas y empates, si existen')
+```
+
+## 4. Ahorro potencial en COP y porcentaje
+
+```{r}
+consulta_4 <- "SELECT id_comun,MIN(precio) AS minimo,MAX(precio) AS maximo,MAX(precio)-MIN(precio) AS ahorro_cop,ROUND(100.0*(MAX(precio)-MIN(precio))/NULLIF(MAX(precio),0),2) AS ahorro_porcentaje FROM observaciones WHERE id_ejecucion=? AND comparable=1 GROUP BY id_comun HAVING COUNT(DISTINCT comercio)=3 ORDER BY ahorro_porcentaje DESC"
+res_4 <- q(consulta_4,list(ej))
+res_4$producto <- unname(labels[res_4$id_comun])
+knitr::kable(res_4[,c('producto','minimo','maximo','ahorro_cop','ahorro_porcentaje')],caption='Ahorro por presentación frente al mayor precio')
+cat('Mayor diferencia:',res_4$producto[[1]],'(',precio_cop(res_4$ahorro_cop[[1]]),';',res_4$ahorro_porcentaje[[1]],'%).\n')
+```
+
+## 5. Precio por unidad para distintos tamaños del mismo producto
+
+```{r}
+consulta_5 <- "SELECT id_comun,comercio,precio,cantidad,unidad,ROUND(precio/cantidad,2) AS precio_por_unidad FROM observaciones WHERE id_ejecucion=? AND comparable=1 AND cantidad>0 AND (id_comun LIKE 'ky_lubricante_%' OR id_comun LIKE 'today_triple_pleasure_%') ORDER BY unidad,comercio,id_comun"
+res_5 <- q(consulta_5,list(ej))
+res_5$producto <- unname(labels[res_5$id_comun])
+knitr::kable(res_5[,c('comercio','producto','precio','cantidad','unidad','precio_por_unidad')],caption='Comparaciones de K-Y 50/100 g y Today Triple Pleasure ×6/×8')
+```
+
+Solo se comparan tamaños de un **mismo producto y formulación**. El precio por gramo se mantiene separado del precio por preservativo. La promoción «pague 6 lleve 8» contiene ocho unidades efectivas.
+
+## 6. Mayores diferencias de precio entre los comercios
+
+```{r}
+consulta_6 <- "SELECT id_comun,ROUND(100.0*(MAX(precio)-MIN(precio))/NULLIF(MAX(precio),0),2) AS rango_porcentual,MAX(precio)-MIN(precio) AS rango_cop FROM observaciones WHERE id_ejecucion=? AND comparable=1 GROUP BY id_comun HAVING COUNT(DISTINCT comercio)=3 ORDER BY rango_porcentual DESC"
+res_6 <- q(consulta_6,list(ej))
+res_6$producto <- unname(labels[res_6$id_comun])
+knitr::kable(res_6[,c('producto','rango_porcentual','rango_cop')],caption='Presentaciones ordenadas por ahorro potencial')
+```
+
+## 7. Datos faltantes e inconsistencias
+
+```{r}
+consulta_7 <- "SELECT comercio,COUNT(*) AS registros,SUM(CASE WHEN precio IS NULL OR precio<=0 THEN 1 ELSE 0 END) AS sin_precio,SUM(CASE WHEN marca IS NULL OR TRIM(marca)='' THEN 1 ELSE 0 END) AS sin_marca,SUM(CASE WHEN cantidad IS NULL OR cantidad<=0 THEN 1 ELSE 0 END) AS sin_cantidad,SUM(CASE WHEN unidad IS NULL OR TRIM(unidad)='' THEN 1 ELSE 0 END) AS sin_unidad,SUM(CASE WHEN url IS NULL OR TRIM(url)='' THEN 1 ELSE 0 END) AS sin_url FROM observaciones WHERE id_ejecucion=? GROUP BY comercio ORDER BY comercio"
+res_7 <- q(consulta_7,list(ej))
+knitr::kable(res_7,caption='Faltantes de todos los productos de la última ejecución')
+```
+
+Hay productos fuera de las ocho correspondencias que carecen de marca o contenido. No se rellenan con cero. Los precios del Club de Cruz Verde están separados y no se mezclan con el precio normal. La disponibilidad, promociones y precio final de entrega podrían cambiar entre la consulta y la compra.
+
+## 8. Cobertura del surtido y completitud de los campos
+
+```{r}
+consulta_8 <- "SELECT comercio,COUNT(DISTINCT sku) AS referencias,ROUND(100.0*AVG(CASE WHEN descripcion_original IS NOT NULL AND TRIM(descripcion_original)<>'' THEN 1.0 ELSE 0 END),1) AS descripcion_pct,ROUND(100.0*AVG(CASE WHEN marca IS NOT NULL AND TRIM(marca)<>'' THEN 1.0 ELSE 0 END),1) AS marca_pct,ROUND(100.0*AVG(CASE WHEN cantidad>0 AND unidad IS NOT NULL THEN 1.0 ELSE 0 END),1) AS contenido_pct FROM observaciones WHERE id_ejecucion=? GROUP BY comercio ORDER BY comercio"
+knitr::kable(q(consulta_8,list(ej)),caption='Tamaño observado y proporción de campos completos')
+knitr::kable(cobertura[,c('comercio','seccion','esperados','capturados','paginas','estado')],caption='Comparación con los contadores de origen')
+```
+
+# Visualizaciones e interpretación
+
+```{r}
+#| label: preparar-graficos
+precios <- q("SELECT comercio,id_comun,precio,cantidad,unidad FROM observaciones WHERE id_ejecucion=? AND comparable=1",list(ej))
+precios$producto <- factor(unname(labels[precios$id_comun]),levels=unname(labels))
+precios$comercio <- factor(precios$comercio,levels=c('Cafam','Locatel','Cruz Verde'))
+```
+
+## Gráfico 1. Precio del mismo empaque entre comercios
+
+```{r}
+#| fig-width: 11
+#| fig-height: 6
+ggplot(precios,aes(x=producto,y=precio,fill=comercio)) +
+  geom_col(position=position_dodge(width=.82),width=.72) + coord_flip() +
+  labs(title='Precio del empaque por comercio',subtitle=paste('Ejecución',ej),x=NULL,y='Precio (COP)',fill='Comercio') + theme_minimal(base_size=11)
+```
+
+Las barras comparan exclusivamente presentaciones con marca, variante y contenido equiparables. Un menor precio del empaque no garantiza un menor costo unitario si los tamaños son diferentes.
+
+## Gráfico 2. Precio por gramo de K-Y según tamaño
+
+```{r}
+#| fig-width: 9
+#| fig-height: 5
+kg <- subset(precios,grepl('^K-Y',as.character(producto)))
+kg$tamanio <- factor(paste0(kg$cantidad,' g'),levels=c('50 g','100 g'))
+ggplot(kg,aes(x=tamanio,y=precio/cantidad,fill=comercio)) +
+  geom_col(position='dodge',width=.7) +
+  labs(title='Lubricante K-Y: costo por gramo',x='Tamaño del envase',y='COP/g',fill='Comercio') +
+  theme_minimal(base_size=11)
+```
+
+El envase de 100 g puede requerir mayor desembolso y, al mismo tiempo, presentar un menor precio por gramo. La comparación se hace dentro de la misma marca y formulación.
+
+## Gráfico 3. Ahorro potencial porcentual
+
+```{r}
+#| fig-width: 10
+#| fig-height: 5
+res_4$producto <- factor(res_4$producto,levels=rev(res_4$producto))
+ggplot(res_4,aes(x=producto,y=ahorro_porcentaje)) +
+  geom_col(width=.65) + coord_flip() +
+  labs(title='Diferencia relativa entre el mayor y menor precio',x=NULL,y='Ahorro potencial (%)') +
+  theme_minimal(base_size=11)
+```
+
+# Comparación de la misma canasta de ocho presentaciones
+
+```{r}
+consulta_canasta <- "SELECT comercio,SUM(precio) AS costo_canasta FROM observaciones WHERE id_ejecucion=? AND comparable=1 GROUP BY comercio HAVING COUNT(DISTINCT id_comun)=8 ORDER BY costo_canasta"
+canasta <- q(consulta_canasta,list(ej))
+knitr::kable(canasta,caption='Mismos ocho productos y cantidades por comercio, sin domicilios ni beneficios de membresía')
+cat('La canasta de menor desembolso en un solo comercio es',canasta$comercio[[1]],'por',precio_cop(canasta$costo_canasta[[1]]),'.\n')
+cat('Sumando el precio mínimo individual de cada una de las ocho presentaciones, la compra en varios comercios costaría',precio_cop(sum(res_4$minimo)),', sin contemplar entregas adicionales.\n')
+```
+
+# Conclusiones y limitaciones
+
+Los resultados permiten orientar la compra de los ocho productos comparables en el instante observado, siempre que se mantengan las condiciones de oferta. **No se debe afirmar que un comercio es globalmente más económico para toda la categoría** a partir de un surtido distinto. La comparación de canasta anterior utiliza deliberadamente las mismas ocho referencias y cantidades.
+
+**Limitaciones:** los precios corresponden al 10 de octubre de 2026 y pueden depender de promociones y zona de entrega; el valor Club no se utilizó en las comparaciones; el estado «ruta recorrida» no demuestra exhaustividad de todas las posibles secciones de las tiendas. El informe y el módulo de scraping dependen de la estructura de los sitios y requieren nueva verificación si estos cambian. Los archivos originales y los SKU permiten auditar las observaciones.
+
+```{r}
+DBI::dbDisconnect(con)
+```

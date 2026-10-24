@@ -1,0 +1,274 @@
+---
+title: "Taller 7: Clase 8: Git, Valores Faltantes e Integración"
+author: "Brayan Camilo Moreno Vilallobos"
+format: 
+  html:
+    theme: cosmo
+    toc: true
+    toc-title: "Contenido"
+execute:
+  warning: false
+  message: false
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+# Ejercicio 1: Diagnóstico de valores faltantes
+
+## Configuración y Simulación de Datos
+
+Primero, recreamos el entorno y los datos originales introduciendo los
+valores faltantes (`NA`) según el escenario planteado.
+
+```{r setup-datos}
+set.seed(2024)
+n <- 400
+ciudad <- sample(c("Bogotá", "Medellín", "Cali", "Barranquilla"), n, TRUE, c(.35, .25, .25, .15))
+edad <- pmax(18, round(rnorm(n, 38, 12)))
+
+# Guardamos el ingreso real sin perturbar para evaluar el sesgo en el Punto 2
+ingreso_real <- rnorm(n, 2.5e6 + 4e4*edad, 6e5)
+ingreso <- ingreso_real
+
+gasto_real <- ingreso * runif(n, 0.3, 0.7)
+gasto <- gasto_real
+
+compra <- rbinom(n, 1, plogis(scale(gasto)[,1]*0.8 - 0.5))
+
+# Introducción de NA según el código de la imagen
+riesgo <- ciudad == "Cali" & edad > 42
+ingreso[rbinom(n, 1, ifelse(riesgo, .55, .06)) == 1] <- NA
+gasto[rbinom(n, 1, plogis(scale(gasto)[,1]*1.5 - 1)) == 1] <- NA
+
+datos <- data.frame(ciudad, edad, ingreso, gasto, compra)
+```
+
+## Solución Punto 1: Evidencia observacional de MAR vs MCAR
+
+```{r punto-1}
+datos$ingreso_na <- is.na(datos$ingreso)
+
+# 1.1 Proporción de valores faltantes por ciudad
+cat("--- Proporción de NA en 'ingreso' por ciudad ---\n")
+aggregate(ingreso_na ~ ciudad, data = datos, mean)
+
+# 1.2 Diferencia de medias en edad según si falta el ingreso
+cat("\n--- Media de 'edad' cuando ingreso es NA vs No NA ---\n")
+aggregate(edad ~ ingreso_na, data = datos, mean)
+
+# 1.3 Comprobación estadística mediante regresión logística
+modelo_mar <- glm(ingreso_na ~ ciudad + edad, data = datos, family = binomial)
+cat("\n--- Modelo Logístico de Ausencia ---\n")
+summary(modelo_mar)$coefficients
+```
+
+**Análisis:** En el análisis exploratorio del conjunto de datos, se hace
+evidente que los valores `NA` en la variable ingreso no se distribuyen
+de manera uniforme ni aleatoria en toda la muestra. La proporción de
+faltantes es significativamente mayor en las filas donde la variable
+ciudad es "Cali" y la variable edad es superior a 42 años.
+
+Debido a que la probabilidad de ausencia depende directamente de otras
+variables que sí han sido observadas (`ciudad` y `edad`), se confirma
+que el mecanismo es **MAR (Missing At Random)** y se descarta que sea
+**MCAR (Missing Completely At Random)**, donde la pérdida sería
+totalmente independiente de cualquier otra característica.
+
+## Solución Punto 2: Comparación de Imputaciones y Sesgo
+
+```{r punto-2}
+# Identificar el subgrupo afectado (Cali y edad > 42)
+subgrupo <- datos$ciudad == "Cali" & datos$edad > 42
+
+# Media real (Ground Truth) del subgrupo usando la variable sin NA
+media_real_subgrupo <- mean(ingreso_real[subgrupo])
+
+# A. Imputación por Media Global
+media_global <- mean(datos$ingreso, na.rm = TRUE)
+ingreso_imp_global <- datos$ingreso
+ingreso_imp_global[is.na(ingreso_imp_global)] <- media_global
+
+# B. Imputación Condicional (Regresión Lineal sobre ciudad y edad)
+modelo_imp <- lm(ingreso ~ ciudad + edad, data = datos)
+ingreso_imp_cond <- datos$ingreso
+idx_na <- is.na(datos$ingreso)
+ingreso_imp_cond[idx_na] <- predict(modelo_imp, newdata = datos[idx_na, ])
+
+# Cálculo de sesgos para el subgrupo
+media_imp_global_subgrupo <- mean(ingreso_imp_global[subgrupo])
+media_imp_cond_subgrupo <- mean(ingreso_imp_cond[subgrupo])
+
+sesgo_global <- media_imp_global_subgrupo - media_real_subgrupo
+sesgo_cond <- media_imp_cond_subgrupo - media_real_subgrupo
+
+cat("\n--- Cuantificación de Sesgos (Subgrupo: Cali & Edad > 42) ---\n")
+cat("Media real del subgrupo:       ", round(media_real_subgrupo, 2), "\n")
+cat("Sesgo (Media Global):          ", round(sesgo_global, 2), "\n")
+cat("Sesgo (Media Condicional):     ", round(sesgo_cond, 2), "\n")
+```
+
+**Análisis:** El subgrupo con la mayor tasa de datos faltantes (personas
+de Cali mayores de 42 años) tiene naturalmente ingresos más altos, dado
+que el ingreso crece proporcionalmente con la edad.
+
+- **Media global:** Imputar con el promedio de toda la muestra inyecta
+  un sesgo negativo severo. Al rellenar los vacíos del subgrupo con el
+  promedio general, se subestima fuertemente su verdadero poder
+  adquisitivo, "arrastrando" sus ingresos hacia abajo.
+- **Media condicional:** Al imputar basándose en un modelo que incluye
+  ciudad y edad, el sesgo se reduce drásticamente. El modelo reconoce
+  que se trata de individuos mayores en una ciudad específica y proyecta
+  un ingreso superior, ajustándose mucho mejor a la realidad de ese
+  segmento.
+
+## Solución Punto 3: Análisis del Gasto (Mecanismo MNAR)
+
+La variable `gasto` sufre de un mecanismo **MNAR (Missing Not At
+Random)**, ya que la probabilidad de que falte el dato es mayor
+precisamente cuando el gasto real es elevado. Ningún método de
+imputación tradicional (como regresión lineal, K-NN o MICE) puede
+corregir este sesgo porque estas técnicas operan bajo el supuesto MAR,
+asumiendo que el comportamiento de los datos faltantes puede deducirse
+por completo a partir de las variables observadas. Dado que falta
+sistemáticamente la "cola superior" de los gastos altos, cualquier
+algoritmo estándar subestimará el gasto total.
+
+**¿Qué hacer en su lugar?** En lugar de forzar una imputación estándar,
+se debe:
+
+1.  **Utilizar Modelos de Selección de Heckman** si se cuenta con
+    variables instrumentales que afecten la probabilidad de reportar el
+    gasto, pero no el nivel de gasto en sí.
+2.  **Aplicar Modelos de Mezcla de Patrones (Pattern-mixture models)**
+    para realizar análisis de sensibilidad, asumiendo diferentes
+    distribuciones para los datos faltantes frente a los observados.
+3.  **Recurrir a fuentes de datos auxiliares** (ej. registros
+    administrativos, bases de datos de tarjetas de crédito) para
+    triangular y recuperar la información censurada de los altos
+    consumidores.
+
+------------------------------------------------------------------------
+
+# Ejercicio 2: Depurar un pipeline con recipes
+
+## Pipeline Corregido
+
+Identificamos errores de fuga de información y orden en los pasos. A
+continuación, el pipeline ajustado:
+
+```{r ejercicio-2-basico}
+# install.packages("tidymodels") # Instalación comentada para evitar ejecución al renderizar
+library(tidymodels)
+
+set.seed(7)
+split <- initial_split(datos, prop = 0.8, strata = compra)
+train <- training(split)
+test  <- testing(split)
+
+receta_corregida <- recipe(compra ~ ., data = train) |>
+  # 1. Imputar primero (numéricas y nominales)
+  step_impute_mode(all_nominal_predictors()) |>
+  step_impute_median(all_numeric_predictors()) |>
+  # 2. Crear variables dummy después de tener los datos completos
+  step_dummy(all_nominal_predictors()) |>
+  prep()
+
+train_proc <- bake(receta_corregida, new_data = NULL)
+test_proc  <- bake(receta_corregida, new_data = test)
+```
+
+## Extensión y Justificación
+
+Mejoramos el pipeline incorporando indicadores de ausencia y métodos de
+imputación avanzados (*bagging*):
+
+```{r ejercicio-2-extendido}
+receta_extendida <- recipe(compra ~ ., data = train) |>
+  # 1. Indicar NAs antes de que desaparezcan
+  step_indicate_na(ingreso) |>
+  # 2. Imputar variables categóricas
+  step_impute_mode(all_nominal_predictors()) |>
+  # 3. Imputar variables numéricas usando modelos de árboles (bagging)
+  step_impute_bag(all_numeric_predictors()) |>
+  # 4. Crear variables dummy al final
+  step_dummy(all_nominal_predictors()) |>
+  prep()
+```
+
+**Justificación del orden final:**
+
+1.  `step_indicate_na(ingreso)` **debe ir de primero:** Es crucial crear
+    la variable indicadora (que marcará con 1 si había un `NA` y 0 si
+    no) antes de aplicar cualquier método de imputación. Si se imputa
+    primero, los `NA` desaparecen y el indicador perdería toda la
+    información.
+2.  `step_impute_mode()` **y** `step_impute_bag()` **van en el medio:**
+    Las imputaciones deben resolver todos los valores vacíos del
+    conjunto de datos. `step_impute_bag()` utiliza modelos basados en
+    árboles que pueden manejar predictores categóricos internamente
+    (como factores), por lo que es seguro imputar en esta etapa antes de
+    la transformación *dummy*.
+3.  `step_dummy()` **debe ir al final:** La creación de variables
+    indicadoras (*dummy*) requiere que los datos estén completamente
+    limpios y sin valores nulos para garantizar que las matrices de
+    diseño generadas para entrenamiento y prueba tengan exactamente la
+    misma estructura de columnas.
+
+------------------------------------------------------------------------
+
+# Ejercicio 3: Razonamiento Conceptual
+
+1.  Evaluación del mecanismo (MAR vs MCAR y componente MNAR) El
+    mecanismo es marcadamente consistente con MAR (Missing At Random) y
+    descarta por completo MCAR (Missing Completely At Random). La
+    ausencia del dato no es un evento puramente aleatorio (MCAR), ya que
+    está sistemáticamente correlacionada con variables observadas como
+    el estrato (correlación de 0.52) y tiene una relación directa con la
+    variable objetivo, reflejada en la drástica diferencia en la tasa de
+    incumplimiento (31% frente al 9%).\
+    No se puede descartar un componente MNAR (Missing Not At Random)
+    porque, por definición, no tenemos los valores reales para
+    comprobarlo. Es altamente probable en un contexto crediticio que los
+    solicitantes decidan omitir su ingreso precisamente porque es
+    demasiado bajo para calificar o porque proviene de fuentes
+    informales difíciles de reportar. Si la ausencia depende del valor
+    real del ingreso que no estamos viendo, el mecanismo es MNAR.
+
+2.  Consecuencia práctica de imputar con la mediana global El grupo con
+    el dato faltante tiene un riesgo de incumplimiento del 31%, mucho
+    mayor que el grupo con datos completos (9%). Si se imputa con la
+    mediana global, se le estará asignando un ingreso "promedio" (y
+    estadísticamente más seguro) a un segmento poblacional que en
+    realidad es de alto riesgo. La consecuencia práctica en el negocio
+    es que el modelo suavizará artificialmente el perfil de riesgo de
+    estos individuos, tratándolos como clientes estándar. Esto derivará
+    en un aumento de falsos negativos en la predicción de riesgo
+    (aprobar créditos a personas que terminarán en impago),
+    incrementando directamente las pérdidas financieras de la entidad.
+
+3.  Estrategia de 3 pasos para el comité de riesgo Dado que la ausencia
+    del dato acarrea una fuerte señal predictiva sobre el incumplimiento
+    (31% vs 9%) y no se pueden descartar registros, la estrategia debe
+    capitalizar esa señal en lugar de ocultarla:
+
+    1.  Creación de variable indicadora (Missing Indicator): Generar una
+        nueva columna binaria (ej. ingreso_no_reportado) que valga 1 si
+        el dato falta y 0 si está presente. Esto permite que el modelo
+        capture explícitamente el alto riesgo (el salto al 31% de
+        incumplimiento) asociado a la omisión del dato.
+
+    2.  Imputación condicional (basada en MAR): En lugar de usar la
+        mediana global, imputar los valores faltantes de
+        ingreso_reportado utilizando las variables que sí muestran
+        correlación, como el estrato (y otras covariables disponibles).
+        Se puede usar una regresión, árboles (bagging) o KNN para
+        proyectar un ingreso mucho más realista para ese solicitante
+        específico.
+
+    3.   Entrenamiento conjunto: Entrenar el modelo de riesgo final
+        (regresión logística, XGBoost, etc.) incluyendo tanto el ingreso
+        imputado condicionalmente como la variable indicadora binaria.
+        El modelo aprenderá a evaluar la capacidad de pago estimada,
+        pero aplicará la penalización correspondiente al descubrir que
+        el dato original fue ocultado.

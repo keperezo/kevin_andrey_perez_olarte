@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+.quarto/
+.jupyter_cache/
+*_files/
+*.ipynb
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+/.quarto/
+**/*.quarto_ipynb

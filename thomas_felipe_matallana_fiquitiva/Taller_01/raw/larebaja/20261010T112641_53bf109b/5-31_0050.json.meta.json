@@ -1,0 +1,8 @@
+{
+  "url": "https://www.larebajavirtual.com/api/catalog_system/pub/products/search?fq=C%3A%2F5%2F31%2F&_from=50&_to=99&O=OrderByNameASC",
+  "fecha_hora": "2026-10-10T11:27:01-05:00",
+  "status": 206,
+  "resources": "50-99/194",
+  "content_type": "application/json; charset=utf-8",
+  "sha256": "83b4e36016b3de04c43f2a0829b6bf7cd72eb30e08c896f31a48f81687cb4b5a"
+}

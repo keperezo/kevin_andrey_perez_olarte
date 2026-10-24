@@ -1,0 +1,110 @@
+library(tidyverse)
+
+moviles <- read_csv("mobile_data.csv", show_col_types = FALSE)
+
+# a) Función genérica de escalado
+escalar <- function(df, cols, metodo = c("minmax", "zscore", "robusto")) {
+  metodo <- match.arg(metodo)
+  sub_df <- df %>% select(all_of(cols))
+  
+  res <- switch(metodo,
+                "minmax" = map_dfc(sub_df, ~ (.x - min(.x, na.rm = TRUE)) / (max(.x, na.rm = TRUE) - min(.x, na.rm = TRUE))),
+                "zscore" = map_dfc(sub_df, ~ (.x - mean(.x, na.rm = TRUE)) / sd(.x, na.rm = TRUE)),
+                "robusto" = map_dfc(sub_df, ~ (.x - median(.x, na.rm = TRUE)) / IQR(.x, na.rm = TRUE))
+  )
+  
+  return(res)
+}
+
+# b) Distancia euclidiana y aporte porcentual entre filas 1 y 2
+cols_interes <- c("ram", "battery_power", "int_memory", "px_height", "px_width")
+
+# Escalar el dataset completo según cada técnica
+df_raw <- moviles %>% select(all_of(cols_interes))
+df_mm  <- escalar(moviles, cols_interes, "minmax")
+df_z   <- escalar(moviles, cols_interes, "zscore")
+df_rob <- escalar(moviles, cols_interes, "robusto")
+
+calcular_aporte <- function(df_esc, nombre) {
+  f1 <- as.numeric(df_esc[1, ])
+  f2 <- as.numeric(df_esc[2, ])
+  d_cuad <- (f1 - f2)^2
+  total  <- sum(d_cuad)
+  
+  tibble(
+    metodo = nombre,
+    variable = cols_interes,
+    aporte_pct = round((d_cuad / total) * 100, 2)
+  )
+}
+
+aportes <- bind_rows(
+  calcular_aporte(df_raw, "Sin escalar"),
+  calcular_aporte(df_mm,  "Min-Max"),
+  calcular_aporte(df_z,   "Z-score"),
+  calcular_aporte(df_rob, "Robusto")
+) %>%
+  pivot_wider(names_from = metodo, values_from = aporte_pct)
+
+print(aportes)
+
+# Justificación:
+# Sin escalar, las variables con escalas grandes (battery_power y ram) aportan más 
+# del 90% de la distancia euclidiana al cuadrado, haciendo que int_memory sea invisible.
+# Tras escalar, el reparto se equilibra y cada variable aporta en función de su dispersión relativa.
+
+# c) Efecto de un outlier extremo en RAM (ram[1] <- 100000)
+moviles_outlier <- moviles
+moviles_outlier$ram[1] <- 100000
+
+# Escalar y extraer las 2999 filas normales restantes
+ram_mm  <- escalar(moviles_outlier, "ram", "minmax")$ram[-1]
+ram_z   <- escalar(moviles_outlier, "ram", "zscore")$ram[-1]
+ram_rob <- escalar(moviles_outlier, "ram", "robusto")$ram[-1]
+
+colapso_sd <- tibble(
+  metodo = c("Min-Max", "Z-score", "Robusto"),
+  sd_2999 = c(sd(ram_mm), sd(ram_z), sd(ram_rob))
+)
+
+print(colapso_sd)
+
+# Justificación:
+# Min-Max colapsa completamente a las demás observaciones (su sd cae casi a cero) porque 
+# el denominador (max - min) se vuelve inmenso (~100,000), comprimiendo el 99.9% de los 
+# datos en un rango diminuto cercano a 0.
+# El método Robusto no se inmuta porque la mediana y el IQR son inmunes a un valor extremo aislado.
+
+# ------------------------------------------------------------------------------
+# d) Fuga de información (Data Leakage) en partición 70/30
+# ------------------------------------------------------------------------------
+set.seed(2024)
+
+n <- nrow(moviles)
+idx_train <- sample(seq_len(n), size = floor(0.70 * n))
+
+train <- moviles[idx_train, cols_interes]
+test  <- moviles[-idx_train, cols_interes]
+
+# Parámetros calculados ÚNICAMENTE con entrenamiento
+mins_train <- map_dbl(train, min)
+maxs_train <- map_dbl(train, max)
+
+# Escalar prueba usando parámetros de entrenamiento
+test_escalado <- map2_dfc(test, names(test), function(col, nom) {
+  (col - mins_train[nom]) / (maxs_train[nom] - mins_train[nom])
+})
+
+# Conteo de valores que escapan del rango [0, 1]
+fuga_resumen <- map_df(test_escalado, ~ tibble(
+  menores_cero = sum(.x < 0),
+  mayores_uno  = sum(.x > 1),
+  total_fuera  = sum(.x < 0 | .x > 1)
+), .id = "variable")
+
+print(fuga_resumen)
+
+# Justificación teórica:
+# Escalar todo el dataset antes de partir es fuga de información porque los mínimos 
+# y máximos globales incluyen observaciones del test. El modelo "aprende" indirectamente 
+# los límites del conjunto de evaluación, lo que produce métricas de rendimiento sobreoptimistas.

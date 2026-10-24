@@ -1,0 +1,6 @@
+comercio_id,sku_comercio,producto_id,nota
+# Correcciones manuales de la correspondencia (regla R8a). Tienen prioridad sobre EAN y clave normalizada.
+# Unir un anuncio a una presentación existente (producto_id de la tabla productos):
+# olimpica,123456,G07702010000000,EAN interno en Olímpica; marca contenido y unidades verificados en la ficha
+# Excluir un anuncio de la categoría y de las comparaciones:
+# exito,987654,EXCLUIR,Kit con obsequio; no es la misma presentación

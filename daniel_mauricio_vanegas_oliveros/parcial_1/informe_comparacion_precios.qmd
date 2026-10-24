@@ -1,0 +1,831 @@
+---
+title: "Taller Parcial 1 - Minería de Datos"
+subtitle: ""
+author: "Daniel Mauricio Vanegas Oliveros"
+lang: es
+date: last-modified
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    theme: cosmo
+    embed-resources: true
+    fig-align: center
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+:::{.callout collapse ="true"}
+
+## Código
+
+
+```{r}
+library(DBI)
+library(RSQLite)
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+library(scales)
+
+options(knitr.kable.NA = "—")
+
+# Colores consistentes por comercio en todos los gráficos
+colores <- c(Carulla = "#8DC63F", Exito = "#FFE701", Jumbo = "#28A745")
+
+# Tabla estándar con kableExtra (formato colombiano: punto de miles, coma decimal)
+tabla <- function(df, titulo, alto = NULL) {
+  t <- kbl(df, caption = titulo, align = "l",
+           format.args = list(big.mark = ".", decimal.mark = ",")) |>
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                  full_width = FALSE, font_size = 13)
+  if (!is.null(alto)) t <- scroll_box(t, height = alto)
+  t
+}
+```
+
+:::
+
+# Introducción
+
+Este informe compara los precios de **ocho presentaciones de productos** (correspondientes a la categoría *Galletas, cereales, frutos secos, barras convencionales, conservas y otros alimentos. Excluye confitería y productos infantiles, deportivos o clínicos.*, seleccionada en el [google sheets](https://docs.google.com/spreadsheets/d/1AS_HUZqTac8J5fpXT8pdE8gWAX-cwfY71tEPzircUuw/edit?gid=0#gid=0)) en tres comercios colombianos en línea: **Carulla, Éxito y Jumbo**. El objetivo es identificar, con consultas SQL sobre una base SQLite, dónde conviene comprar cada producto, cuánto se ahorra eligiendo la oferta más económica y si el tamaño de la presentación cambia el precio por unidad de contenido. Los productos mostrados son seleccionados a partir de una revisión exhaustiva de la base de datos `consultas_iniciales.db`, que a su vez proviene del script `scraper.R`.
+
+# Fuentes y scraping
+
+Los datos provienen de las páginas de búsqueda de cada comercio. La siguiente consulta resume, a partir de la propia base, qué se capturó y cuándo.
+
+:::{.callout collapse ="true"}
+
+## Código
+
+```{r}
+#| label: conexion
+# Se trabaja sobre una copia para no modificar la base original
+invisible(file.copy("consultas_iniciales.db", "consultas_comparables.db", overwrite = TRUE))
+con <- dbConnect(RSQLite::SQLite(), "consultas_comparables.db")
+#| label: fuentes
+q_fuentes <- "
+SELECT pagina AS comercio,
+       COUNT(DISTINCT consulta) AS categorias_consultadas,
+       MIN(hora_consulta) AS primera_captura,
+       MAX(hora_consulta) AS ultima_captura,
+       MIN(CASE WHEN consulta = 'cereales' THEN pagina_consulta END) AS url_ejemplo
+FROM productos
+GROUP BY pagina
+ORDER BY pagina"
+```
+
+:::
+
+```{r, echo = FALSE}
+tabla(dbGetQuery(con, q_fuentes), "Capturas por comercio (hora de Colombia, UTC-5)")
+```
+
+Las categorías consultadas en cada comercio fueron: `barras_cereal`, `cereales`, `chocorramo`, `conserva`, `frutos_secos`, `galletas`, `gansito` y `granola`. Cada combinación categoría–comercio tiene su propia hora de captura; todas ocurrieron el mismo día, en una ventana de unos 10 minutos.
+
+# Preparación
+
+La base tiene una única tabla, `productos`, con una fila por producto observado. Antes de comparar se hicieron las siguientes normalizaciones (ya incorporadas en las columnas de la tabla):
+
+- **Precio:** `precio_texto` (por ejemplo `"$ 16.730"`) convertido a número en `precio` (COP).
+- **Contenido:** `gramos` y `unidades` extraídos de la descripción.
+- **Marca:** `marca_producto`, con variantes de escritura entre comercios (se documentan en la pregunta 7).
+- **Correspondencia de productos:** las reglas de selección de `sql_consult.R` definen qué filas son el *mismo producto y presentación* en los tres comercios.
+
+Para comparar presentaciones de distinto tamaño se usa el precio por unidad común:
+
+$$
+\text{Precio por unidad de contenido} = \frac{\text{Precio del empaque (COP)}}{\text{Contenido total en la unidad elegida}}
+$$
+
+En paquetes múltiples se usa el contenido total y no se mezclan rankings en mL, g, mg y unidad. Todos los productos encontrados dentro de la base están medidos en **gramos**; el Gansito se expresa además por unidad.
+
+## Reglas de comparabilidad
+
+Cada regla reproduce literalmente los filtros de `sql_consult.R`. El contenido total (`contenido_g`) y las unidades por paquete se fijan por presentación.
+
+:::{.callout collapse ="true"}
+
+## Código
+
+En este código no se está imputando los datos, sino que se están seleccionando los productos desde el SQL.
+
+```{r}
+#| label: reglas
+reglas <- data.frame(
+  id_presentacion = sprintf("P%02d", 1:8),
+  producto = c("Maní La Especial con arándanos 450 g",
+               "Cereal Zucaritas 610 g",
+               "Cereal Choco Krispis 570 g",
+               "Corn Flakes Kellogg's 410 g",
+               "Froot Loops 450 g",
+               "Cereal Flips chocolate 400 g",
+               "Ponqué Chocoramo tajada 65 g",
+               "Gansito x6 (222 g)"),
+  contenido_g = c(450, 610, 570, 410, 450, 400, 65, 222),
+  unidades_paquete = c(1, 1, 1, 1, 1, 1, 1, 6),
+  condicion_sql = c(
+    "marca_producto LIKE '%especial%' AND gramos = 450",
+    "marca_producto LIKE '%zuca%' AND gramos = 610",
+    "marca_producto LIKE '%choco%' AND gramos = 570",
+    "marca_producto LIKE '%kellogg%' AND gramos = 410",
+    "marca_producto LIKE '%froot%' AND gramos = 450",
+    "marca_producto LIKE '%flips%' AND gramos = 400 AND titulo LIKE '%choco%'",
+    "(marca_producto LIKE '%chocoramo%' OR marca_producto LIKE '%chocorramo%') AND precio < 4000 AND titulo LIKE '%ponqu%' AND gramos = 65",
+    "marca_producto LIKE '%gansito%' AND unidades = 6 AND titulo NOT LIKE '%zombie%'"),
+  stringsAsFactors = FALSE
+)
+```
+
+:::
+
+```{r}
+tabla(reglas, "Reglas de selección de productos comparables")
+```
+
+# Base SQLite
+
+## Función que marca los productos comparables
+
+La función `marcar_comparables()` recibe la conexión y la tabla de reglas y:
+
+1. Agrega a `productos` las columnas `comparable` (booleano 1/0), `id_presentacion` (por ejemplo `P01`) e `id_comparable` (identificador **único** por observación);
+2. Marca como comparable (1) toda fila que cumpla alguna regla y deja en 0 las demás;
+3. Crea un índice único sobre `id_comparable`;
+4. Crea la tabla `presentaciones_comparables` y las vistas `v_comparables` y `v_resumen_presentacion`, que se usan en las consultas;
+5. Devuelve una tabla de control que verifica que cada regla marcó exactamente las filas que cumplen su condición.
+
+:::{.callout collapse="true"}
+
+## Código de función `marcar_comparables()`
+
+```{r}
+#| label: funcion
+marcar_comparables <- function(con, reglas) {
+
+  # 1. Columnas nuevas (solo si no existen)
+  nuevas <- c(comparable = "INTEGER DEFAULT 0",
+              id_presentacion = "TEXT",
+              id_comparable = "TEXT")
+  for (campo in setdiff(names(nuevas), dbListFields(con, "productos"))) {
+    dbExecute(con, paste0("ALTER TABLE productos ADD COLUMN ", campo, " ", nuevas[[campo]]))
+  }
+
+  # 2. Reinicio y marcado
+  dbExecute(con, "UPDATE productos SET comparable = 0, id_presentacion = NULL, id_comparable = NULL")
+  dbExecute(con, "CREATE UNIQUE INDEX IF NOT EXISTS ux_id_comparable ON productos(id_comparable)")
+
+  n_cumplen <- integer(nrow(reglas))
+  n_marcadas <- integer(nrow(reglas))
+  for (i in seq_len(nrow(reglas))) {
+    cond <- reglas$condicion_sql[i]
+    id <- reglas$id_presentacion[i]
+    n_cumplen[i] <- dbGetQuery(con, paste0("SELECT COUNT(*) AS n FROM productos WHERE ", cond))$n
+    # comparable = 0 evita que una fila ya marcada sea reasignada por otra regla
+    n_marcadas[i] <- dbExecute(con, paste0(
+      "UPDATE productos SET comparable = 1, id_presentacion = '", id, "', ",
+      "id_comparable = '", id, "-' || UPPER(SUBSTR(pagina, 1, 3)) ",
+      "WHERE comparable = 0 AND (", cond, ")"))
+  }
+
+  # 3. Catálogo de presentaciones y vistas
+  dbWriteTable(con, "presentaciones_comparables",
+               reglas[, c("id_presentacion", "producto", "contenido_g", "unidades_paquete")],
+               overwrite = TRUE)
+
+  dbExecute(con, "DROP VIEW IF EXISTS v_resumen_presentacion")
+  dbExecute(con, "DROP VIEW IF EXISTS v_comparables")
+
+  dbExecute(con, "
+    CREATE VIEW v_comparables AS
+    SELECT p.rowid AS id_obs, p.id_comparable, p.id_presentacion, c.producto,
+           p.pagina AS comercio, p.titulo, p.marca_producto,
+           p.precio, p.precio_previo, p.tiene_descuento, p.descuento_pct,
+           p.gramos, p.unidades, c.contenido_g, c.unidades_paquete,
+           p.precio / c.contenido_g AS precio_g,
+           p.precio / c.unidades_paquete AS precio_unidad,
+           p.consulta, p.hora_consulta, SUBSTR(p.hora_consulta, 1, 10) AS fecha
+    FROM productos p
+    JOIN presentaciones_comparables c USING (id_presentacion)
+    WHERE p.comparable = 1")
+
+  dbExecute(con, "
+    CREATE VIEW v_resumen_presentacion AS
+    WITH e AS (
+      SELECT id_presentacion, producto, COUNT(*) AS n_comercios,
+             MIN(precio) AS precio_min, MAX(precio) AS precio_max,
+             ROUND(AVG(precio), 0) AS precio_prom
+      FROM v_comparables
+      GROUP BY id_presentacion, producto)
+    SELECT e.*,
+      (SELECT COUNT(*) FROM v_comparables v
+        WHERE v.id_presentacion = e.id_presentacion AND v.precio = e.precio_min) AS n_comercios_en_minimo,
+      (SELECT GROUP_CONCAT(comercio, ', ') FROM
+        (SELECT comercio FROM v_comparables v
+          WHERE v.id_presentacion = e.id_presentacion AND v.precio = e.precio_min
+          ORDER BY comercio)) AS comercios_menor_precio,
+      (SELECT GROUP_CONCAT(comercio, ', ') FROM
+        (SELECT comercio FROM v_comparables v
+          WHERE v.id_presentacion = e.id_presentacion AND v.precio = e.precio_max
+          ORDER BY comercio)) AS comercios_mayor_precio,
+      e.precio_max - e.precio_min AS ahorro_cop,
+      ROUND(100.0 * (e.precio_max - e.precio_min) / e.precio_max, 1) AS ahorro_pct
+    FROM e")
+
+  # 4. Tabla de control
+  data.frame(id_presentacion = reglas$id_presentacion,
+             filas_que_cumplen_regla = n_cumplen,
+             filas_marcadas = n_marcadas,
+             coincide = n_cumplen == n_marcadas)
+}
+
+control <- marcar_comparables(con, reglas)
+
+```
+
+:::
+
+```{r, echo = FALSE}
+tabla(control, "Control del marcado de comparables")
+```
+
+## Estructura, relaciones y validaciones
+
+- `productos` (tabla original, 331 observaciones) + 3 columnas nuevas: `comparable`, `id_presentacion`, `id_comparable`.
+- `presentaciones_comparables` (catálogo de 8 presentaciones): se relaciona con `productos` por `id_presentacion`.
+- `v_comparables`: une ambas y calcula `precio_g` (COP/g) y `precio_unidad` (COP por unidad del paquete).
+- `v_resumen_presentacion`: precio mínimo, máximo, promedio, comercios con menor y mayor precio y ahorro por presentación.
+
+:::{.callout collapse="true"}
+
+## Validación de marcado como productos comparables
+
+```{r}
+#| label: validacion
+stopifnot(
+  all(control$coincide),
+  dbGetQuery(con, "SELECT SUM(comparable) AS n FROM productos")$n == sum(control$filas_marcadas),
+  dbGetQuery(con, "SELECT COUNT(DISTINCT id_comparable) AS n FROM productos WHERE comparable = 1")$n ==
+    dbGetQuery(con, "SELECT SUM(comparable) AS n FROM productos")$n
+)
+
+q_marcados <- "
+SELECT id_comparable, producto, comercio, precio AS precio_cop, contenido_g,
+       ROUND(precio_g, 2) AS cop_por_g
+FROM v_comparables
+ORDER BY id_presentacion, comercio"
+
+```
+
+:::
+
+```{r, echo = FALSE}
+tabla(dbGetQuery(con, q_marcados), "Observaciones marcadas como comparables", alto = "320px")
+```
+
+Las validaciones confirman que cada regla marca exactamente las filas que cumple, que ninguna fila quedó marcada por dos reglas y que los identificadores son únicos.
+
+# Comparación de precios y presentaciones
+
+A los productos comparables se les aplican tres tipos de comparación.
+
+**Mismo producto y misma presentación.** Se compara directamente el precio entre comercios: se identifica el menor precio, los empates y la diferencia frente al precio más alto observado.
+
+**Mismo producto en diferentes presentaciones.** Si cambia el contenido, se compara el precio por unidad común (COP/g aquí). Una presentación mayor exige un desembolso más alto pero puede tener menor precio por unidad; ambas conclusiones se distinguen. En este conjunto cada producto tiene **una sola presentación**, por lo que el efecto del tamaño no puede evaluarse (se detalla en la pregunta 5); la columna `precio_g` deja la comparación lista si se agregan tamaños.
+
+**Ahorro potencial.** Para una misma presentación y condiciones comparables:
+
+$$
+\text{Ahorro (COP)} = P_{max} - P_{min}, \qquad \text{Ahorro (\%)} = 100 \cdot \frac{P_{max} - P_{min}}{P_{max}}
+$$
+
+No se concluye que un comercio sea globalmente más barato comparando promedios de surtidos distintos. Para la canasta se usan exactamente las mismas ocho presentaciones, con cobertura completa y precios de una misma ejecución.
+
+**Comparabilidad.** Pertenecer a la misma categoría no hace equivalentes a los productos: se comparan solo presentaciones del mismo producto y formulación. Las excepciones detectadas se discuten en la pregunta 7.
+
+# Consultas SQL
+
+Cada pregunta muestra la consulta, su resultado y una interpretación breve. Por «ejecución» se entiende la **sesión de recolección** del 2026-10-10 (18:33 a 18:43, UTC-5); cada categoría y comercio tiene además su propia hora de captura.
+
+## Pregunta 1. Tamaño de la base y aporte por comercio
+
+:::{.callout collapse="true"}
+
+## Código
+
+```{r}
+#| label: q1a
+q1a <- "
+SELECT 'Comercios' AS medida, COUNT(DISTINCT pagina) AS valor FROM productos
+UNION ALL SELECT 'Observaciones (filas)', COUNT(*) FROM productos
+UNION ALL SELECT 'Productos distintos (título normalizado)', COUNT(DISTINCT LOWER(TRIM(titulo))) FROM productos
+UNION ALL SELECT 'Presentaciones comparables', COUNT(DISTINCT id_presentacion) FROM productos WHERE comparable = 1
+UNION ALL SELECT 'Observaciones comparables', SUM(comparable) FROM productos"
+
+```
+
+```{r, echo = FALSE}
+tabla(dbGetQuery(con, q1a), "Contenido general de la base")
+```
+
+```{r, echo = FALSE}
+#| label: q1b
+q1b <- "
+SELECT pagina AS comercio,
+       COUNT(*) AS observaciones,
+       COUNT(DISTINCT LOWER(TRIM(titulo))) AS productos_distintos,
+       COUNT(DISTINCT consulta) AS categorias,
+       SUM(comparable) AS comparables
+FROM productos
+GROUP BY pagina
+ORDER BY pagina"
+
+```
+
+:::
+
+```{r, echo = FALSE}
+tabla(dbGetQuery(con, q1b), "Aporte de cada comercio")
+```
+
+**Interpretación.** La base tiene 3 comercios y 331 observaciones. Éxito aporta 128 (127 productos distintos), Carulla 124 y Jumbo 79 (75 distintos). Los 239 «productos distintos» totales no son 239 artículos diferentes: el mismo artículo se nombra distinto en cada comercio. De todo ello, 8 presentaciones están disponibles en los tres comercios, es decir 24 observaciones comparables.
+
+## Pregunta 2. Cobertura de una misma ejecución y registros repetidos
+
+:::{.callout collapse="true"}
+
+## Código
+
+```{r}
+#| label: q2a
+q2a <- "
+SELECT fecha AS ejecucion,
+       MIN(hora_consulta) AS primera_captura,
+       MAX(hora_consulta) AS ultima_captura,
+       COUNT(*) AS obs_comparables,
+       COUNT(DISTINCT id_presentacion) AS productos,
+       COUNT(DISTINCT comercio) AS comercios,
+       COUNT(*) - COUNT(DISTINCT id_presentacion || '|' || comercio) AS registros_repetidos,
+       CASE WHEN COUNT(*) >= 24 THEN 'Sí' ELSE 'No' END AS cumple_24_obs
+FROM v_comparables
+GROUP BY fecha"
+
+```
+
+:::
+
+```{r, echo = FALSE}
+tabla(dbGetQuery(con, q2a), "Cobertura de la ejecución")
+```
+
+
+:::{.callout collapse="true"}
+
+## Código
+```{r}
+#| label: q2b
+q2b <- "
+SELECT id_presentacion, comercio, COUNT(*) AS n_registros
+FROM v_comparables
+GROUP BY id_presentacion, comercio
+HAVING COUNT(*) > 1"
+r2b <- dbGetQuery(con, q2b)
+
+```
+
+:::
+
+```{r, echo = FALSE}
+if (nrow(r2b) == 0) {
+  cat("Sin resultados: ninguna combinación producto–comercio está repetida.")
+} else {
+  tabla(r2b, "Combinaciones producto–comercio repetidas")
+}
+```
+
+
+**Interpretación.** Sí se cumple el mínimo: hay 24 observaciones comparables (8 productos × 3 comercios) en una única ejecución, capturadas entre las 18:33:55 y las 18:42:27. Las 24 combinaciones producto–comercio son únicas, sin registros repetidos.
+
+## Pregunta 3. Precio mínimo, máximo y promedio por presentación
+
+:::{.callout collapse="true"}
+
+## Código
+
+```{r}
+#| label: q3
+q3 <- "
+SELECT id_presentacion, producto, precio_min, precio_max, precio_prom,
+       comercios_menor_precio, n_comercios_en_minimo
+FROM v_resumen_presentacion
+ORDER BY id_presentacion"
+```
+
+:::
+
+```{r, echo = FALSE}
+tabla(dbGetQuery(con, q3), "Precios (COP) por presentación y comercio(s) con el menor precio")
+```
+
+**Interpretación.** Carulla ofrece el menor precio del maní (P01); Carulla y Éxito empatan en Zucaritas (P02); Éxito es el más barato en Choco Krispis (P03) y en Gansito (P08); Jumbo lo es en Chocoramo (P07). Corn Flakes (P04) y Froot Loops (P05) tienen el mismo precio en los tres comercios. Los flips parecen haber sido mal elegidos pero el *choco avellanas* de Jumbo es el mismo producto de los demás comercios. 
+
+## Pregunta 4. Ahorro al elegir la oferta más económica
+
+:::{.callout collapse="true"}
+
+## Código
+
+```{r}
+#| label: q4
+q4 <- "
+SELECT id_presentacion, producto, precio_max, precio_min,
+       ahorro_cop, ahorro_pct
+FROM v_resumen_presentacion
+ORDER BY id_presentacion"
+```
+
+:::
+
+```{r, echo = FALSE}
+tabla(dbGetQuery(con, q4), "Ahorro potencial por presentación (COP y %)")
+```
+
+**Interpretación.** El ahorro varía de 0 a 33,1 %. En COP, el mayor es el del Zucaritas (COP8.910) seguido del maní (COP8.270); en el Chocoramo la diferencia es de apenas COP200. Para Corn Flakes y Froot Loops no hay ahorro posible porque los tres comercios cobran lo mismo. Este comportamiento se repite en otros productos asociados a Kellogs.
+
+## Pregunta 5. Menor precio por unidad de contenido
+
+:::{.callout collapse="true"}
+
+## Código
+
+```{r}
+#| label: q5
+q5 <- "
+SELECT id_presentacion, producto, comercio, precio AS precio_cop, contenido_g,
+       ROUND(precio_g, 2) AS cop_por_g,
+       CASE WHEN unidades_paquete > 1 THEN ROUND(precio_unidad, 0) END AS cop_por_unidad
+FROM (SELECT *, RANK() OVER (PARTITION BY id_presentacion ORDER BY precio_g) AS pos
+      FROM v_comparables)
+WHERE pos = 1
+ORDER BY id_presentacion, comercio"
+```
+
+:::
+
+```{r, echo = FALSE}
+tabla(dbGetQuery(con, q5), "Menor precio por gramo en cada presentación (incluye empates)")
+```
+
+**Interpretación.** De los productos seleccionados, solamente el Gansito es vendido en paquete de unidad, el menor precio por unidad es el de Éxito (1.992 COP/unidad). Para ese producto se usó el contenido total (6 × 37 g = 222 g).
+
+## Pregunta 6. Mayores diferencias de precio entre comercios
+
+:::{.callout collapse="true"}
+
+## Código
+
+```{r}
+#| label: q6
+q6 <- "
+SELECT id_presentacion, producto, comercios_menor_precio, comercios_mayor_precio,
+       ahorro_cop, ahorro_pct
+FROM v_resumen_presentacion
+ORDER BY ahorro_pct DESC, id_presentacion"
+r6 <- dbGetQuery(con, q6)
+```
+
+
+:::
+
+```{r, echo = FALSE}
+tabla(r6, "Presentaciones ordenadas por ahorro porcentual")
+
+```
+
+**Interpretación.** Las mayores brechas son el maní La Especial (33,1 %, Jumbo es el más caro) y las Zucaritas (30,8 %, también Jumbo). Les siguen Flips (12,5 %, con la salvedad de la pregunta 7), Chocoramo (5,7 %), Gansito (5,2 %) y Choco Krispis (4,2 %). Corn Flakes y Froot Loops no muestran diferencia. Jumbo solamente resalta en precio del Chocoramo.
+
+## Pregunta 7. Datos faltantes o inconsistentes
+
+:::{.callout collapse="true"}
+
+## Código
+
+```{r}
+#| label: q7a
+q7a <- "
+WITH b AS (
+  SELECT *, COUNT(*) OVER (PARTITION BY pagina, consulta, LOWER(TRIM(titulo))) AS k
+  FROM productos)
+SELECT 'Título vacío o nulo' AS problema,
+       SUM(titulo IS NULL OR TRIM(titulo) = '') AS n_base,
+       SUM((titulo IS NULL OR TRIM(titulo) = '') AND comparable = 1) AS n_comparables
+FROM b
+UNION ALL SELECT 'Marca vacía o nula', SUM(marca_producto IS NULL OR TRIM(marca_producto) = ''),
+       SUM((marca_producto IS NULL OR TRIM(marca_producto) = '') AND comparable = 1) FROM b
+UNION ALL SELECT 'Contenido en gramos faltante', SUM(gramos IS NULL),
+       SUM(gramos IS NULL AND comparable = 1) FROM b
+UNION ALL SELECT 'Precio nulo o no positivo', SUM(precio IS NULL OR precio <= 0),
+       SUM((precio IS NULL OR precio <= 0) AND comparable = 1) FROM b
+UNION ALL SELECT 'Descuento marcado sin precio previo', SUM(tiene_descuento = 1 AND precio_previo IS NULL),
+       SUM(tiene_descuento = 1 AND precio_previo IS NULL AND comparable = 1) FROM b
+UNION ALL SELECT 'Precio previo menor o igual al precio actual', SUM(precio_previo IS NOT NULL AND precio_previo <= precio),
+       SUM(precio_previo IS NOT NULL AND precio_previo <= precio AND comparable = 1) FROM b
+UNION ALL SELECT 'Porcentaje de descuento incoherente con los precios',
+       SUM(precio_previo > 0 AND descuento_pct IS NOT NULL AND ABS(100.0 * (1 - precio / precio_previo) - descuento_pct) > 1),
+       SUM(precio_previo > 0 AND descuento_pct IS NOT NULL AND ABS(100.0 * (1 - precio / precio_previo) - descuento_pct) > 1 AND comparable = 1) FROM b
+UNION ALL SELECT 'Registros repetidos (mismo comercio, categoría y título)', SUM(k > 1),
+       SUM(k > 1 AND comparable = 1) FROM b"
+```
+
+:::
+
+```{r, echo = FALSE}
+tabla(dbGetQuery(con, q7a), "Datos faltantes o inconsistentes en la base completa y en los comparables")
+```
+
+El posible motivo por el que la base recibió datos incompletos o faltantes es que:
+
+ - La marca no fue correctamente identificada por el `scraper.R`.
+ - Se introdujeron productos que no estaban medidos en gramos (`scraper.R` solamente tomaba en cuenta esa unidad de medida).
+
+:::{.callout collapse="true"}
+
+## Código
+
+```{r}
+#| label: q7b
+q7b <- "
+SELECT id_comparable AS referencia,
+       'Gramos reportados distintos del contenido total del paquete' AS motivo,
+       gramos || ' g reportados vs ' || contenido_g || ' g esperados' AS detalle
+FROM v_comparables
+WHERE gramos <> contenido_g
+UNION ALL
+SELECT id_comparable, 'Descripción menciona avellanas: posible formulación distinta', titulo
+FROM v_comparables
+WHERE id_presentacion = 'P06' AND LOWER(titulo) LIKE '%avellana%'
+UNION ALL
+SELECT id_presentacion, 'Marca escrita con variantes entre comercios', GROUP_CONCAT(DISTINCT marca_producto)
+FROM v_comparables
+GROUP BY id_presentacion
+HAVING COUNT(DISTINCT marca_producto) > 1"
+```
+
+
+
+:::
+
+```{r, echo = FALSE}
+tabla(dbGetQuery(con, q7b), "Inconsistencias que afectan a los productos comparables")
+```
+
+**Interpretación.** En la base completa faltan la marca en 12 filas y los gramos en 18, y hay 2 registros repetidos; **ninguno de ellos afecta a los 24 comparables**. Las comprobaciones de precio y descuento no encontraron problemas. Sí afectan la comparación tres hechos:
+
+- **Gansito en Jumbo** reporta 37 g (peso por unidad) y no 222 g (total); se corrigió con el contenido del catálogo.
+- **La marca** se escribe distinto entre comercios en las 8 presentaciones (mayúsculas o, en el Chocoramo, ortografía), lo que obliga a usar filtros con `LIKE`.
+
+## Pregunta 8. Tamaño de la oferta y calidad de los datos
+
+:::{.callout collapse="true"}
+
+## Código
+
+```{r}
+#| label: q8a
+q8a <- "
+SELECT consulta AS categoria, pagina AS comercio, hora_consulta AS ejecucion,
+       COUNT(*) AS productos
+FROM productos
+GROUP BY consulta, pagina, hora_consulta
+ORDER BY consulta, pagina"
+```
+
+:::
+
+```{r, echo = FALSE}
+tabla(dbGetQuery(con, q8a), "Productos obtenidos por categoría, comercio y ejecución", alto = "320px")
+```
+
+:::{.callout collapse="true"}
+
+## Código
+
+```{r}
+#| label: q8b
+q8b <- "
+SELECT pagina AS comercio,
+       COUNT(*) AS productos,
+       ROUND(1.0 * COUNT(*) / COUNT(DISTINCT consulta), 1) AS promedio_por_categoria,
+       ROUND(100.0 * AVG(titulo IS NOT NULL AND TRIM(titulo) <> ''), 1) AS pct_con_descripcion,
+       ROUND(100.0 * AVG(marca_producto IS NOT NULL AND TRIM(marca_producto) <> ''), 1) AS pct_con_marca,
+       ROUND(100.0 * AVG(gramos IS NOT NULL), 1) AS pct_con_contenido_g
+FROM productos
+GROUP BY pagina
+ORDER BY pagina"
+```
+
+:::
+
+```{r, echo = FALSE}
+tabla(dbGetQuery(con, q8b), "Tamaño de la oferta observada y completitud de los datos")
+```
+
+
+**Interpretación.** Carulla y Éxito aportan 15,5 y 16,0 productos por categoría; Jumbo, 9,9. Sin embargo, en seis de las ocho categorías los topes son 16, 16 y 12 productos, lo que sugiere un límite por página de resultados: la diferencia refleja lo capturado y **no necesariamente** el tamaño real del surtido. Todos los productos tienen descripción; la marca está en el 98,4 % (Carulla), 92,2 % (Éxito) y 100 % (Jumbo); esto debido a que Jumbo es la única que etiqueta la marca dentro de cada producto, de resto fue identificada su marca por las mayúsculas. El contenido en gramos está disponible en el 93,5 %, 93,0 % y 98,7 %. Los productos que no mostraran unidades dentro del título fueron señalados como unitarios directamente desde `scraper.R`.
+
+# Visualizaciones
+
+:::{.callout collapse="true"}
+
+## Código
+
+```{r}
+#| label: grafico1
+#| fig-width: 10
+#| fig-height: 7.5
+#| fig-cap: "Precio de cada presentación por comercio (COP)"
+d1 <- dbGetQuery(con, "
+  SELECT id_presentacion, producto, comercio, precio
+  FROM v_comparables
+  ORDER BY id_presentacion, comercio")
+d1$producto <- factor(d1$producto, levels = unique(d1$producto))
+
+g1 = ggplot(d1, aes(x = comercio, y = precio, fill = comercio)) +
+       geom_col(width = 0.7) +
+       geom_text(aes(label = number(precio, big.mark = ".", decimal.mark = ",")),
+                 vjust = -0.4, size = 3) +
+       facet_wrap(~ producto, scales = "free_y", ncol = 4, labeller = label_wrap_gen(22)) +
+       scale_fill_manual(values = colores) +
+       scale_y_continuous(labels = label_number(big.mark = ".", decimal.mark = ","),
+                          expand = expansion(mult = c(0, 0.2))) +
+       labs(title = "Precio de la misma presentación en cada comercio",
+            subtitle = "Precios en COP observados el 2026-10-10; la escala vertical es propia de cada producto",
+            x = NULL, y = "Precio de la presentación (COP)", fill = "Comercio") +
+       theme_minimal(base_size = 11) +
+       theme(legend.position = "bottom", axis.text.x = element_blank(),
+             panel.grid.major.x = element_blank())
+```
+
+:::
+
+```{r, echo = FALSE}
+g1
+```
+
+**Interpretación.** En el maní y las Zucaritas, Jumbo se ve claramente más caro; en Corn Flakes y Froot Loops las tres barras son iguales. Como limitación se tiene que los precios son de un solo momento, y las barras de Carulla en maní, Zucaritas y Flips corresponden a precios con descuento. De todas formas estos descuentos se mantuvieron desde el martes 6 de octubre, por lo que pueden ser simplemente descuentos falsos (inflamiento previo del precio para hacer llamativo un descuento de precio común).
+
+:::{.callout collapse="true"}
+
+## Código
+
+```{r}
+#| label: grafico2
+#| fig-width: 9
+#| fig-height: 5.5
+#| fig-cap: "Precio por 100 g por presentación y comercio"
+d2 <- dbGetQuery(con, "
+  SELECT id_presentacion, producto, comercio, precio_g * 100 AS cop_por_100g
+  FROM v_comparables
+  ORDER BY id_presentacion, comercio")
+d2$producto <- factor(d2$producto, levels = unique(d2$producto))
+
+g2 = ggplot(d2, aes(x = cop_por_100g, y = producto)) +
+       geom_line(aes(group = producto), colour = "grey70", linewidth = 0.8) +
+       geom_point(aes(fill = comercio, size = comercio), shape = 21, colour = "white", stroke = 0.8) +
+       scale_size_manual(values = c(Carulla = 6, Exito = 4.5, Jumbo = 3), guide = "none") +
+       scale_fill_manual(values = colores) +
+       scale_y_discrete(limits = rev(levels(d2$producto))) +
+       scale_x_continuous(labels = label_number(big.mark = ".", decimal.mark = ",")) +
+       guides(fill = guide_legend(override.aes = list(size = 4))) +
+       labs(title = "Precio por unidad de contenido (COP por 100 g)",
+            subtitle = "Puntos concéntricos indican precios iguales entre comercios",
+            x = "COP por 100 g", y = NULL, fill = "Comercio") +
+       theme_minimal(base_size = 11) +
+       theme(legend.position = "bottom")
+```
+
+
+:::
+
+```{r, echo = FALSE}
+g2
+```
+
+Este gráfico muestra horizontalmente el precio por unidad de contenido. *La unidad de gansito fue comparada segun su referencia completa (paquete de 6 unidades).*
+
+:::{.callout collapse="true"}
+
+## Código
+
+```{r}
+#| label: grafico3
+#| fig-width: 9
+#| fig-height: 5
+#| fig-cap: "Ahorro porcentual potencial por presentación"
+d3 <- r6
+d3$producto <- factor(d3$producto, levels = d3$producto[order(d3$ahorro_pct)])
+d3$etiqueta <- paste0(number(d3$ahorro_pct, accuracy = 0.1, decimal.mark = ","), " % (COP ",
+                      number(d3$ahorro_cop, big.mark = ".", decimal.mark = ","), ")")
+
+g3 = ggplot(d3, aes(x = ahorro_pct, y = producto)) +
+       geom_col(fill = "grey35", width = 0.7) +
+       geom_text(aes(label = etiqueta), hjust = -0.05, size = 3.3) +
+       scale_x_continuous(expand = expansion(mult = c(0, 0.5))) +
+       labs(title = "Ahorro potencial al elegir la oferta más barata",
+            subtitle = "Ahorro (%) = 100 · (precio máximo − precio mínimo) / precio máximo",
+            x = "Ahorro (%)", y = NULL) +
+       theme_minimal(base_size = 11) +
+       theme(panel.grid.major.y = element_blank())
+```
+
+
+:::
+
+```{r, echo = FALSE}
+g3
+```
+
+**Interpretación.** El ahorro se concentra en dos productos (maní y Zucaritas, cerca del 31 % al 33 %); en cuatro más es de entre 4 % y 12 %, y en dos es nulo. **Limitaciones:** el valor depende de los tres comercios observados y del momento de captura; el dato de Flips mezcla dos formulaciones.
+
+# Limitaciones y conclusiones
+
+## Promociones y alcance de los precios
+
+:::{.callout collapse="true"}
+
+## Código
+
+```{r}
+#| label: promos
+q_promos <- "
+SELECT id_comparable, producto, comercio, precio_previo AS precio_previo_cop,
+       precio AS precio_cop, descuento_pct
+FROM v_comparables
+WHERE tiene_descuento = 1
+ORDER BY id_comparable"
+```
+
+:::
+
+```{r, echo = FALSE}
+tabla(dbGetQuery(con, q_promos), "Observaciones comparables con descuento al momento de la captura")
+
+```
+
+Seis de las 24 observaciones tenían descuento marcado: cinco en Carulla y una en Jumbo (el Flips). Esos precios son promocionales y pueden no mantenerse; el descuento de Carulla en Corn Flakes (0,3 %) es insignificante. Además, el scrapeo no registró la ciudad ni la sede, ni costos de envío, existencias o condiciones de compra. De todas formas, al ser un comercio virtual, se asume que pueden hacerse compras de recogida en tienda o existe un umbral de compra para envío gratuito.
+
+## Canasta completa
+
+Para revisar en conjunto la compra, se suman todos los productos:
+
+:::{.callout collapse="true"}
+
+## Código
+
+```{r}
+#| label: canasta
+q_canasta <- "
+WITH mn AS (SELECT id_presentacion, MIN(precio) AS p FROM v_comparables GROUP BY id_presentacion),
+     tot AS (SELECT comercio AS opcion, COUNT(*) AS presentaciones, SUM(precio) AS total_cop
+             FROM v_comparables GROUP BY comercio),
+     opt AS (SELECT 'Mejor precio de cada producto' AS opcion, COUNT(*) AS presentaciones, SUM(p) AS total_cop FROM mn),
+     t AS (SELECT * FROM tot UNION ALL SELECT * FROM opt)
+SELECT opcion, presentaciones, total_cop,
+       total_cop - (SELECT total_cop FROM opt) AS sobrecosto_vs_mejor_cop,
+       ROUND(100.0 * (total_cop - (SELECT total_cop FROM opt)) / total_cop, 1) AS ahorro_si_compra_lo_mejor_pct
+FROM t
+ORDER BY total_cop"
+
+```
+
+:::
+
+```{r, echo = FALSE}
+tabla(dbGetQuery(con, q_canasta), "Costo de la canasta de 8 presentaciones")
+```
+
+Éxito (145.250 COP) y Carulla (145.370 COP) tienen canastas casi iguales y Jumbo es 11,0 % más cara que Éxito (161.183 COP). Comprar lo más barato de cada producto costaría 142.213 COP: 3.037 COP menos que la canasta de Éxito (2,1 %), a costa de visitar varios comercios. 
+
+## Orientación al consumidor
+
+| Producto | Dónde conviene comprar (según los datos) | Condición a tener en cuenta |
+|:--|:--|:--|
+| Maní La Especial arándanos 450 g | Carulla (16.730) o Éxito (17.500); Jumbo cobra 25.000 | El precio de Carulla es promocional |
+| Cereal Zucaritas 610 g | Carulla o Éxito (19.990); Jumbo cobra 28.900 | El precio de Carulla es promocional |
+| Choco Krispis 570 g | Éxito (29.100) | Diferencia pequeña (4,2 %) |
+| Corn Flakes 410 g y Froot Loops 450 g | Indiferente: precio idéntico | Elegir por conveniencia |
+| Flips chocolate 400 g | El 14.413 de Jumbo es la mejor opción | El de Carulla es promocional |
+| Chocoramo tajada 65 g | Jumbo (3.280) | Diferencia de solo 200 COP frente a Éxito |
+| Gansito x6 | Éxito (11.950; 1.992 COP por unidad) | Ahorro de 650 COP frente a Carulla |
+
+**Ahorro unitario, desembolso total y tamaño.** Todos los productos revisados no tienen cambios en cantidad de medida, por lo que son comparaciones válidas. Se presenta, de todas formas, un ahorro que posiblemente no sea significativo dependiendo de las necesidades. A pesar de la competitividad por los precios de algunos almacenes, las diferencias pueden llegar a justificar un viaje para comprar en un comercio particular, además no se toma en cuenta el acceso a medios de pago propios de cada tienda (que varían tambien en conveniencia para el tipo de consumidor).
+
+**Alcance.** Estas conclusiones describen precios observados en un momento dado y no son una recomendación general de que un comercio sea más barato que otro. 
+
+```{r}
+#| label: cierre
+dbDisconnect(con)
+```

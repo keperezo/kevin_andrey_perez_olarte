@@ -1,0 +1,2 @@
+ejecucion_id,comercio,fecha_hora_inicio,fecha_hora_fin,modo,paginas_categoria,productos_por_pagina,total_inferido_paginacion,urls_productos_detectadas,ids_unicos,ids_duplicados,urls_invalidas,estado
+cruzverde_20261010_123437,Cruz Verde,2026-10-10T12:37:13-05:00,2026-10-10T12:37:14-05:00,offline,13,12,149,149,149,0,0,completa

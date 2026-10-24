@@ -1,0 +1,846 @@
+---
+title: "Taller 1 — Comparador de precios: Nutrición clínica"
+author: "Camilo Prieto"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+params:
+  recolectar: false   # TRUE: ejecuta una nueva recolección antes del análisis
+  offline: false      # TRUE: la recolección se reprocesa desde raw/ (sin conexión)
+  corrida: null       # corrida a reprocesar cuando offline = TRUE
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+options(OutDec = ",")   # cifras con coma decimal en el texto
+```
+
+# Introducción
+
+**Categoría:** Nutrición clínica: fórmulas nutricionales completas, fórmulas
+especializadas (diabetes, renal, otras patologías), fórmulas clínicas pediátricas,
+módulos de proteína y espesantes.
+
+**Objetivo:** recolectar la categoría completa en tres comercios con venta en línea
+en Colombia (Locatel, Cruz Verde y Farmatodo) y comparar el precio de diez
+presentaciones idénticas. Con eso se quiere identificar dónde conviene comprar cada
+una y si la presentación grande tiene menor precio por gramo.
+
+**Productos comparables:**
+
+| Id | Presentación | Tipo |
+|---|---|---|
+| P01 | Ensure Advance vainilla, polvo 400 g | Fórmula completa adulto |
+| P02 | Ensure Advance vainilla, líquido 220 mL | Fórmula completa adulto |
+| P03 | Glucerna vainilla, polvo 400 g | Fórmula para diabetes |
+| P04 | Glucerna vainilla, líquido 237 mL | Fórmula para diabetes |
+| P05 | ProWhey DM vainilla, polvo 400 g | Fórmula para diabetes |
+| P06 | ProWhey DM vainilla, líquido 200 mL | Fórmula para diabetes |
+| P07 | Diben Drink vainilla, 200 mL | Fórmula para diabetes |
+| P08 | Ensure Advance vainilla, polvo 850 g | Fórmula completa adulto |
+| P09 | ProWhey Net vainilla, polvo 434 g | Módulo de proteína |
+| P10 | ProWhey DM vainilla, polvo 850 g | Fórmula para diabetes |
+
+El enunciado pide mínimo ocho; se marcan diez para que, si en una corrida falta
+alguno en un comercio, sigan quedando ocho con cobertura completa. Los pares
+P01/P08 (Ensure Advance 400 g y 850 g) y P05/P10 (ProWhey DM 400 g y 850 g) permiten
+comparar el precio por gramo entre tamaños.
+
+# Fuentes y scraping
+
+```{r paquetes}
+source("scraper.R")   # módulo de extracción, limpieza y carga en SQLite
+library(ggplot2)
+library(tidyr)
+library(knitr)
+
+# Presentación de resultados: nombres de los comercios, colores y formato de cifras
+nombres_comercio <- c(locatel = "Locatel", cruzverde = "Cruz Verde", farmatodo = "Farmatodo")
+colores <- c("Locatel" = "#2962FF", "Cruz Verde" = "#00C853", "Farmatodo" = "#FF3D00")
+miles   <- function(x) format(round(x), big.mark = ".", decimal.mark = ",",
+                              scientific = FALSE, trim = TRUE)
+tabla   <- function(df, ...) kable(df, format.args = list(big.mark = ".", decimal.mark = ","), ...)
+tema    <- theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(face = "bold", size = 14),
+        plot.subtitle = element_text(colour = "grey35"),
+        legend.position = "top",
+        panel.grid.minor = element_blank())
+```
+
+## Comercios elegidos
+
+Los tres son cadenas de droguerías y tiendas de salud con presencia nacional y venta
+en línea. Son lugares habituales para comprar fórmulas nutricionales sin necesidad
+de ir a una tienda especializada, y los tres manejan las mismas marcas clínicas
+(Abbott, Nestlé, Fresenius, Boydorr), así que la comparación es directa.
+
+- **Locatel:** cadena de tiendas de salud y bienestar con una sección amplia de
+  alimentos nutricionales.
+- **Cruz Verde:** cadena de droguerías con una sección propia de *Nutrición* dentro
+  de *Bienestar y Nutrición*.
+- **Farmatodo:** cadena de farmacias de autoservicio con sección de *Nutrición*
+  dentro de *Bienestar y nutrición deportiva*.
+
+La Rebaja Virtual se evaluó y se descartó: su sección de nutrición especializada
+tiene 80 productos, frente a 243 de Cruz Verde, y no contenía todos los productos
+candidatos.
+
+## Secciones consideradas equivalentes a la categoría
+
+| Comercio | Sección | Servicio consultado | Total del sitio |
+|---|---|---|---|
+| Locatel | Alimentos nutricionales > Suplementos; Cereales > Regulares | API de catálogo VTEX (`/api/catalog_system/pub/products/search`, filtros `C:/6/41/` y `C:/6/40/251/`) | encabezado HTTP `resources` |
+| Cruz Verde | Bienestar y Nutrición > Nutrición | API del sitio (`api.cruzverde.com.co/product-service/products/search`, `cgid=bienynut-nutricion`, zona `COCV_zona64`) | campo `total` |
+| Farmatodo | Bienestar y nutrición deportiva > Nutrición | Buscador Algolia de la página (`products-colombia`, filtro de departamento y categoría, solo activos) | campo `nbHits` |
+
+- **Por qué se incluye *Cereales > Regulares* en Locatel:** Locatel clasifica allí
+  Ensure Advance líquido (P02). Los cereales de esa sección se recolectan, pero se
+  marcan como excluidos.
+- **Por qué *Suplementos* completo en Locatel:** Glucerna polvo está en
+  *Complementos* y no en *Nutricionales*. Lo que no es nutrición clínica (deportiva,
+  vitaminas) se marca como excluido.
+
+## Estrategia de extracción
+
+Las tres tiendas arman el listado de productos con JavaScript: `read_html()` devuelve
+la página sin productos. Por eso se consulta el servicio JSON que usa la propia
+página. Ese servicio se identificó en la pestaña *Red* de las herramientas del
+navegador, al cargar la categoría. Las peticiones son HTTP directas con `httr2`, sin
+automatizar el navegador.
+
+- **Locatel (VTEX):** 50 productos por página con `_from` y `_to`; el total sale del
+  encabezado `resources` (por ejemplo `0-49/383`).
+- **Cruz Verde:** primero abre una sesión de invitado (POST a `customer-service/login`;
+  sin ella el servicio responde 401). Luego recorre la sección de 48 en 48 con
+  `offset` y pide la descripción de los 48 productos de cada página a
+  `product-summary`. Los precios dependen de la zona de inventario (`COCV_zona64`).
+- **Farmatodo:** POST al índice de Algolia con 100 productos por página, recorriendo
+  `nbPages`. La clave usada es la clave pública de **solo búsqueda** que la página
+  envía a todos los visitantes; no es una credencial privada.
+
+**Buenas prácticas:** user-agent de navegador, pausa de 1,5 s entre solicitudes,
+hasta 3 reintentos y manejo de errores con `tryCatch` y `possibly()`, para que la
+falla de un comercio no detenga a los demás.
+
+**Condiciones de uso:** los `robots.txt` de Cruz Verde y Farmatodo prohíben las
+páginas de búsqueda del sitio web (`/search`), no las páginas de categoría ni los
+servicios que las alimentan. Se consulta solo la categoría, con pausas y sin
+autenticarse como cliente. Cruz Verde publica además un precio Club, exclusivo
+para afiliados: se guarda en `precio_club` y no entra en la comparación.
+
+## Organización del código y ejecución
+
+`scraper.R` contiene:
+
+- una función por comercio (`scrape_locatel()`, `scrape_cruzverde()`,
+  `scrape_farmatodo()`), todas con las mismas columnas;
+- la limpieza (`limpiar()`);
+- la base SQLite (`crear_base()`, `insertar_lote()`);
+- la correspondencia (`aplicar_correspondencia()`, `verificar_correspondencia()`);
+- la función general `ejecutar_recoleccion()`.
+
+Este documento solo llama esas funciones. Cada respuesta se guarda comprimida en
+`raw/<comercio>/<corrida>/`, junto con el total que informa el sitio
+(`totales.csv`). Con `offline = TRUE` se reprocesan esas copias sin consultar los
+sitios.
+
+```{r recoleccion}
+# Por defecto el documento analiza la base entregada. Para una corrida nueva:
+#   rmarkdown::render("taller_1.Rmd", params = list(recolectar = TRUE))
+# Para reprocesar las copias crudas sin conexión:
+#   rmarkdown::render("taller_1.Rmd",
+#     params = list(recolectar = TRUE, offline = TRUE, corrida = "20261010T213019"))
+if (isTRUE(params$recolectar)) {
+  ejecutar_recoleccion(offline = params$offline, corrida = params$corrida)
+}
+con <- dbConnect(SQLite(), "comparador_precios.sqlite")
+```
+
+## Ejecuciones registradas
+
+```{sql, connection = con, output.var = "ejec"}
+SELECT e.corrida, c.nombre AS comercio, e.inicio, e.fin,
+       e.n_registros, e.total_sitio, e.estado, e.modo
+FROM ejecuciones e
+JOIN comercios c ON c.id_comercio = e.id_comercio
+ORDER BY e.id_ejecucion
+```
+
+```{r ejec-tabla}
+tabla(ejec, col.names = c("Corrida", "Comercio", "Inicio", "Fin", "Registros",
+                          "Total del sitio", "Estado", "Modo"))
+```
+
+`Registros` es lo obtenido y `Total del sitio` lo que informa cada sitio para las
+secciones recolectadas. En las `r nrow(ejec)` ejecuciones registradas,
+`r sum(ejec$n_registros == ejec$total_sitio, na.rm = TRUE)` obtuvieron exactamente
+el total que informa el sitio, y por eso quedaron con estado `completa`. La hora de
+inicio y fin de cada ejecución es también la fecha y hora de captura de los precios.
+
+# Preparación de los datos
+
+La limpieza está en `limpiar()` (sección 9 de `scraper.R`). Las versiones
+estandarizadas se guardan en columnas propias. `nombre`, `marca`, `subcategoria` y
+`texto_original` quedan tal como los publicó cada sitio.
+
+1. **Precios.** Los tres servicios entregan precios numéricos en COP. Un precio 0 o
+   ausente se guarda como `NULL`, nunca como 0.
+   - **Precio comparado:** el de oferta abierta a todos si existe; si no, el de lista.
+   - **Promoción:** `promocion = 1` cuando el precio es menor que el de lista.
+2. **Contenido y unidad.** Se extraen del nombre y se normalizan a g o mL:
+   1 kg = 1000 g, 1 L = 1000 mL, 1 lb = 453,592 g. El número de unidades sale de
+   expresiones como "x 6 und".
+3. **Marca y subcategoría.** `marca_std` usa un diccionario de marcas buscadas en el
+   nombre, porque la misma marca llega como "Glucerna", "GLUCERNA" o "Abbott" según
+   el sitio. `subcategoria_std` asigna una de estas clases, por reglas sobre el nombre:
+   - espesante;
+   - fórmula pediátrica;
+   - fórmula para diabetes;
+   - fórmula renal;
+   - fórmula especializada;
+   - fórmula completa adulto;
+   - módulo de proteína.
+4. **Paquetes.** `es_paquete = 1` en ofertas compuestas ("850 g + 400 g", "x 6",
+   "pack"). No se emparejan con la presentación individual.
+5. **Duplicados.** Hay un SKU por comercio, con `UNIQUE(id_comercio, sku)`.
+6. **Exclusiones** (se marcan, no se borran). Las secciones de los sitios mezclan
+   productos de otras categorías de la planilla.
+   - **Criterio:** un anuncio pertenece a la categoría si su nombre contiene una
+     marca o un término de nutrición clínica (lista `NUTRICION_CLINICA`).
+   - **Lo demás** queda con `excluido = 1` y un motivo: nutrición deportiva,
+     vitaminas o suplemento dietario, medicamento o cuidado personal, leche infantil
+     de consumo general, cereal, dispositivo médico u otro alimento.
+7. **Correspondencia.** `correspondencia.csv` asigna el identificador común (P01–P10)
+   al SKU de cada comercio. Cada asignación se revisó por marca, variante (vainilla),
+   contenido, unidad y número de unidades. No se usa el EAN porque no coincide entre
+   tiendas y Cruz Verde no lo publica.
+
+```{r motivos}
+motivos <- dbGetQuery(con, "
+  SELECT c.nombre AS comercio,
+         COALESCE(a.motivo_exclusion, '(en la categoría)') AS motivo,
+         COUNT(*) AS n
+  FROM anuncios a JOIN comercios c ON c.id_comercio = a.id_comercio
+  GROUP BY 1, 2 ORDER BY 1, 3 DESC")
+tabla(motivos, col.names = c("Comercio", "Motivo", "Anuncios"))
+```
+
+**Interpretación:**
+Las secciones de los sitios no coinciden con
+  la delimitación de la planilla. Locatel mezcla en *Suplementos* la nutrición
+  deportiva (proteínas *whey*, creatinas) con las fórmulas clínicas. Cruz Verde
+  incluye en *Nutrición* vitaminas, cápsulas y productos de cuidado personal.
+Recolectar la sección completa y marcar lo
+  excluido permite verificar que no se perdió ningún producto de la categoría, y
+  deja documentado qué se descartó y por qué.
+
+```{r verificacion-correspondencia}
+verif <- verificar_correspondencia(con)
+verif %>%
+  mutate(comercio = nombres_comercio[id_comercio]) %>%
+  select(id_producto, comercio, sku, nombre, contenido_anuncio,
+         unidad_anuncio, unidades_anuncio, coincide) %>%
+  tabla(col.names = c("Id", "Comercio", "SKU", "Nombre publicado", "Contenido",
+                      "Unidad", "Unidades", "Coincide"))
+```
+
+Coinciden `r sum(verif$coincide)` de `r nrow(verif)` asignaciones en marca,
+contenido, unidad y número de unidades. Los nombres publicados son distintos en cada
+comercio: por ejemplo "Tarro X 400Gr", "Polvo 400G" o "Lata x 400 gr". Por eso la
+correspondencia no se puede hacer comparando nombres. Se hace por SKU, verificando
+los atributos ya estandarizados.
+
+# Base SQLite
+
+| Tabla | Contenido | Restricciones |
+|---|---|---|
+| `comercios` | id, nombre, URL base | PK `id_comercio` |
+| `ejecuciones` | corrida, comercio, inicio, fin, registros, total del sitio, estado, modo | PK `id_ejecucion` |
+| `productos` | identificador común P01–P10: marca, variante, contenido, unidad, unidades | PK `id_producto` |
+| `anuncios` | cada producto en cada comercio: SKU, sección, EAN, texto original, URL, campos estandarizados, `excluido`, `id_producto`, `comparable` | `UNIQUE(id_comercio, sku)` |
+| `observaciones` | precio, precio de lista, precio Club, promoción, disponibilidad, fecha y hora de consulta, ejecución | `UNIQUE(id_anuncio, fecha_hora_consulta)` |
+
+- **Relaciones:**
+  - `observaciones` → `anuncios` → `comercios`;
+  - `anuncios.id_producto` → `productos`;
+  - `observaciones.id_ejecucion` → `ejecuciones`.
+- **Sin sobrescritura:** una nueva corrida agrega observaciones. Si un anuncio ya
+  existe, se actualizan sus datos descriptivos y se conservan su id y su
+  correspondencia.
+
+Para las comparaciones se define una vista con las observaciones comparables de la
+corrida más reciente. Todos los precios de una comparación provienen así de la misma
+ejecución.
+
+```{r vista}
+dbExecute(con, "DROP VIEW IF EXISTS comp")
+dbExecute(con, "
+  CREATE TEMP VIEW comp AS
+  SELECT e.corrida, a.id_producto, p.nombre_std, p.contenido, p.unidad,
+         a.id_comercio, cm.nombre AS comercio,
+         o.precio, o.precio_lista, o.promocion, o.disponible, o.fecha_hora_consulta
+  FROM observaciones o
+  JOIN anuncios a    ON a.id_anuncio   = o.id_anuncio
+  JOIN ejecuciones e ON e.id_ejecucion = o.id_ejecucion
+  JOIN productos p   ON p.id_producto  = a.id_producto
+  JOIN comercios cm  ON cm.id_comercio = a.id_comercio
+  WHERE a.comparable = 1
+    AND e.corrida = (SELECT MAX(corrida) FROM ejecuciones)")
+corrida_actual <- dbGetQuery(con, "SELECT MAX(corrida) AS c FROM ejecuciones")$c
+```
+
+Corrida analizada: **`r corrida_actual`**.
+
+# Consultas SQL
+
+## Pregunta 1. Tamaño de la base
+
+```{sql, connection = con, output.var = "q1a"}
+SELECT (SELECT COUNT(*) FROM comercios)                      AS comercios,
+       (SELECT COUNT(*) FROM productos)                      AS presentaciones_comparables,
+       (SELECT COUNT(*) FROM anuncios)                       AS anuncios_recolectados,
+       (SELECT COUNT(*) FROM anuncios WHERE excluido = 0)    AS anuncios_en_categoria,
+       (SELECT COUNT(*) FROM observaciones)                  AS observaciones,
+       (SELECT COUNT(DISTINCT corrida) FROM ejecuciones)     AS corridas
+```
+
+```{r q1a-tabla}
+tabla(q1a, col.names = c("Comercios", "Presentaciones comparables",
+                         "Anuncios recolectados", "Anuncios en la categoría",
+                         "Observaciones de precio", "Corridas"))
+```
+
+```{sql, connection = con, output.var = "q1b"}
+SELECT c.nombre AS comercio,
+       COUNT(*)                  AS recolectados,
+       SUM(a.excluido = 0)       AS en_categoria,
+       SUM(a.excluido = 1)       AS excluidos,
+       SUM(a.comparable = 1)     AS comparables
+FROM anuncios a
+JOIN comercios c ON c.id_comercio = a.id_comercio
+GROUP BY c.nombre
+ORDER BY en_categoria DESC
+```
+
+```{r q1b-tabla}
+q1b <- q1b %>% mutate(pct_categoria = round(100 * en_categoria / recolectados, 1))
+tabla(q1b, col.names = c("Comercio", "Recolectados", "En la categoría",
+                         "Excluidos", "Comparables", "% en la categoría"))
+```
+
+**Interpretación:**
+La base contiene `r q1a$comercios` comercios,
+  `r q1a$presentaciones_comparables` presentaciones comparables,
+  `r miles(q1a$anuncios_recolectados)` anuncios recolectados y
+  `r miles(q1a$observaciones)` observaciones de precio en `r q1a$corridas` corrida.
+De los anuncios recolectados,
+  `r miles(q1a$anuncios_en_categoria)` pertenecen a la categoría según la
+  delimitación de la planilla. El comercio con la oferta más amplia es
+  **`r q1b$comercio[1]`** (`r q1b$en_categoria[1]` productos), seguido de
+  `r q1b$comercio[2]` (`r q1b$en_categoria[2]`) y `r q1b$comercio[3]`
+  (`r q1b$en_categoria[3]`).
+La proporción de la sección que de verdad es
+  nutrición clínica va de `r min(q1b$pct_categoria)` % a `r max(q1b$pct_categoria)` %.
+  En el comercio con el porcentaje más bajo, la sección del sitio está dominada por
+  otros productos.
+Cada comercio aporta las `r q1a$presentaciones_comparables`
+  presentaciones comparables, que es la condición para comparar precios.
+
+## Pregunta 2. Cobertura de la ejecución y repetidos
+
+```{sql, connection = con, output.var = "q2a"}
+SELECT e.corrida, c.nombre AS comercio,
+       COUNT(*)                      AS observaciones_comparables,
+       COUNT(DISTINCT a.id_producto) AS presentaciones,
+       COUNT(o.precio)               AS con_precio
+FROM observaciones o
+JOIN anuncios a    ON a.id_anuncio   = o.id_anuncio
+JOIN ejecuciones e ON e.id_ejecucion = o.id_ejecucion
+JOIN comercios c   ON c.id_comercio  = a.id_comercio
+WHERE a.comparable = 1
+GROUP BY e.corrida, c.nombre
+ORDER BY e.corrida, c.nombre
+```
+
+```{r q2a-tabla}
+tabla(q2a, col.names = c("Corrida", "Comercio", "Observaciones comparables",
+                         "Presentaciones distintas", "Con precio"))
+```
+
+```{sql, connection = con, output.var = "q2b"}
+-- Repetidos: el mismo producto en el mismo comercio más de una vez en una corrida
+SELECT e.corrida, c.nombre AS comercio, a.id_producto, COUNT(*) AS veces
+FROM observaciones o
+JOIN anuncios a    ON a.id_anuncio   = o.id_anuncio
+JOIN ejecuciones e ON e.id_ejecucion = o.id_ejecucion
+JOIN comercios c   ON c.id_comercio  = a.id_comercio
+WHERE a.comparable = 1
+GROUP BY e.corrida, c.nombre, a.id_producto
+HAVING COUNT(*) > 1
+```
+
+```{r q2b-tabla}
+cobertura <- dbGetQuery(con, "SELECT COUNT(*) AS n, COUNT(precio) AS con_precio FROM comp")
+if (nrow(q2b) == 0) cat("No hay registros repetidos.") else tabla(q2b)
+```
+
+**Interpretación:**
+La corrida `r corrida_actual` tiene `r cobertura$n` observaciones
+  comparables, y `r cobertura$con_precio` de ellas tienen precio. Son
+  `r q1a$presentaciones_comparables` presentaciones por 3 comercios, por encima del
+  mínimo de 24 que exige el enunciado.
+Todos los precios comparados vienen de la misma ejecución.
+  Así ninguna diferencia de precio se explica por haber consultado los comercios en
+  días distintos.
+`r if (nrow(q2b) == 0) "La consulta no devuelve filas: no hay registros repetidos del mismo producto y comercio." else paste("Hay", nrow(q2b), "combinaciones repetidas.")`
+  Esto lo garantizan dos controles: la eliminación de SKU duplicados antes de
+  insertar y la restricción `UNIQUE(id_anuncio, fecha_hora_consulta)`.
+
+## Pregunta 3. Precio mínimo, máximo y promedio por presentación
+
+```{sql, connection = con, output.var = "p3"}
+WITH r AS (
+  SELECT id_producto, COUNT(precio) AS n,
+         MIN(precio) AS minimo, MAX(precio) AS maximo, AVG(precio) AS promedio
+  FROM comp GROUP BY id_producto)
+SELECT r.id_producto, p.nombre_std,
+       CAST(p.contenido AS INTEGER) || ' ' || p.unidad AS presentacion,
+       r.n, r.minimo, r.maximo, ROUND(r.promedio) AS promedio,
+       (SELECT GROUP_CONCAT(c.comercio, ' / ') FROM comp c
+         WHERE c.id_producto = r.id_producto AND c.precio = r.minimo) AS mas_barato,
+       (SELECT COUNT(*) FROM comp c
+         WHERE c.id_producto = r.id_producto AND c.precio = r.minimo) AS n_con_minimo
+FROM r JOIN productos p ON p.id_producto = r.id_producto
+ORDER BY r.id_producto
+```
+
+```{r p3-tabla}
+tabla(p3, col.names = c("Id", "Producto", "Presentación", "Precios",
+                        "Mínimo (COP)", "Máximo (COP)", "Promedio (COP)",
+                        "Más barato", "Comercios con el mínimo"))
+gana <- dbGetQuery(con, "
+  SELECT c.comercio, COUNT(*) AS veces_mas_barato
+  FROM comp c
+  JOIN (SELECT id_producto, MIN(precio) AS m FROM comp GROUP BY id_producto) x
+    ON x.id_producto = c.id_producto AND c.precio = x.m
+  GROUP BY c.comercio ORDER BY veces_mas_barato DESC")
+tabla(gana, col.names = c("Comercio", "Presentaciones en las que es el más barato"))
+```
+
+```{r p3-resumen, include = FALSE}
+p3 <- p3 %>% mutate(brecha = round(100 * (maximo - minimo) / minimo, 1))
+empates <- p3 %>% filter(n_con_minimo > 1)
+```
+
+**Interpretación:**
+ **`r gana$comercio[1]`** tiene el menor precio
+  en `r gana$veces_mas_barato[1]` de las `r nrow(p3)` presentaciones.
+  `r if (nrow(gana) > 1) paste0(paste0(gana$comercio[-1], " en ", gana$veces_mas_barato[-1], collapse = " y "), ".") else ""`
+  Ningún comercio es el más barato en todo, así que la decisión de compra depende
+  del producto.
+ `r if (nrow(empates) == 0) "No hay empates en el precio mínimo en esta corrida." else paste0("Hay ", nrow(empates), " presentación(es) con empate en el mínimo: ", paste(empates$nombre_std, empates$presentacion, collapse = "; "), ". En esos casos todos los comercios empatados aparecen en la columna «Más barato».")`
+ La distancia entre el precio máximo y el mínimo va de
+  `r min(p3$brecha)` % a `r max(p3$brecha)` % por encima del mínimo. La más alta es
+  la de **`r p3$nombre_std[which.max(p3$brecha)]` `r p3$presentacion[which.max(p3$brecha)]`**.
+El promedio sirve como referencia del precio "típico" de cada
+  presentación entre los tres comercios. No es un precio que exista en alguna
+  tienda.
+
+## Pregunta 4. Ahorro al elegir la oferta más económica
+
+```{sql, connection = con, output.var = "p4"}
+SELECT c.id_producto, p.nombre_std,
+       CAST(p.contenido AS INTEGER) || ' ' || p.unidad AS presentacion,
+       MAX(c.precio) AS precio_max, MIN(c.precio) AS precio_min,
+       MAX(c.precio) - MIN(c.precio) AS ahorro_cop,
+       ROUND(100.0 * (MAX(c.precio) - MIN(c.precio)) / MAX(c.precio), 1) AS ahorro_pct
+FROM comp c JOIN productos p ON p.id_producto = c.id_producto
+WHERE c.precio IS NOT NULL
+GROUP BY c.id_producto
+ORDER BY c.id_producto
+```
+
+```{r p4-tabla}
+tabla(p4, col.names = c("Id", "Producto", "Presentación", "Precio máximo (COP)",
+                        "Precio mínimo (COP)", "Ahorro (COP)", "Ahorro (%)"))
+```
+
+**Interpretación:**
+Ahorro (COP) = P~max~ − P~min~ y Ahorro (%) = 100 (P~max~ − P~min~) / P~max~,
+  para la misma presentación y la misma corrida.
+- **Rango.** El ahorro va de `r min(p4$ahorro_pct)` % a `r max(p4$ahorro_pct)` %,
+  con un promedio de `r round(mean(p4$ahorro_pct), 1)` %.
+El ahorro es mayor en las presentaciones grandes, porque su precio es
+  más alto. El mayor ahorro en pesos es de $`r miles(max(p4$ahorro_cop))` en
+  **`r p4$nombre_std[which.max(p4$ahorro_cop)]` `r p4$presentacion[which.max(p4$ahorro_cop)]`**.
+El mayor ahorro está en
+  **`r p4$nombre_std[which.max(p4$ahorro_pct)]` `r p4$presentacion[which.max(p4$ahorro_pct)]`**
+  (`r max(p4$ahorro_pct)` %).
+Comprar cada una en el comercio más barato
+  en vez del más caro ahorra en total $`r miles(sum(p4$ahorro_cop))`. Para quien
+  consume estas fórmulas de forma continua, por ejemplo un tarro al mes, ese ahorro
+  se repite en cada compra.
+
+## Pregunta 5. Precio por gramo entre tamaños del mismo producto
+
+Solo se comparan tamaños del mismo producto y la misma formulación: Ensure Advance
+polvo 400 g y 850 g, y ProWhey DM polvo 400 g y 850 g. El precio se expresa en COP
+por 100 g. No se mezclan g con mL en el mismo ranking.
+
+```{sql, connection = con, output.var = "p5"}
+SELECT nombre_std, CAST(contenido AS INTEGER) || ' ' || unidad AS presentacion,
+       comercio, precio,
+       ROUND(100.0 * precio / contenido, 1) AS cop_por_100g,
+       RANK() OVER (PARTITION BY nombre_std ORDER BY precio / contenido) AS puesto
+FROM comp
+WHERE id_producto IN ('P01', 'P08', 'P05', 'P10') AND precio IS NOT NULL
+ORDER BY nombre_std, puesto
+```
+
+```{r p5-tabla}
+tabla(p5, col.names = c("Producto", "Presentación", "Comercio", "Precio (COP)",
+                        "COP por 100 g", "Puesto"))
+mejor5 <- p5 %>% filter(puesto == 1)
+# Reducción del precio por gramo al pasar de 400 g a 850 g, en cada comercio
+tamanos <- p5 %>%
+  mutate(tam = ifelse(startsWith(presentacion, "850"), "grande", "pequena")) %>%
+  select(nombre_std, comercio, tam, cop_por_100g) %>%
+  pivot_wider(names_from = tam, values_from = cop_por_100g) %>%
+  mutate(reduccion_pct = round(100 * (pequena - grande) / pequena, 1))
+tabla(tamanos, col.names = c("Producto", "Comercio", "COP/100 g en 850 g",
+                             "COP/100 g en 400 g", "Reducción por gramo (%)"))
+```
+
+**Interpretación:**
+
+  `r paste0(mejor5$nombre_std, ": ", mejor5$presentacion, " en ", mejor5$comercio, " (", miles(mejor5$cop_por_100g), " COP por 100 g)", collapse = "; ")`.
+Pasar de 400 g a 850 g cambia el precio por gramo entre
+  `r min(tamanos$reduccion_pct, na.rm = TRUE)` % y
+  `r max(tamanos$reduccion_pct, na.rm = TRUE)` %, según el producto y el comercio.
+  Un valor positivo significa que la presentación grande es más barata por gramo.
+  En `r sum(tamanos$reduccion_pct > 0, na.rm = TRUE)` de las `r nrow(tamanos)`
+  combinaciones de producto y comercio, la presentación grande tiene menor precio
+  por gramo.
+El tarro de 850 g exige un desembolso
+  mayor de una vez. El ahorro solo se realiza si el producto se consume antes de su
+  vencimiento una vez abierto.
+La combinación más barata por gramo no
+  siempre es la presentación grande del comercio más barato en 400 g. Por eso el
+  ranking se calcula sobre el precio por gramo y no sobre el precio del empaque.
+
+## Pregunta 6. Mayores diferencias de precio entre comercios
+
+```{sql, connection = con, output.var = "p6"}
+WITH r AS (
+  SELECT id_producto, MAX(precio) AS pmax, MIN(precio) AS pmin
+  FROM comp WHERE precio IS NOT NULL GROUP BY id_producto)
+SELECT p.nombre_std, CAST(p.contenido AS INTEGER) || ' ' || p.unidad AS presentacion,
+       (SELECT GROUP_CONCAT(comercio, ' / ') FROM comp c
+         WHERE c.id_producto = r.id_producto AND c.precio = r.pmax) AS mas_caro,
+       (SELECT GROUP_CONCAT(comercio, ' / ') FROM comp c
+         WHERE c.id_producto = r.id_producto AND c.precio = r.pmin) AS mas_barato,
+       r.pmax - r.pmin AS ahorro_cop,
+       ROUND(100.0 * (r.pmax - r.pmin) / r.pmax, 1) AS ahorro_pct
+FROM r JOIN productos p ON p.id_producto = r.id_producto
+ORDER BY ahorro_pct DESC
+```
+
+```{r p6-tabla}
+tabla(p6, col.names = c("Producto", "Presentación", "Más caro", "Más barato",
+                        "Ahorro (COP)", "Ahorro (%)"))
+caro <- p6 %>% separate_rows(mas_caro, sep = " / ") %>% count(mas_caro, sort = TRUE)
+```
+
+**Interpretación:**
+Las tres presentaciones con mayor diferencia son
+  `r paste0(p6$nombre_std[1:3], " ", p6$presentacion[1:3], " (", format(p6$ahorro_pct[1:3], decimal.mark = ","), " %)", collapse = ", ")`.
+  En ellas, elegir mal el comercio cuesta más.
+Las de menor diferencia son
+  `r n6 <- nrow(p6); paste0(p6$nombre_std[(n6-1):n6], " ", p6$presentacion[(n6-1):n6], " (", format(p6$ahorro_pct[(n6-1):n6], decimal.mark = ","), " %)", collapse = " y ")`.
+  Ahí los precios son casi iguales, y pesan más la disponibilidad, el envío o la
+  cercanía de la tienda.
+ **`r caro$mas_caro[1]`** es el comercio más caro en
+  `r caro$n[1]` presentaciones. Comprar todo en un solo lugar por costumbre puede  costar más que repartir la compra.
+
+## Pregunta 7. Datos faltantes o inconsistentes
+
+```{sql, connection = con, output.var = "q7"}
+SELECT 'Anuncios de la categoría sin contenido (g o mL)' AS problema, COUNT(*) AS n
+  FROM anuncios WHERE excluido = 0 AND contenido IS NULL
+UNION ALL
+SELECT 'Anuncios de la categoría sin marca publicada por el sitio', COUNT(*)
+  FROM anuncios WHERE excluido = 0 AND (marca IS NULL OR marca = '')
+UNION ALL
+SELECT 'Anuncios de la categoría sin EAN', COUNT(*)
+  FROM anuncios WHERE excluido = 0 AND (ean IS NULL OR ean = '')
+UNION ALL
+SELECT 'Anuncios de la categoría sin subcategoría estandarizada (Otro)', COUNT(*)
+  FROM anuncios WHERE excluido = 0 AND subcategoria_std = 'Otro (revisar)'
+UNION ALL
+SELECT 'Anuncios de la categoría que son paquetes u ofertas compuestas', COUNT(*)
+  FROM anuncios WHERE excluido = 0 AND es_paquete = 1
+UNION ALL
+SELECT 'Observaciones sin precio (última corrida)', COUNT(*)
+  FROM observaciones o JOIN ejecuciones e ON e.id_ejecucion = o.id_ejecucion
+  WHERE o.precio IS NULL AND e.corrida = (SELECT MAX(corrida) FROM ejecuciones)
+UNION ALL
+SELECT 'Comparables no disponibles para compra', COUNT(*)
+  FROM comp WHERE disponible = 0
+UNION ALL
+SELECT 'Comparables con precio en promoción', COUNT(*)
+  FROM comp WHERE promocion = 1
+UNION ALL
+SELECT 'Comparables con precio Club (solo afiliados, no comparado)', COUNT(*)
+  FROM observaciones o JOIN anuncios a ON a.id_anuncio = o.id_anuncio
+  JOIN ejecuciones e ON e.id_ejecucion = o.id_ejecucion
+  WHERE a.comparable = 1 AND o.precio_club IS NOT NULL
+    AND e.corrida = (SELECT MAX(corrida) FROM ejecuciones)
+```
+
+```{r q7-tabla}
+tabla(q7, col.names = c("Problema", "Registros"))
+v7 <- setNames(q7$n, q7$problema)
+```
+
+**Interpretación:** se separan los problemas que afectan la comparación de los que solo afectan la descripción de la oferta.
+
+- **No afectan la comparación de precios:**
+  - **EAN.** Falta en `r v7[3]` anuncios de la categoría, sobre todo en Cruz Verde,
+    cuyo servicio no lo publica. Además, el mismo producto tiene EAN distintos entre
+    tiendas (por ejemplo, Glucerna 400 g en Locatel y en Farmatodo). Por eso la
+    correspondencia se hizo por SKU y atributos.
+  - **Contenido.** `r v7[1]` anuncios de la categoría no indican gramos ni
+    mililitros en el nombre. Los 30 comparables sí tienen contenido verificado.
+  - **Subcategoría.** `r v7[4]` anuncios quedaron en "Otro": son de la categoría,
+    pero su nombre no permite asignarles un tipo de fórmula.
+  - **Paquetes.** `r v7[5]` anuncios son ofertas compuestas ("x 6", "850 g + 400 g").
+    No se emparejan con la presentación individual.
+- **Sí afectan la interpretación de los precios:**
+  - **Sin precio.** `r v7[6]` observaciones de la última corrida no tienen precio y
+    quedaron como `NULL`, sin reemplazarse por 0.
+  - **Promociones.** `r v7[8]` de los 30 precios comparables son promocionales. La
+    diferencia entre comercios en esas presentaciones puede ser temporal.
+  - **Disponibilidad.** `r v7[7]` comparables aparecen sin disponibilidad. El precio
+    está publicado, pero no se puede comprar en ese momento.
+  - **Precio Club.** `r v7[9]` comparables de Cruz Verde tienen un precio menor para
+    afiliados, que no se usa en la comparación.
+
+## Pregunta 8. Tamaño de la oferta y calidad de la información
+
+```{sql, connection = con, output.var = "q8"}
+SELECT e.corrida, c.nombre AS comercio,
+       COUNT(*)                                        AS obtenidos,
+       SUM(a.excluido = 0)                             AS en_categoria,
+       ROUND(100.0 * AVG(CASE WHEN a.excluido = 0 THEN
+             LENGTH(a.texto_original) > LENGTH(a.nombre) + 10 END), 1) AS pct_con_descripcion,
+       ROUND(100.0 * AVG(CASE WHEN a.excluido = 0 THEN
+             a.marca IS NOT NULL AND a.marca <> '' END), 1)            AS pct_con_marca,
+       ROUND(100.0 * AVG(CASE WHEN a.excluido = 0 THEN
+             a.contenido IS NOT NULL END), 1)                          AS pct_con_contenido
+FROM observaciones o
+JOIN anuncios a    ON a.id_anuncio   = o.id_anuncio
+JOIN ejecuciones e ON e.id_ejecucion = o.id_ejecucion
+JOIN comercios c   ON c.id_comercio  = a.id_comercio
+GROUP BY e.corrida, c.nombre
+ORDER BY e.corrida, en_categoria DESC
+```
+
+```{r q8-tabla}
+tabla(q8, col.names = c("Corrida", "Comercio", "Obtenidos", "En la categoría",
+                        "% con descripción", "% con marca", "% con contenido"))
+q8u <- q8 %>% filter(corrida == corrida_actual)
+```
+
+Un anuncio tiene descripción cuando su texto original es al menos diez caracteres
+más largo que el nombre. Los porcentajes se calculan sobre los anuncios de la
+categoría (`excluido = 0`).
+
+**Interpretación:**
+`r if (q8u$comercio[which.max(q8u$obtenidos)] != q8u$comercio[1]) paste0(q8u$comercio[which.max(q8u$obtenidos)], " publica la sección más grande (", max(q8u$obtenidos), " productos), pero la mayor oferta de nutrición clínica es la de ", q8u$comercio[1], " (", q8u$en_categoria[1], " productos).") else paste0(q8u$comercio[1], " tiene la sección más grande (", max(q8u$obtenidos), " productos) y también la mayor oferta de nutrición clínica (", q8u$en_categoria[1], " productos).")`
+  La proporción de cada sección que pertenece a la categoría cambia mucho entre
+  comercios. Por eso la oferta se compara sobre los productos de la categoría, no
+  sobre el tamaño de la sección del sitio.
+
+  - **Descripción:** va de `r min(q8u$pct_con_descripcion)` % a
+    `r max(q8u$pct_con_descripcion)` % de los anuncios, según el comercio.
+  - **Marca:** va de `r min(q8u$pct_con_marca)` % a `r max(q8u$pct_con_marca)` %.
+  - **Contenido identificable:** va de `r min(q8u$pct_con_contenido)` % a
+    `r max(q8u$pct_con_contenido)` %.
+  - Un contenido identificable es lo que permite calcular el precio por gramo o por
+    mililitro y comparar presentaciones.
+
+# Visualizaciones
+
+Los colores identifican siempre al mismo comercio en todos los gráficos. Los precios están en pesos colombianos (COP), en la corrida `r corrida_actual`.
+
+```{r datos-graficos}
+comp <- dbGetQuery(con, "SELECT * FROM comp WHERE precio IS NOT NULL") %>%
+  mutate(comercio = factor(comercio, levels = names(colores)),
+         etiqueta = paste0(nombre_std, " ", contenido, " ", unidad))
+```
+
+## Precio de cada presentación por comercio
+
+```{r g1, fig.width = 9.5, fig.height = 6}
+ggplot(comp, aes(x = precio, y = reorder(etiqueta, precio), colour = comercio)) +
+  geom_line(aes(group = etiqueta), colour = "grey80", linewidth = 2.2) +
+  geom_point(size = 4.2, alpha = 0.9) +
+  scale_colour_manual(values = colores) +
+  scale_x_continuous(labels = scales::label_dollar(big.mark = ".", decimal.mark = ",")) +
+  labs(x = "Precio (COP)", y = NULL, colour = NULL,
+       title = "Precio de la misma presentación en los tres comercios") +
+  tema
+```
+
+**Interpretación:**
+- El punto más a la izquierda de cada fila es el comercio más
+  barato para esa presentación. Una barra gris larga indica una diferencia grande   entre comercios. Las presentaciones grandes (850 g) dominan la escala por su precio en   pesos, así que la diferencia relativa de los productos baratos (líquidos de 200–237 mL) se ve mejor en el gráfico de ahorro porcentual.
+- **Limitación.** Son precios de un solo momento y, en Cruz Verde, de una zona de inventario.
+
+## Precio por 100 g entre tamaños
+
+```{r g2, fig.width = 9, fig.height = 4.8}
+comp %>%
+  filter(id_producto %in% c("P01", "P08", "P05", "P10")) %>%
+  mutate(cop_100g = 100 * precio / contenido,
+         tamano = factor(paste(contenido, unidad), levels = c("400 g", "850 g"))) %>%
+  ggplot(aes(x = tamano, y = cop_100g, fill = comercio)) +
+  geom_col(position = position_dodge(width = 0.85), width = 0.8) +
+  geom_text(aes(label = miles(cop_100g)), position = position_dodge(width = 0.85),
+            vjust = -0.4, size = 3) +
+  facet_wrap(~ nombre_std, scales = "free_y") +
+  scale_fill_manual(values = colores) +
+  scale_y_continuous(labels = scales::label_dollar(big.mark = ".", decimal.mark = ","),
+                     expand = expansion(mult = c(0, 0.12))) +
+  labs(x = "Presentación", y = "COP por 100 g", fill = NULL,
+       title = "Precio por 100 g: presentación de 400 g contra 850 g") +
+  tema
+```
+
+**Interpretación:**
+Si en un mismo comercio la barra de 850 g es más baja que la de
+  400 g, la presentación grande tiene menor precio por gramo.En esta corrida pasa en `r sum(tamanos$reduccion_pct > 0, na.rm = TRUE)` de las `r nrow(tamanos)`
+  combinaciones de producto y comercio. La reducción por gramo llega hasta
+  `r max(tamanos$reduccion_pct, na.rm = TRUE)` %.
+ **Limitación.** Solo compara polvos en gramos; los líquidos (mL) no se mezclan
+  aquí.
+
+## Oportunidades de ahorro
+
+```{r g3, fig.width = 9, fig.height = 5}
+ggplot(p6, aes(x = ahorro_pct,
+               y = reorder(paste(nombre_std, presentacion), ahorro_pct),
+               fill = ahorro_pct)) +
+  geom_col(width = 0.75) +
+  geom_text(aes(label = paste0(format(ahorro_pct, decimal.mark = ","), " % · $",
+                               miles(ahorro_cop))),
+            hjust = -0.08, size = 3.4) +
+  scale_fill_gradient(low = "#B3E5FC", high = "#0D47A1", guide = "none") +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.35))) +
+  labs(x = "Ahorro (%) al comprar en el comercio más barato frente al más caro",
+       y = NULL, title = "Ahorro potencial por presentación") +
+  tema
+```
+
+**Interpretación:**
+Las presentaciones están ordenadas de mayor a menor ahorro
+  porcentual, y el tono se aclara a medida que el ahorro disminuye.
+Arriba está donde comparar antes de comprar tiene más efecto:
+  **`r p6$nombre_std[1]` `r p6$presentacion[1]`**, con `r p6$ahorro_pct[1]` %. Abajo, los precios son prácticamente iguales entre comercios. Muestra el ahorro en pesos, que es lo que cambia el desembolso real. Un porcentaje alto en un producto barato puede representar menos dinero que un porcentaje bajo en un tarro de 850 g.
+
+## Canasta con las mismas presentaciones
+
+```{sql, connection = con, output.var = "canasta"}
+SELECT comercio, COUNT(precio) AS presentaciones, SUM(precio) AS total_canasta
+FROM comp
+GROUP BY comercio
+ORDER BY total_canasta
+```
+
+```{r canasta, fig.width = 8, fig.height = 3.6}
+tabla(canasta, col.names = c("Comercio", "Presentaciones", "Total de la canasta (COP)"))
+canasta %>%
+  mutate(comercio = factor(comercio, levels = rev(canasta$comercio))) %>%
+  ggplot(aes(x = total_canasta, y = comercio, fill = comercio)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = paste0("$", miles(total_canasta))), hjust = -0.1, size = 3.8) +
+  scale_fill_manual(values = colores, guide = "none") +
+  scale_x_continuous(labels = scales::label_dollar(big.mark = ".", decimal.mark = ","),
+                     expand = expansion(mult = c(0, 0.2))) +
+  labs(x = "Costo de una unidad de cada presentación (COP)", y = NULL,
+       title = "Canasta de las 10 presentaciones comparables") +
+  tema
+```
+
+**Interpretación:**
+ **¿Qué es la canasta?** Una unidad de cada una de las 10 presentaciones, con
+  precios de la misma corrida. Es válida porque los tres comercios tienen las 10
+  presentaciones con precio. Es la forma correcta de comparar comercios en conjunto. Un promedio de surtidos distintos no es comparable.
+La canasta cuesta menos en **`r canasta$comercio[1]`**
+  ($`r miles(canasta$total_canasta[1])`) y más en
+  `r canasta$comercio[nrow(canasta)]` ($`r miles(canasta$total_canasta[nrow(canasta)])`):
+  una diferencia de $`r miles(diff(range(canasta$total_canasta)))`.
+Comprar cada presentación donde es más barata costaría
+  $`r miles(sum(p4$precio_min))`, es decir, $`r miles(canasta$total_canasta[1] - sum(p4$precio_min))`
+  menos que la canasta completa en el comercio más barato.
+
+# Limitaciones y conclusiones
+
+## Limitaciones
+
+- **Momento y lugar.** Los precios corresponden a la fecha y hora de captura y, en
+  Cruz Verde, a la zona de inventario `COCV_zona64`. No deben leerse como permanentes.
+- **Precios condicionados.** No se comparan el precio Club de Cruz Verde (exige
+  afiliación) ni los descuentos por cantidad ("x 6", "lleve 2"). El precio comparado
+  es el que paga cualquier comprador por una unidad.
+- **Promociones.** Un precio promocional puede cambiar en la siguiente corrida. Con
+  dos corridas en fechas distintas se podría separar el precio habitual del
+  promocional.
+- **Envío.** No se incluye el costo de envío ni el pedido mínimo, que pueden cambiar
+  cuál es la opción más barata en una compra en línea.
+- **Delimitación de la categoría.** Se hizo por reglas sobre el nombre. Un producto
+  con nombre poco informativo puede quedar mal clasificado. La cifra de la oferta
+  por comercio es aproximada; los 30 anuncios comparables sí se verificaron uno a uno.
+- **No es una recomendación de sustitución.** Ensure, Glucerna, Diben y ProWhey
+  tienen formulaciones distintas, así que solo se compara cada presentación consigo
+  misma. Un menor precio no indica que un producto reemplace a otro: la elección de
+  una fórmula clínica depende de la indicación médica o nutricional.
+
+## Conclusiones para el consumidor
+
+```{r conclusion}
+p3 %>%
+  left_join(select(p4, id_producto, ahorro_cop, ahorro_pct), by = "id_producto") %>%
+  transmute(`Presentación` = paste(nombre_std, presentacion),
+            `Dónde comprar` = mas_barato,
+            `Precio mínimo (COP)` = minimo,
+            `Ahorro frente al más caro (COP)` = ahorro_cop,
+            `Ahorro (%)` = ahorro_pct) %>%
+  tabla()
+```
+
+1. **Dónde comprar.** La tabla anterior indica, para cada presentación, el comercio
+   con el menor precio en la corrida `r corrida_actual`.
+   **`r gana$comercio[1]`** es el más barato en más presentaciones
+   (`r gana$veces_mas_barato[1]` de `r nrow(p3)`), pero no en todas: conviene revisar
+   producto por producto.
+2. **Canasta completa.** Para comprar todo en un solo lugar, **`r canasta$comercio[1]`**
+   es la opción más económica ($`r miles(canasta$total_canasta[1])`). Repartir la
+   compra entre comercios ahorra $`r miles(canasta$total_canasta[1] - sum(p4$precio_min))`
+   más, aunque puede implicar varios envíos.
+3. **Presentación grande.** `r paste0(mejor5$nombre_std, ": la opción con menor precio por gramo es ", mejor5$presentacion, " en ", mejor5$comercio, collapse = ". ")`.
+   La presentación grande reduce el costo por gramo, pero exige un desembolso mayor
+   de una vez. Conviene si se consume con regularidad y antes de su vencimiento.
+4. **Ahorro unitario, desembolso y condiciones de compra.** Comprar donde está el
+   menor precio unitario conviene si el envío o el desplazamiento no anulan la
+   diferencia. En las presentaciones con diferencias pequeñas (las últimas filas de
+   la pregunta 6), la disponibilidad y la comodidad pueden pesar más que el precio.
+   Los precios en promoción y el precio Club de Cruz Verde pueden cambiar la
+   recomendación en otra fecha o para un comprador afiliado.
+
+```{r cierre, include = FALSE}
+dbDisconnect(con)
+```

@@ -1,0 +1,707 @@
+---
+title: 'Taller 1: comparador de precios de nutrición deportiva'
+subtitle: Éxito, Farmatodo y Locatel
+author: Lucio Alfonso Muñoz Adarme
+date: 10/10/2026
+lang: es
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    embed-resources: true
+jupyter: python3
+---
+
+
+## 1. Introducción
+
+En este notebook se construye un comparador de precios para la categoría de nutrición deportiva, con datos extraídos mediante web scraping de tres comercios colombianos con venta en línea: Éxito, Farmatodo y Locatel. Todos los precios corresponden a Bogotá.
+
+Se busca responder dos preguntas: en qué comercio sale más barato un mismo producto y qué presentación tiene el menor precio por gramo, mililitro o unidad. La comparación se hace con 11 presentaciones que están en los tres comercios: proteínas Going de vainilla y chocolate (600 g), bebidas hidratantes Going de uva y coco (300 g), Benet Whey (595 g), 100% Whey de 225 g y 900 g, Mega Soy (750 g), Creatine Power (908 g), Crea Stack en sobres (500 g) y Radical Power (360 g).
+
+La categoría elegida fue "Nutrición deportiva" e incluye proteínas deportivas, creatina, aminoácidos, preentrenos, geles, barras y bebidas formuladas específicamente para deporte. Dada esta delimitación, se dejaron por fuera productos como vitaminas, multivitamínicos, minerales, colágeno, omega 3, sueros de rehidratación oral de uso médico (Electrolit, Hidraplus, Pedialyte), alimentos comunes que solo contienen proteína (brownies, cereales, galletas, ponqués) y accesorios como shakers y termos.
+
+Todo el código de extracción, limpieza y carga está en `scraper.py`. Este documento importa ese módulo y llama sus funciones. La variable `ONLINE` de la siguiente celda decide si se hace una extracción nueva (`True`) o si se reprocesan las copias crudas guardadas en `raw/` sin conectarse a internet (`False`, el valor por defecto).
+
+```{python}
+ONLINE = False   # True: extracción nueva de los tres comercios; False: reprocesa raw/ sin internet
+
+import sqlite3
+import textwrap
+from pathlib import Path
+
+import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
+
+import scraper
+
+BASE = scraper.BASE
+ORDEN = ["Exito", "Farmatodo", "Locatel"]
+ETIQUETA = {"Exito": "Éxito", "Farmatodo": "Farmatodo", "Locatel": "Locatel"}
+COLORES = {"Exito": "#E0A100", "Farmatodo": "#1F5AA6", "Locatel": "#1E9E4A"}
+
+
+def numero(x, decimales=0):
+    """Separador de miles con punto y decimales con coma: 259.600 o 271,01."""
+    return f"{x:,.{decimales}f}".replace(",", "_").replace(".", ",").replace("_", ".")
+
+
+pd.set_option("display.float_format", lambda x: numero(x, 0 if x == int(x) else 2))
+pd.set_option("display.max_columns", 30)
+pd.set_option("display.max_colwidth", 70)
+
+
+def pesos(x, decimales=0):
+    return "" if pd.isna(x) else "$" + numero(x, decimales)
+
+
+def consulta(sql, **params):
+    con = sqlite3.connect(BASE)
+    tabla = pd.read_sql(sql, con, params=params)
+    con.close()
+    return tabla
+```
+
+## 2. Fuentes y scraping
+
+### 2.1 Comercios y secciones
+
+| Comercio | Categoría | Servicio JSON |
+|---|---|---|
+| Éxito | [Cuidado personal > Salud y medicamentos > Vitaminas, proteínas y suplementos](https://tienda.exito.com/cuidado-personal/salud-y-medicamentos/vitaminas-proteinas-y-suplementos) | `GET https://www.exito.com/api/catalog_system/pub/products/search` (VTEX) |
+| Farmatodo | [Bienestar y nutrición deportiva > Suplementos deportivos](https://www.farmatodo.com.co/categorias/bienestar-y-nutricion-deportiva/suplementos-deportivos) | `POST https://api-search.farmatodo.com/1/indexes/*/queries` (Algolia a través de un proxy del sitio) |
+| Locatel | [Alimentos nutricionales > Suplementos](https://www.locatelcolombia.com/alimentos-nutricionales/suplementos), [Bebidas > Rehidratantes](https://www.locatelcolombia.com/alimentos-nutricionales/bebidas/rehidratantes) y [Bebidas > Energizantes](https://www.locatelcolombia.com/alimentos-nutricionales/bebidas/energizantes) | `GET https://www.locatelcolombia.com/api/catalog_system/pub/products/search` (VTEX) |
+
+Inicialmente el tercer comercio era Cruz Verde. En la ejecución completa del 10 de octubre su categoría Bienestar Deportivo tenía 26 productos, y aun completándola con búsquedas solo 47 presentaciones cumplían la delimitación. Con Éxito y Farmatodo coincidieron solo 2 presentaciones, y solo 1 tenía precio en los tres. Debido a la falta de productos comunes, se reemplazó Cruz Verde por Locatel, una cadena independiente que vende casi todas las marcas deportivas que también están en Éxito y Farmatodo (Going, Benet, Nutramerican, Megaplex, Healthy Sports). Las ejecuciones de prueba con Cruz Verde no se conservaron en `raw/` ni en la base.
+
+Se trabajó en Python con `requests` para las peticiones HTTP, `gzip` y `json` para las copias en `raw/`, `pandas` para las tablas, `sqlite3` para la base y `matplotlib` para los gráficos.
+
+### 2.2 Identificación de los servicios
+
+En los tres sitios se abrió la categoría en el navegador y, en las herramientas de desarrollador (pestaña Network, filtro Fetch/XHR), se identificó la petición que traía los productos en JSON. Esa petición se replicó con `requests`. Éxito y Locatel funcionan sobre la plataforma VTEX y Farmatodo usa Algolia.
+
+### 2.3 Estrategia de extracción por comercio
+
+**Éxito.** Se descargan los productos de la sección Vitaminas, proteínas y suplementos que tienen precio, en páginas de 50. Se usa el filtro de precio del servicio (`P:[1 TO 99999999]`) porque la página de la categoría también muestra solo los productos disponibles; los agotados aparecen con precio 0 y no sirven para comparar. Los errores 500 del servicio se manejan con reintentos. Como Éxito es un marketplace, se toma el vendedor por defecto de cada producto.
+
+**Farmatodo.** Su servicio no permite pedir la categoría directamente y entrega como máximo 24 productos por búsqueda. Por eso la categoría se reconstruye con una lista fija de 49 búsquedas: tipos de producto (proteína, creatina, aminoácidos, geles, barras, bebidas), subcategorías del sitio y marcas o líneas (Nutramerican, Going, Benet, Mega Soy, Crea Stack, entre otras). En la limpieza solo se conservan los productos con `categorie = Suplementos deportivos`.
+
+**Locatel.** No tiene una categoría deportiva; los productos están en Suplementos (383), Rehidratantes (12) y Energizantes (24). Las tres secciones se descargan completas con el mismo código de Éxito. Para que la consulta corresponda a Bogotá, se usa la región del código 11001.
+
+En los tres casos, cada respuesta se guarda comprimida en `raw/<comercio>/<fecha>/<id_ejecucion>/` junto con un `manifiesto.json`, y la tabla siempre se construye a partir de esas copias, en línea o sin conexión. Entre peticiones hay una pausa de 1 segundo.
+
+### 2.4 Revisión de robots.txt
+
+- **Éxito:** su robots.txt pide no recorrer `/api/`, que es donde está el servicio usado, aunque permite las páginas de categoría (`?page=N`). Se usó el servicio porque entrega los mismos productos en un formato más completo (EAN, vendedor y precio antes), con carga baja: una petición a la vez y pausas.
+- **Farmatodo:** el servicio está en otro dominio (`api-search.farmatodo.com`), pero equivale a la búsqueda del sitio, que su robots.txt bloquea; por eso las búsquedas se limitaron a las necesarias.
+- **Locatel:** su robots.txt no bloquea `/api/`, así que el servicio está permitido.
+
+### 2.5 Ejecución de la recolección
+
+`ejecutar_recoleccion` corre los tres comercios con un mismo identificador de ejecución, registra cada uno en la tabla `ejecuciones` (con estado completa, parcial o fallida) e inserta las observaciones sin borrar las anteriores. Si un comercio falla, queda registrado como `fallida` y la función sigue con los demás. Con `ONLINE = False` recorre todas las carpetas de `raw/` que tienen `manifiesto.json` y las vuelve a cargar; si una ejecución ya estaba en la base, la restricción de unicidad evita duplicar sus observaciones.
+
+```{python}
+resumen = scraper.ejecutar_recoleccion(online=ONLINE, db=BASE)
+resumen
+```
+
+```{python}
+ejecuciones = consulta("SELECT * FROM ejecuciones ORDER BY inicio, comercio")
+ejecuciones
+```
+
+Todas las fechas están en ISO 8601 con la hora de Colombia. La base tiene dos ejecuciones del 11 de octubre de 2026, una a las 11:23 (20261011T112336) y otra a las 11:43 (20261011T114310), cada una con los tres comercios bajo el mismo identificador; por eso la tabla tiene 6 filas, una por comercio y ejecución. Las ejecuciones de prueba anteriores, incluidas las de Cruz Verde, se hicieron con versiones anteriores y no se conservaron. Como referencia se usa la ejecución más reciente que tiene datos de los tres comercios:
+
+```{python}
+EJ_REF = scraper.ejecucion_referencia(BASE)
+print("Ejecución de referencia:", EJ_REF)
+```
+
+### 2.6 Control de completitud
+
+Para verificar que la recolección está completa, se compara en la ejecución de referencia el número de productos que muestra la página, el total que reporta el servicio y lo que se obtuvo.
+
+```{python}
+MUESTRA_LA_PAGINA = {"Exito": 1251, "Farmatodo": 80, "Locatel": 383 + 12 + 24}   # conteos de las páginas
+
+completitud = consulta("""
+    SELECT e.comercio, e.total_sitio,
+           COUNT(DISTINCT a.id_producto_comercio) AS obtenidos, e.estado
+    FROM ejecuciones e
+    JOIN observaciones o ON o.id_ejecucion = e.id_ejecucion
+    JOIN anuncios a ON a.id_anuncio = o.id_anuncio AND a.comercio = e.comercio
+    WHERE e.id_ejecucion = :ej
+    GROUP BY e.comercio""", ej=EJ_REF)
+completitud.insert(1, "muestra_la_pagina", completitud["comercio"].map(MUESTRA_LA_PAGINA))
+completitud
+```
+
+- **Éxito:** el servicio reporta 1.257 productos con precio y se obtuvieron los 1.257 (la página muestra 1.251). Estado completa.
+- **Locatel:** se obtuvieron los 419 productos que reporta el servicio. Estado completa.
+- **Farmatodo:** la página muestra como máximo 80 productos (por eso `total_sitio` es 80), el servicio no publica el total real de la categoría y corta cada búsqueda en 24 resultados. Con 49 búsquedas se reunieron 466 productos, 223 de ellos en Suplementos deportivos; como 16 búsquedas llegaron al tope, puede faltar alguno. Estado parcial.
+
+## 3. Preparación de los datos
+
+Las funciones de los tres comercios devuelven las mismas columnas (comercio, identificador, SKU, EAN, nombre, marca, categoría, precio, precio antes, promoción, disponibilidad, vendedor, URL, texto original, descripción, fecha y hora de consulta e identificador de ejecución). La función `limpiar` agrega las columnas estandarizadas sin modificar el texto original. No se borró ningún registro: los que no cumplen la delimitación quedan con `en_categoria = 0` y el motivo.
+
+### 3.1 Precios, promociones y texto original
+
+Los precios se guardan como números en pesos. Si un comercio no publica precio (por ejemplo, un producto agotado de Éxito), el precio queda NULL, nunca en cero. En Éxito y Locatel el precio es `Price` y el precio antes `ListPrice`; en Farmatodo el precio es `fullPrice`, o `offerPrice` si existe y es menor. Hay promoción cuando el precio es menor que el precio antes.
+
+En Farmatodo el servicio solo trae el precio normal del catálogo. En la página se observaron descuentos que no aparecen en esos campos (por ejemplo, el gel Going de granada a \$6.503 frente a \$7.650), así que sus precios en la base pueden quedar un poco por encima de lo que paga un cliente.
+
+### 3.2 Contenido y unidad
+
+El contenido se extrae del nombre y se convierte a gramos, mililitros o unidades (1 kg = 1.000 g, 1 lb = 453,6 g, 1 L = 1.000 ml). En paquetes múltiples se usa el contenido total ("30 sticks x 6 g" son 180 g), y cuando el nombre trae dos medidas se toma la más exacta ("0.7 Lb 360 G" son 360 g). Algunos ejemplos:
+
+```{python}
+ejemplos = ["Tarro x 910 gr", "Tarro Por 910Gr", "x 957 gr", "Doypack 908Gr", "2 lb", "Frasco X 625Ml",
+            "Sobre x 30 gr", "Caja X 30 Sticks X 6Gr", "x 1 und", "Paquete x 65 g", "1,8 kg",
+            "0.7 Lb 360 G", "Tarro x 2.2 lb (1.000g)"]
+pd.DataFrame([(e, *scraper.extraer_contenido(scraper.normalizar(e))) for e in ejemplos],
+             columns=["texto en el nombre", "contenido", "unidad", "unidades_empaque"])
+```
+
+### 3.3 Marcas
+
+Cada comercio escribe las marcas distinto (por ejemplo, Farmatodo usa NUTRAMERICANPHARMA y Locatel registra la 100% Whey de Nutramerican con la marca "Locatel"). Por eso se usa un diccionario de patrones que busca la marca primero en el campo del sitio y después en el nombre:
+
+```{python}
+pd.DataFrame(scraper.MARCAS, columns=["patrón en la marca o el nombre", "marca estándar"])
+```
+
+### 3.4 Delimitación de la categoría y subcategorías
+
+La función `clasificar` decide con palabras clave del nombre si un producto pertenece a la categoría:
+
+1. En Farmatodo solo cuentan los productos de Suplementos deportivos.
+2. Se excluyen cuidado personal, sueros de uso médico, colágeno, quemadores y nutrición médica (Ensure, PediaSure, Prowhey).
+3. Se incluyen los productos con palabras propias de la categoría: creatina, whey, isolate, BCAA, glutamina, aminoácidos, preentreno, ganador de peso, gel energético, Gatorade, y líneas como BiPro o Crea Stack.
+4. Se excluyen alimentos comunes (galletas, cereales, pancakes), vitaminas y minerales y otros suplementos.
+5. Se incluyen los que mencionan proteína, barra, gel o bebida hidratante, y el resto se excluye.
+
+La subcategoría (proteína, creatina, aminoácidos, preentreno, ganador de peso, gel, barra o bebida deportiva) sale de las mismas palabras.
+
+```{python}
+clasificacion = consulta("""
+    SELECT comercio, COALESCE(subcategoria_std, 'excluido: ' || motivo_exclusion) AS clasificacion,
+           COUNT(*) AS anuncios
+    FROM anuncios
+    WHERE id_anuncio IN (SELECT id_anuncio FROM observaciones WHERE id_ejecucion = :ej)
+    GROUP BY comercio, clasificacion""", ej=EJ_REF)
+clasificacion.pivot_table(index="clasificacion", columns="comercio", values="anuncios",
+                          fill_value=0, aggfunc="sum")[ORDEN]
+```
+
+En la ejecución de referencia quedaron dentro de la delimitación 144 presentaciones de Éxito, 206 de Farmatodo y 139 de Locatel. En Éxito lo excluido son sobre todo productos sin ninguna palabra de la categoría (442), vitaminas y minerales (215) y cuidado personal (195), porque la sección mezcla mucho más que nutrición deportiva. La subcategoría más grande es proteína (190 presentaciones entre los tres comercios).
+
+Productos que el propio sitio pone en su categoría deportiva pero que las reglas excluyeron:
+
+```{python}
+consulta("""
+    SELECT comercio, nombre, motivo_exclusion
+    FROM anuncios
+    WHERE en_categoria = 0 AND (categoria_sitio LIKE 'Suplementos deportivos%' OR categoria_sitio LIKE '%/ejercicios/')
+      AND id_anuncio IN (SELECT id_anuncio FROM observaciones WHERE id_ejecucion = :ej)
+    ORDER BY comercio, motivo_exclusion, nombre""", ej=EJ_REF)
+```
+
+Son 34 productos (17 de Farmatodo y 17 de Locatel), en su mayoría bien excluidos: galletas, cereales y chips con proteína, combos con colágeno y quemadores como Burner Stack. Algunos sí podrían ser de la categoría pero tienen nombres que las reglas no reconocen, como los ganadores Titan Army y Barbarus o las gomitas deportivas Titanium; ninguno está en los tres comercios, así que no afectan la comparación.
+
+### 3.5 Registros descartados y faltantes
+
+```{python}
+consulta("""
+    SELECT a.comercio,
+           COUNT(*) AS observaciones,
+           SUM(a.en_categoria = 0) AS fuera_de_la_categoria,
+           SUM(a.en_categoria = 1 AND o.precio IS NULL) AS en_categoria_sin_precio,
+           SUM(a.en_categoria = 1 AND a.contenido IS NULL) AS en_categoria_sin_contenido,
+           SUM(a.en_categoria = 1 AND a.marca_std IS NULL) AS en_categoria_sin_marca
+    FROM observaciones o JOIN anuncios a ON a.id_anuncio = o.id_anuncio
+    WHERE o.id_ejecucion = :ej
+    GROUP BY a.comercio""", ej=EJ_REF)
+```
+
+De las 2.146 observaciones de la ejecución de referencia, 1.657 quedaron fuera de la categoría. Dentro de ella, 11 no tienen precio (en Éxito), 46 no tienen contenido identificable y 9 no tienen marca; siguen en la base, pero no entran a las comparaciones que los necesitan.
+
+### 3.6 Correspondencia entre comercios
+
+La función `proponer_correspondencia` agrupa los anuncios que son la misma presentación en los tres comercios:
+
+- Se emparejan directamente por EAN (código de barras), que los tres comercios publican: si el mismo EAN aparece en los tres, es la misma presentación.
+- Si hay varios anuncios con el mismo EAN, se toma el que tiene precio.
+
+Luego se revisaron los grupos a mano. Las listas `QUITAR` y `AGREGAR` permiten quitar un grupo mal formado o agregar uno que no tenga el mismo EAN en los tres comercios.
+
+```{python}
+QUITAR = ["going_gel_energizante_banano_y_fresa_33g",   # Éxito lo publica como sabor guayaba
+          "healthy_sports_iso_whey_510g"]              # Locatel lo publica como 454 g
+AGREGAR = []   # tuplas (sku Éxito, sku Farmatodo, sku Locatel) que las reglas no encontraron
+
+correspondencia = scraper.proponer_correspondencia(EJ_REF, BASE, quitar=QUITAR, agregar=AGREGAR)
+print(correspondencia["id_producto_comun"].nunique(), "presentaciones en los tres comercios")
+correspondencia.pivot(index="id_producto_comun", columns="comercio", values="nombre")[ORDEN]
+```
+
+El EAN encontró 13 grupos. Al revisarlos, 11 coinciden en marca, sabor, contenido y unidades, y se quitaron 2 donde el nombre no coincide pese a tener el mismo EAN: el gel Going, que Éxito publica como sabor guayaba y los otros dos como fresa y banano, y el Iso Whey de Healthy Sports, que Locatel publica como 454 g y los otros dos como 510 g. Los 11 que quedan tienen precio en los tres comercios.
+
+La correspondencia queda guardada en la base: la tabla `productos` tiene una fila por presentación común, y en `anuncios` cada anuncio emparejado tiene su `id_producto_comun` y `comparable = 1`.
+
+```{python}
+scraper.guardar_correspondencia(correspondencia, BASE)
+consulta("SELECT * FROM productos ORDER BY id_producto_comun")
+```
+
+## 4. Base de datos SQLite
+
+La base `comparador_precios.sqlite` tiene cinco tablas:
+
+| Tabla | Una fila por | Contenido principal |
+|---|---|---|
+| `comercios` | comercio | nombre y URL de la categoría |
+| `ejecuciones` | comercio en una ejecución | inicio, fin, registros, total del sitio, estado (completa, parcial o fallida) y carpeta de `raw/` |
+| `anuncios` | presentación publicada por un comercio | SKU, EAN, nombre, texto original, marca y subcategoría estandarizadas, sabor, contenido y unidad, si cumple la delimitación y por qué no, URL, identificador común y `comparable` |
+| `productos` | presentación común a los tres comercios | identificador común, nombre, marca, subcategoría, sabor, contenido y regla de correspondencia |
+| `observaciones` | precio de un anuncio en una ejecución | precio, precio antes, promoción, disponibilidad, vendedor y fecha y hora de consulta |
+
+Se separaron `anuncios` y `observaciones` para no repetir el texto del producto en cada ejecución: el anuncio se guarda una vez y cada ejecución le agrega una observación con su precio. `observaciones` tiene la restricción `UNIQUE (id_anuncio, fecha_consulta)`, que equivale a comercio + producto del comercio + fecha y hora de consulta, porque cada anuncio pertenece a un solo comercio. El precio tiene además un `CHECK (precio > 0)`, así que un precio en cero no puede entrar a la base.
+
+```{python}
+print("\n\n".join(consulta("SELECT sql FROM sqlite_master WHERE type = 'table'")["sql"]))
+```
+
+```{python}
+consulta("""
+    SELECT 'comercios' AS tabla, COUNT(*) AS filas FROM comercios
+    UNION ALL SELECT 'ejecuciones', COUNT(*) FROM ejecuciones
+    UNION ALL SELECT 'anuncios', COUNT(*) FROM anuncios
+    UNION ALL SELECT 'productos', COUNT(*) FROM productos
+    UNION ALL SELECT 'observaciones', COUNT(*) FROM observaciones""")
+```
+
+```{python}
+# Validaciones: fecha y hora en todas las observaciones, formato ISO 8601 de Colombia, sin precios en cero
+consulta("""
+    SELECT COUNT(*) AS observaciones,
+           SUM(fecha_consulta IS NULL) AS sin_fecha,
+           SUM(fecha_consulta NOT GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]-05:00')
+               AS fecha_con_otro_formato,
+           SUM(precio = 0) AS precios_en_cero,
+           SUM(promocion = 1 AND (precio_antes IS NULL OR precio_antes <= precio)) AS promociones_inconsistentes,
+           COUNT(*) - COUNT(DISTINCT id_anuncio || '|' || fecha_consulta) AS repetidas
+    FROM observaciones""")
+```
+
+Las 4.292 observaciones tienen fecha y hora de consulta en el formato `AAAA-MM-DDTHH:MM:SS-05:00`, ninguna tiene precio en cero y no hay observaciones repetidas del mismo anuncio con la misma fecha y hora. Todas las columnas de validación dan 0, incluida la de promociones inconsistentes: ningún anuncio está marcado en promoción sin un precio antes mayor que el precio.
+
+## 5. Consultas SQL
+
+Las consultas que comparan precios usan solo la ejecución de referencia (parámetro `:ej`), para que todos los precios sean del mismo momento.
+
+### 5.1 ¿Cuántos comercios, productos y observaciones contiene la base? ¿Cuántos productos aporta cada comercio?
+
+```{python}
+sql_1a = """
+SELECT (SELECT COUNT(*) FROM comercios) AS comercios,
+       (SELECT COUNT(*) FROM anuncios WHERE en_categoria = 1) AS presentaciones_en_categoria,
+       (SELECT COUNT(*) FROM productos) AS productos_comunes,
+       (SELECT COUNT(*) FROM observaciones) AS observaciones,
+       (SELECT COUNT(*) FROM ejecuciones) AS ejecuciones
+"""
+consulta(sql_1a)
+```
+
+```{python}
+sql_1b = """
+SELECT a.comercio,
+       COUNT(DISTINCT a.id_anuncio) AS anuncios,
+       COUNT(DISTINCT CASE WHEN a.en_categoria = 1 THEN a.id_anuncio END) AS en_categoria,
+       COUNT(DISTINCT CASE WHEN a.comparable = 1 THEN a.id_anuncio END) AS comparables,
+       COUNT(o.id_observacion) AS observaciones
+FROM anuncios a
+LEFT JOIN observaciones o ON o.id_anuncio = a.id_anuncio
+GROUP BY a.comercio
+ORDER BY en_categoria DESC
+"""
+consulta(sql_1b)
+```
+
+La base tiene 3 comercios, 489 presentaciones que cumplen la delimitación, 11 productos comunes y 4.292 observaciones de dos ejecuciones (6 filas en la tabla de ejecuciones, una por comercio y ejecución). Éxito aporta 144 presentaciones de la categoría, Farmatodo 206 y Locatel 139. Éxito tiene más observaciones porque guarda toda la sección, incluidas las vitaminas y otros suplementos.
+
+### 5.2 En una misma ejecución, ¿hay al menos 24 observaciones comparables? ¿Hay registros repetidos del mismo producto y comercio?
+
+```{python}
+sql_2a = """
+WITH por_producto AS (
+    SELECT o.id_ejecucion, a.id_producto_comun,
+           COUNT(*) AS observaciones,
+           COUNT(DISTINCT CASE WHEN o.precio IS NOT NULL THEN a.comercio END) AS comercios_con_precio
+    FROM observaciones o
+    JOIN anuncios a ON a.id_anuncio = o.id_anuncio
+    WHERE a.comparable = 1
+    GROUP BY o.id_ejecucion, a.id_producto_comun
+)
+SELECT id_ejecucion,
+       COUNT(*) AS productos_comparables,
+       SUM(observaciones) AS observaciones_comparables,
+       SUM(comercios_con_precio = 3) AS productos_con_precio_en_los_tres,
+       3 * SUM(comercios_con_precio = 3) AS observaciones_con_precio_en_los_tres
+FROM por_producto
+GROUP BY id_ejecucion
+ORDER BY id_ejecucion
+"""
+consulta(sql_2a)
+```
+
+```{python}
+sql_2b = """
+SELECT 'Mismo anuncio más de una vez' AS revision, COUNT(*) AS casos FROM (
+    SELECT 1 FROM observaciones o JOIN anuncios a ON a.id_anuncio = o.id_anuncio
+    WHERE o.id_ejecucion = :ej
+    GROUP BY a.comercio, a.id_producto_comercio, a.sku HAVING COUNT(*) > 1)
+UNION ALL
+SELECT 'Mismo producto común más de una vez en un comercio', COUNT(*) FROM (
+    SELECT 1 FROM observaciones o JOIN anuncios a ON a.id_anuncio = o.id_anuncio
+    WHERE o.id_ejecucion = :ej AND a.comparable = 1
+    GROUP BY a.comercio, a.id_producto_comun HAVING COUNT(*) > 1)
+"""
+consulta(sql_2b, ej=EJ_REF)
+```
+
+En la ejecución de referencia (20261011T114310) hay 11 presentaciones con precio en los tres comercios, es decir 33 observaciones comparables, por encima del mínimo de 24 que pide el taller; la ejecución anterior tiene las mismas 11. No hay registros repetidos: cada anuncio tiene una sola observación en la ejecución y cada producto común tiene un solo anuncio por comercio.
+
+### 5.3 Para cada presentación comparable, ¿cuál es el precio mínimo, máximo y promedio, y qué comercio ofrece el menor precio?
+
+Las consultas 5.3, 5.4 y 5.6 parten de la misma base: los precios de la ejecución de referencia para las presentaciones que tienen precio en los tres comercios.
+
+```{python}
+PRECIOS_REF = """
+WITH precios AS (
+    SELECT a.id_producto_comun, p.marca_std || ' ' || p.nombre_comun AS producto, a.comercio, o.precio
+    FROM observaciones o
+    JOIN anuncios a ON a.id_anuncio = o.id_anuncio
+    JOIN productos p ON p.id_producto_comun = a.id_producto_comun
+    WHERE o.id_ejecucion = :ej AND a.comparable = 1 AND o.precio IS NOT NULL
+),
+completos AS (   -- solo presentaciones con precio en los tres comercios
+    SELECT * FROM precios
+    WHERE id_producto_comun IN (SELECT id_producto_comun FROM precios
+                                GROUP BY id_producto_comun HAVING COUNT(DISTINCT comercio) = 3)
+),
+resumen AS (
+    SELECT id_producto_comun, MIN(precio) AS pmin, MAX(precio) AS pmax, AVG(precio) AS promedio
+    FROM completos
+    GROUP BY id_producto_comun
+)
+"""
+
+sql_3 = PRECIOS_REF + """
+SELECT c.producto,
+       r.pmin AS precio_minimo, r.pmax AS precio_maximo, ROUND(r.promedio) AS precio_promedio,
+       GROUP_CONCAT(CASE WHEN c.precio = r.pmin THEN c.comercio END, ', ') AS comercio_mas_barato,
+       SUM(c.precio = r.pmin) AS comercios_con_el_minimo
+FROM completos c
+JOIN resumen r ON r.id_producto_comun = c.id_producto_comun
+GROUP BY c.id_producto_comun
+ORDER BY c.producto
+"""
+q3 = consulta(sql_3, ej=EJ_REF)
+q3
+```
+
+```{python}
+q3["comercio_mas_barato"].value_counts()
+```
+
+Éxito tiene el menor precio en 8 de las 11 presentaciones, Farmatodo en 2 y Locatel en 1 (la Benet Whey de 595 g). No hay empates en el precio mínimo: en todas las filas `comercios_con_el_minimo` vale 1. El producto con el precio promedio más alto es la proteína Going de vainilla de 600 g (\$183.867) y el más barato es la 100% Whey de cookies and cream de 225 g (\$23.175).
+
+### 5.4 ¿Cuánto se ahorra al elegir la oferta más económica de cada presentación?
+
+```{python}
+sql_4 = PRECIOS_REF + """
+SELECT c.producto,
+       r.pmin AS precio_minimo, r.pmax AS precio_maximo,
+       r.pmax - r.pmin AS ahorro_cop,
+       ROUND(100.0 * (r.pmax - r.pmin) / r.pmax, 1) AS ahorro_pct,
+       GROUP_CONCAT(CASE WHEN c.precio = r.pmin THEN c.comercio END, ', ') AS comprar_en,
+       GROUP_CONCAT(CASE WHEN c.precio = r.pmax THEN c.comercio END, ', ') AS mas_caro_en
+FROM completos c
+JOIN resumen r ON r.id_producto_comun = c.id_producto_comun
+GROUP BY c.id_producto_comun
+ORDER BY ahorro_cop DESC
+"""
+q4 = consulta(sql_4, ej=EJ_REF)
+q4
+```
+
+El ahorro se calcula como `Pmax - Pmin` en pesos y `100 x (Pmax - Pmin) / Pmax` en porcentaje. Como las presentaciones son las mismas en los tres comercios y vienen de la misma ejecución, también se puede comparar el costo de la canasta completa:
+
+```{python}
+sql_4b = PRECIOS_REF + """
+SELECT comercio, COUNT(*) AS presentaciones, SUM(precio) AS total_canasta
+FROM completos
+GROUP BY comercio
+UNION ALL
+SELECT 'Cada una donde es más barata', COUNT(*), SUM(pmin)
+FROM resumen
+ORDER BY total_canasta
+"""
+consulta(sql_4b, ej=EJ_REF)
+```
+
+Elegir la oferta más barata ahorra entre \$3.200 y \$51.850 por presentación, o entre 4,1 % y 27,6 %. El mayor ahorro en pesos está en la proteína Going de chocolate de 600 g (\$51.850 al comprarla en Éxito y no en Locatel). La canasta con las 11 presentaciones cuesta \$1.038.322 en Éxito, \$1.160.390 en Farmatodo y \$1.155.120 en Locatel; comprando cada producto donde es más barato cuesta \$1.009.292. Esta comparación de canasta es válida porque usa las mismas presentaciones, con precio en los tres comercios y en la misma ejecución.
+
+### 5.5 Entre tamaños del mismo producto, ¿qué presentación y comercio tienen el menor precio por gramo, mililitro o unidad?
+
+Se toman como mismo producto los anuncios de la categoría con igual marca, nombre estandarizado y sabor, y se buscan los que aparecen en al menos dos tamaños, en cualquier comercio. Dos contenidos que difieren en 2 % o menos (por ejemplo 2 lb = 907,2 g y 908 g) se cuentan como el mismo tamaño. El precio por unidad es el precio dividido por el contenido total, y cada ranking se hace dentro de una sola unidad (g, ml o und), sin mezclarlas.
+
+```{python}
+sql_5 = """
+WITH ref AS (
+    SELECT a.comercio, a.marca_std, COALESCE(a.nombre_std, '') AS nombre_std,
+           COALESCE(a.variante, 'sin sabor') AS variante,   
+           a.unidad, a.contenido, a.nombre, a.comparable, o.precio, o.precio / a.contenido AS precio_unidad
+    FROM observaciones o
+    JOIN anuncios a ON a.id_anuncio = o.id_anuncio
+    WHERE o.id_ejecucion = :ej AND a.en_categoria = 1 AND o.precio IS NOT NULL
+      AND a.contenido > 0 AND a.marca_std IS NOT NULL
+),
+familias AS (   -- mismo producto en al menos dos tamaños (que difieran más de 2 %)
+    SELECT marca_std, nombre_std, variante, unidad
+    FROM ref
+    GROUP BY marca_std, nombre_std, variante, unidad
+    HAVING MAX(contenido) > 1.02 * MIN(contenido)
+)
+SELECT TRIM(r.marca_std || ' ' || r.nombre_std) || ' (' || r.variante || ')' AS producto,
+       r.unidad, r.contenido, r.comercio, r.precio, ROUND(r.precio_unidad, 2) AS precio_por_unidad, r.comparable,
+       RANK() OVER (PARTITION BY r.marca_std, r.nombre_std, r.variante, r.unidad ORDER BY r.precio_unidad) AS puesto_por_unidad,
+       RANK() OVER (PARTITION BY r.marca_std, r.nombre_std, r.variante, r.unidad ORDER BY r.precio) AS puesto_por_desembolso
+FROM ref r
+JOIN familias f USING (marca_std, nombre_std, variante, unidad)
+ORDER BY producto, precio_por_unidad
+"""
+q5 = consulta(sql_5, ej=EJ_REF)
+q5
+```
+
+```{python}
+# Mejor opción por unidad de contenido en cada producto
+q5[q5["puesto_por_unidad"] == 1]
+```
+
+Se encontraron 32 productos con más de un tamaño. En la BiPro Classic de vainilla, la presentación de 1.362 g en Farmatodo tiene el menor precio por gramo (\$241,56 por g), mientras que el menor desembolso es la de 408 g en Farmatodo o en Locatel (\$119.000). En 26 de los 32 productos el tamaño más grande es el más barato por unidad. En los otros 6 no; por ejemplo, en la Crea Stack de frutos rojos de Éxito la caja de sobres de 500 g sale a \$212,33 por gramo porque está en promoción, y el tarro de 600 g a \$212,49. El menor precio por unidad y el menor desembolso total casi nunca coinciden: comprar el tarro grande ahorra por gramo pero exige pagar más de una vez.
+
+### 5.6 ¿Dónde están las mayores diferencias de precio entre comercios?
+
+Se compara cada par de comercios para cada presentación y se ordena por el ahorro porcentual de comprar en el más barato del par.
+
+```{python}
+sql_6 = PRECIOS_REF + """
+SELECT caro.producto,
+       caro.comercio AS comercio_caro, caro.precio AS precio_caro,
+       barato.comercio AS comercio_barato, barato.precio AS precio_barato,
+       caro.precio - barato.precio AS diferencia_cop,
+       ROUND(100.0 * (caro.precio - barato.precio) / caro.precio, 1) AS ahorro_pct
+FROM completos caro
+JOIN completos barato
+  ON barato.id_producto_comun = caro.id_producto_comun AND barato.precio < caro.precio
+ORDER BY ahorro_pct DESC
+LIMIT 10
+"""
+consulta(sql_6, ej=EJ_REF)
+```
+
+La mayor diferencia es en la proteína Going de chocolate de 600 g: cuesta \$187.650 en Locatel y \$135.800 en Éxito, un ahorro de 27,6 %. En 8 de los 10 pares de la tabla el comercio barato es Éxito, y esas diferencias vienen de promociones de vendedores del marketplace. Los productos de Nutramerican los vende en Éxito la tienda de la marca (`nutramerican pharma`) con 15 % menos que su precio antes, y la proteína Going de chocolate y la bebida Going de coco las vende `america store` con 30 % y 25 % de descuento. Los otros 2 pares son de la Benet Whey, más barata en Locatel por una promoción de 20 %.
+
+### 5.7 ¿Qué datos faltantes o inconsistentes afectan la comparación?
+
+```{python}
+sql_7 = """
+SELECT 'Sin precio (agotado o sin oferta)' AS problema, a.comercio, COUNT(*) AS registros
+FROM observaciones o JOIN anuncios a ON a.id_anuncio = o.id_anuncio
+WHERE o.id_ejecucion = :ej AND a.en_categoria = 1 AND o.precio IS NULL
+GROUP BY a.comercio
+UNION ALL
+SELECT 'Comparable sin precio en la ejecución', a.comercio, COUNT(*)
+FROM observaciones o JOIN anuncios a ON a.id_anuncio = o.id_anuncio
+WHERE o.id_ejecucion = :ej AND a.comparable = 1 AND o.precio IS NULL
+GROUP BY a.comercio
+UNION ALL
+SELECT 'Sin contenido identificable en el nombre', a.comercio, COUNT(*)
+FROM observaciones o JOIN anuncios a ON a.id_anuncio = o.id_anuncio
+WHERE o.id_ejecucion = :ej AND a.en_categoria = 1 AND a.contenido IS NULL
+GROUP BY a.comercio
+UNION ALL
+SELECT 'Sin marca identificable', a.comercio, COUNT(*)
+FROM observaciones o JOIN anuncios a ON a.id_anuncio = o.id_anuncio
+WHERE o.id_ejecucion = :ej AND a.en_categoria = 1 AND a.marca_std IS NULL
+GROUP BY a.comercio
+UNION ALL
+SELECT 'Sin EAN', a.comercio, COUNT(*)
+FROM observaciones o JOIN anuncios a ON a.id_anuncio = o.id_anuncio
+WHERE o.id_ejecucion = :ej AND a.en_categoria = 1 AND a.ean IS NULL
+GROUP BY a.comercio
+UNION ALL
+SELECT 'Vendido por un tercero del marketplace', a.comercio, COUNT(*)
+FROM observaciones o JOIN anuncios a ON a.id_anuncio = o.id_anuncio
+WHERE o.id_ejecucion = :ej AND a.en_categoria = 1 AND a.comercio = 'Exito' AND o.vendedor != 'exito'
+GROUP BY a.comercio
+UNION ALL
+SELECT 'Descuento mayor al 50 %', a.comercio, COUNT(*)
+FROM observaciones o JOIN anuncios a ON a.id_anuncio = o.id_anuncio
+WHERE o.id_ejecucion = :ej AND a.en_categoria = 1 AND o.promocion = 1 AND o.precio < 0.5 * o.precio_antes
+GROUP BY a.comercio
+"""
+q7 = consulta(sql_7, ej=EJ_REF)
+q7.pivot_table(index="problema", columns="comercio", values="registros", fill_value=0, aggfunc="sum")
+```
+
+Los faltantes son pocos en la ejecución de referencia: 11 presentaciones de Éxito no tienen precio, 46 presentaciones no tienen contenido identificable (14 de Éxito, 27 de Farmatodo y 5 de Locatel) y 9 no tienen marca, así que no entran a las comparaciones que necesitan esos datos. Ninguna de las 11 presentaciones comunes tiene faltantes. En Éxito, 114 presentaciones las vende un tercero del marketplace, y una tiene un descuento mayor al 50 % (la Gainz de 3,2 lb, a \$109.900 frente a \$219.990). Otro punto a tener en cuenta son las promociones: en Éxito 771 de los 1.194 productos con precio aparecen en promoción, casi 2 de cada 3, lo que puede indicar precios antes inflados.
+
+### 5.8 ¿Cuántos productos de la categoría se obtuvieron por comercio y ejecución? ¿Qué proporción tiene descripción, marca y contenido identificables?
+
+```{python}
+sql_8 = """
+WITH cat AS (
+    SELECT o.id_ejecucion, a.comercio, a.con_descripcion,
+           a.marca_std IS NOT NULL AS con_marca, a.contenido IS NOT NULL AS con_contenido
+    FROM observaciones o
+    JOIN anuncios a ON a.id_anuncio = o.id_anuncio
+    WHERE a.en_categoria = 1
+)
+SELECT e.comercio, e.id_ejecucion, e.estado, e.total_sitio, e.registros AS obtenidos,
+       COUNT(c.comercio) AS en_categoria,
+       ROUND(100.0 * AVG(c.con_descripcion), 1) AS pct_con_descripcion,
+       ROUND(100.0 * AVG(c.con_marca), 1) AS pct_con_marca,
+       ROUND(100.0 * AVG(c.con_contenido), 1) AS pct_con_contenido
+FROM ejecuciones e
+LEFT JOIN cat c ON c.id_ejecucion = e.id_ejecucion AND c.comercio = e.comercio
+GROUP BY e.comercio, e.id_ejecucion
+ORDER BY e.id_ejecucion, e.comercio
+"""
+consulta(sql_8)
+```
+
+En la ejecución de referencia Farmatodo tiene la oferta más grande de la categoría (206 presentaciones), seguido de Éxito (144) y Locatel (139). 85,4 % de las presentaciones de Éxito, 15,5 % de las de Farmatodo y 100 % de las de Locatel tienen descripción. La marca se identifica en 98,2 % de los casos y el contenido en 90,6 %. Entre las dos ejecuciones, separadas por 20 minutos, el tamaño de la oferta no cambió (144, 206 y 139 presentaciones en ambas). En Éxito, 2 presentaciones de la categoría cambiaron de precio y unas pocas aparecieron o desaparecieron por cambios en los vendedores del marketplace; en Farmatodo y Locatel ningún precio cambió. Los precios de las 11 presentaciones comparables fueron iguales en las dos ejecuciones.
+
+## 6. Visualizaciones
+
+Los tres gráficos salen de la base SQLite con las consultas anteriores. Cada comercio tiene siempre el mismo color: Éxito amarillo, Farmatodo azul y Locatel verde.
+
+### 6.1 Precio de las mismas presentaciones en cada comercio
+
+```{python}
+precios = consulta(PRECIOS_REF + "SELECT producto, comercio, precio FROM completos", ej=EJ_REF)
+tabla = precios.pivot(index="producto", columns="comercio", values="precio")[ORDEN]
+
+columnas = 3
+filas = -(-len(tabla) // columnas)
+fig, ejes = plt.subplots(filas, columnas, figsize=(12, 3 * filas), squeeze=False, layout="constrained")
+for ax, (producto, fila) in zip(ejes.flat, tabla.iterrows()):
+    barras = ax.bar([ETIQUETA[c] for c in ORDEN], fila.values, color=[COLORES[c] for c in ORDEN])
+    ax.bar_label(barras, labels=[pesos(v) for v in fila.values], fontsize=8)
+    ax.set_title(textwrap.fill(producto, 34), fontsize=9)
+    ax.set_ylim(0, fila.max() * 1.22)
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda x, _: pesos(x)))
+    ax.tick_params(labelsize=8)
+for ax in list(ejes.flat)[len(tabla):]:
+    ax.axis("off")
+fig.supylabel("Precio (COP)")
+fig.suptitle(f"Precio de la misma presentación en cada comercio, Bogotá (ejecución {EJ_REF})")
+plt.show()
+```
+
+En 8 de las 11 presentaciones el precio más bajo está en Éxito, en 2 en Farmatodo y en 1 en Locatel. Las diferencias son pequeñas en la proteína Going de vainilla (4,1 %) y la bebida Going de uva (4,4 %), y grandes en la proteína Going de chocolate (27,6 %) y la bebida Going de coco (19,1 %). Entre Farmatodo y Locatel los precios son muy parecidos en casi todo; la diferencia la marca Éxito.
+
+Limitaciones: cada panel tiene su propia escala, porque los precios van de \$20.825 a \$187.650, así que los paneles no se comparan entre sí por la altura de las barras. Los precios son de una sola ejecución y de la zona de Bogotá asignada por cada sitio; no incluyen domicilio ni precios de membresía.
+
+### 6.2 Precio por unidad de contenido según el tamaño
+
+```{python}
+def agrupar_tamanos(valores):
+    """Une los tamaños que difieren en 2 % o menos, como 907,2 g (2 lb) y 908 g."""
+    grupos, base = {}, None
+    for v in sorted(set(valores)):
+        if base is None or v > base * 1.02:
+            base = v
+        grupos[v] = base
+    return grupos
+
+
+# Primero los productos que tienen alguna presentación comparable y los que están en más comercios
+orden = (q5.groupby("producto").agg(comparable=("comparable", "max"), comercios=("comercio", "nunique"))
+           .sort_values(["comparable", "comercios"], ascending=False))
+familias = orden.index[:6]
+if len(familias) == 0:
+    print("No hay productos con más de un tamaño en la ejecución de referencia.")
+else:
+    fig, ejes = plt.subplots(len(familias), 1, figsize=(10, 3.2 * len(familias)), squeeze=False, layout="constrained")
+    for ax, familia in zip(ejes.flat, familias):
+        datos = q5[q5["producto"] == familia].copy()
+        unidad = datos["unidad"].iloc[0]
+        datos["tamano"] = datos["contenido"].map(agrupar_tamanos(datos["contenido"]))
+        tabla = datos.pivot_table(index="tamano", columns="comercio", values="precio_por_unidad", aggfunc="min")
+        tabla = tabla[[c for c in ORDEN if c in tabla.columns]]
+        tabla.index = [f"{numero(t, 0 if t >= 100 else 1)} {unidad}" for t in tabla.index]
+        tabla.rename(columns=ETIQUETA).plot.bar(ax=ax, color=[COLORES[c] for c in tabla.columns], rot=0, width=0.75)
+        ax.set_title(familia, fontsize=10)
+        ax.set_xlabel("Presentación")
+        ax.set_ylabel(f"COP por {unidad}")
+        ax.yaxis.set_major_formatter(FuncFormatter(lambda x, _: pesos(x, 1)))
+        ax.legend(title="Comercio", fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1))
+    fig.suptitle(f"Precio por unidad de contenido de los productos con varios tamaños (ejecución {EJ_REF})")
+    plt.show()
+```
+
+En la 100% Whey de cookies and cream, el tarro de 900 g cuesta \$89,25 por gramo en Éxito, frente a \$92,56 por gramo en la presentación de 225 g, una diferencia de menos de 4 %. En la proteína Going de vainilla, el tarro de 600 g sale a \$300,08 por gramo en Farmatodo y el sobre de 30 g a \$343,33. En cambio, en la Crea Stack la presentación más grande no sale más barata por gramo: la caja de sobres de 500 g cuesta \$212,33 por gramo en Éxito y el tarro de 600 g \$212,49, y en Farmatodo \$249,80 y \$249,98.
+
+Limitaciones: solo aparecen los productos que el mismo comercio o los otros venden en más de un tamaño con el mismo nombre, marca y sabor, así que algunos tamaños pueden faltar porque estaban agotados o porque el nombre no traía el contenido. Un tamaño que solo vende un comercio no dice nada sobre los otros. Además, el mismo producto puede quedar en dos grupos si los comercios lo nombran distinto: la 100% Whey de Locatel aparece aparte como "radical nutrition".
+
+### 6.3 Oportunidades de ahorro
+
+```{python}
+ahorro = q4.sort_values("ahorro_pct")
+colores = [COLORES.get(c, "#9A9A9A") for c in ahorro["comprar_en"]]   # gris si hay empate
+fig, ax = plt.subplots(figsize=(10, 0.55 * len(ahorro) + 1.8))
+barras = ax.barh([textwrap.fill(p, 45) for p in ahorro["producto"]], ahorro["ahorro_pct"], color=colores)
+ax.bar_label(barras, labels=[f"{numero(p, 1)} % ({pesos(c)})" for p, c in zip(ahorro["ahorro_pct"], ahorro["ahorro_cop"])],
+             fontsize=8, padding=3)
+ax.set_xlim(0, max(ahorro["ahorro_pct"].max(), 1) * 1.4)
+ax.xaxis.set_major_formatter(FuncFormatter(lambda x, _: numero(x, 1)))
+ax.set_xlabel("Ahorro frente al comercio más caro (%); entre paréntesis, el ahorro en COP")
+ax.set_title(f"Ahorro al comprar cada presentación en el comercio más barato (ejecución {EJ_REF})")
+ax.legend([plt.Rectangle((0, 0), 1, 1, color=COLORES[c]) for c in ORDEN], [ETIQUETA[c] for c in ORDEN],
+          title="Comercio más barato", loc="lower right", fontsize=8)
+fig.tight_layout()
+plt.show()
+```
+
+Las mayores oportunidades de ahorro están en la proteína Going de chocolate (27,6 %) y la bebida Going de coco (19,1 %), y en ambos casos conviene comprar en Éxito. En la proteína Going de vainilla (4,1 %) y la bebida Going de uva (4,4 %) la diferencia es menor al 5 % y casi da igual dónde comprar.
+
+Limitaciones: el ahorro compara el comercio más barato con el más caro de la misma ejecución; si el precio más bajo viene de una promoción, puede desaparecer en pocos días. No incluye el costo del domicilio, que puede cambiar la decisión en productos baratos como las barras o las bebidas.
+
+## 7. Limitaciones y conclusiones
+
+### 7.1 Limitaciones
+
+- **Éxito:** solo se descargan los productos con precio, así que los agotados no aparecen en la base. Además, varios precios bajos vienen de promociones de vendedores terceros, que pueden cambiar pronto.
+- **Farmatodo:** la categoría se reconstruyó con una lista fija de búsquedas, sin un total oficial para comparar, así que puede faltar algún producto; además, el servicio no trae los descuentos que muestra la página.
+- **Locatel:** no tiene categoría deportiva, así que la delimitación depende de las reglas aplicadas sobre secciones más amplias. Se eligió después de descartar Cruz Verde, que no alcanzó los ocho productos comunes.
+- **Precios:** corresponden a Bogotá y al momento de la captura; no incluyen domicilio ni precios de membresía.
+- **Limpieza:** las reglas de palabras clave pueden fallar con nombres poco comunes.
+- **robots.txt:** el servicio de Éxito está bajo `/api/` y las búsquedas de Farmatodo equivalen a su buscador; por eso se hizo una petición a la vez, con pausas, y solo se descargaron datos públicos de catálogo.
+
+### 7.2 Conclusiones para el consumidor
+
+Con los datos de la ejecución 20261011T114310 (11 de octubre de 2026):
+
+Para los productos de Nutramerican conviene Éxito, donde los vende la tienda de la marca con 15 % de descuento. La 100% Whey de 900 g cuesta \$80.325, frente a \$93.400 en Locatel y \$94.500 en Farmatodo; el Mega Soy de 750 g, \$59.492 frente a cerca de \$70.000 en los otros dos; la Crea Stack en sobres de 500 g, \$106.165 frente a \$124.900; y el Radical Power de 360 g, \$101.915 frente a \$119.900 y \$120.500. La proteína Going de chocolate de 600 g es la mayor diferencia: \$135.800 en Éxito y \$187.650 en Locatel.
+
+La Benet Whey de 595 g sale más barata en Locatel (\$122.320, en promoción) que en Éxito (\$145.700) y en Farmatodo (\$148.350). Farmatodo es el más barato en la proteína Going de vainilla (\$180.050) y la bebida Going de uva (\$69.100).
+
+Ningún comercio es el más barato en todo: Éxito gana en 8 de las 11 presentaciones, Farmatodo en 2 y Locatel en 1. En la canasta de las 11 presentaciones comunes, Éxito es el más económico (\$1.038.322), pero comprar cada producto donde es más barato ahorra \$29.030 adicionales frente a esa canasta. Locatel (\$1.155.120) y Farmatodo (\$1.160.390) quedan casi iguales.
+
+Sobre los tamaños, la presentación más grande no siempre sale más barata por gramo. En 26 de los 32 productos con varios tamaños el más grande sí es el más barato por unidad, como la BiPro Classic de vainilla en Farmatodo (\$241,56 por gramo en 1.362 g frente a \$291,67 en 408 g); en la Crea Stack pasa lo contrario, porque la caja de 500 g sale un poco más barata por gramo que el tarro de 600 g. Hay que distinguir el ahorro por unidad del desembolso total: el tarro de BiPro de 1.362 g cuesta \$329.000, casi el triple de los \$119.000 que cuesta el de 408 g, aunque el gramo salga 17 % más barato. Para alguien que consume poca proteína o quiere probar un sabor, la presentación pequeña puede convenir más aunque el gramo salga más caro.
+

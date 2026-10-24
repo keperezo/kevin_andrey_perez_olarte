@@ -1,0 +1,212 @@
+{
+ "comercio": "cafam",
+ "secciones": [
+  {
+   "fq": "/salud-y-medicamentos/bienestar-natural",
+   "rango_precio": null,
+   "nombre": "Bienestar natural",
+   "total_reportado": 108,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/cuidado-de-los-ojos",
+   "rango_precio": null,
+   "nombre": "Cuidado de los ojos",
+   "total_reportado": 88,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/cuidado-respiratorio",
+   "rango_precio": null,
+   "nombre": "Cuidado respiratorio",
+   "total_reportado": 236,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/dermatologicos",
+   "rango_precio": null,
+   "nombre": "Dermatológicos",
+   "total_reportado": 42,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/dolor-y-malestar",
+   "rango_precio": null,
+   "nombre": "Dolor y malestar",
+   "total_reportado": 143,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/equipos-medicos",
+   "rango_precio": null,
+   "nombre": "Equipos médicos",
+   "total_reportado": 64,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/estomago-y-digestion",
+   "rango_precio": null,
+   "nombre": "Estómago y digestión",
+   "total_reportado": 152,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/medicamentos-rx",
+   "rango_precio": "0 TO 23605",
+   "nombre": "Medicamentos RX [0 TO 23605]",
+   "total_reportado": 313,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/medicamentos-rx",
+   "rango_precio": "23605 TO 47210",
+   "nombre": "Medicamentos RX [23605 TO 47210]",
+   "total_reportado": 343,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/medicamentos-rx",
+   "rango_precio": "47210 TO 75600",
+   "nombre": "Medicamentos RX [47210 TO 75600]",
+   "total_reportado": 349,
+   "vueltas": 2,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/medicamentos-rx",
+   "rango_precio": "75600 TO 103990",
+   "nombre": "Medicamentos RX [75600 TO 103990]",
+   "total_reportado": 307,
+   "vueltas": 2,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/medicamentos-rx",
+   "rango_precio": "103990 TO 255036",
+   "nombre": "Medicamentos RX [103990 TO 255036]",
+   "total_reportado": 548,
+   "vueltas": 2,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/medicamentos-rx",
+   "rango_precio": "255036 TO 406083",
+   "nombre": "Medicamentos RX [255036 TO 406083]",
+   "total_reportado": 85,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/medicamentos-rx",
+   "rango_precio": "406083 TO 708177",
+   "nombre": "Medicamentos RX [406083 TO 708177]",
+   "total_reportado": 17,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/medicamentos-rx",
+   "rango_precio": "708177 TO 1312365",
+   "nombre": "Medicamentos RX [708177 TO 1312365]",
+   "total_reportado": 4,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/medicamentos-rx",
+   "rango_precio": "1312365 TO 2520741",
+   "nombre": "Medicamentos RX [1312365 TO 2520741]",
+   "total_reportado": 1,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/medicamentos-rx",
+   "rango_precio": "4937492 TO 9770995",
+   "nombre": "Medicamentos RX [4937492 TO 9770995]",
+   "total_reportado": 1,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/movilidad-y-apoyo-fisico",
+   "rango_precio": null,
+   "nombre": "Movilidad y apoyo físico",
+   "total_reportado": 103,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/preparados-tradicionales",
+   "rango_precio": null,
+   "nombre": "Preparados tradicionales",
+   "total_reportado": 35,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/primeros-auxilios",
+   "rango_precio": null,
+   "nombre": "Primeros auxilios",
+   "total_reportado": 209,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/productos-hogar",
+   "rango_precio": null,
+   "nombre": "Productos hogar",
+   "total_reportado": 6,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  }
+ ],
+ "paginas": 376,
+ "errores": [],
+ "total_sitio": 3153,
+ "nota": "páginas HTML de categoría (?page=N); en raw/ se guarda el bloque __STATE__ con los productos de cada página",
+ "productos_unicos": 3150,
+ "productos_por_seccion": {
+  "Bienestar natural": 108,
+  "Cuidado de los ojos": 88,
+  "Cuidado respiratorio": 236,
+  "Dermatológicos": 42,
+  "Dolor y malestar": 143,
+  "Equipos médicos": 64,
+  "Estómago y digestión": 152,
+  "Medicamentos RX [0 TO 23605]": 313,
+  "Medicamentos RX [23605 TO 47210]": 343,
+  "Medicamentos RX [47210 TO 75600]": 348,
+  "Medicamentos RX [75600 TO 103990]": 306,
+  "Medicamentos RX [103990 TO 255036]": 547,
+  "Medicamentos RX [255036 TO 406083]": 85,
+  "Medicamentos RX [406083 TO 708177]": 17,
+  "Medicamentos RX [708177 TO 1312365]": 4,
+  "Medicamentos RX [1312365 TO 2520741]": 1,
+  "Medicamentos RX [4937492 TO 9770995]": 1,
+  "Movilidad y apoyo físico": 103,
+  "Preparados tradicionales": 35,
+  "Primeros auxilios": 209,
+  "Productos hogar": 6
+ },
+ "no_mostrados_por_seccion": {
+  "Medicamentos RX [47210 TO 75600]": 1,
+  "Medicamentos RX [75600 TO 103990]": 1,
+  "Medicamentos RX [103990 TO 255036]": 1
+ },
+ "skus": 3151,
+ "skus_repetidos_descartados": 1202,
+ "id_ejecucion": "E20261009T235057",
+ "inicio": "2026-10-10T00:00:12-05:00",
+ "fin": "2026-10-10T00:19:31-05:00",
+ "estado": "completa"
+}

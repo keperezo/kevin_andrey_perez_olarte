@@ -1,0 +1,8 @@
+{
+  "url": "https://www.drogueriascafam.com.co/api/catalog_system/pub/products/search?fq=C%3A%2F2%2F53%2F59%2F&_from=50&_to=99&O=OrderByNameASC",
+  "fecha_hora": "2026-10-10T16:37:31-05:00",
+  "status": 206,
+  "resources": "50-99/118",
+  "content_type": "application/json; charset=utf-8",
+  "sha256": "dca3df33730229b92f6104f92c5c2f46338aa881606b27b8e547a7518c24df0c"
+}

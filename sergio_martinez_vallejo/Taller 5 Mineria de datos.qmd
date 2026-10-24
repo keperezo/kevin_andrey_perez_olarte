@@ -1,0 +1,136 @@
+---
+title: "Taller 5 Mineria de datos"
+format: pdf
+author: Sergio Martinez Vallejo
+---
+
+Ejercicio 1: clasificación de tipos de datos
+
+Para cada fuente de datos, indique: (a) si es estructurada, semi-estructurada o no estructurada; (b) la razón; (c) el paso de preprocesamiento mínimo para convertirla en un tibble analizable.
+
+1.) Microdatos GEIH del DANE (archivo .csv de 300.000 filas).
+
+La GEIH es un archivo csv, por su naturaleza es una base de datos estructurada.
+
+2.) Respuesta JSON de la API pública datos.gov.co con indicadores de calidad del aire.
+
+Semi-estruturada, el tipo de datos JSON no son estructurados del todo, tienen esp
+
+3.) Grabaciones de audio de audiencias judiciales de la Rama Judicial.
+
+No estructurada, los audios son tipos de datos que no tienen una estructurada
+
+4.) Factura electrónica emitida por la DIAN (formato XML) Tabla HTML de Wikipedia scrapeada con rvest en las clases 2–3.
+
+Semi-estructurada, bases de datos HTML suelen ser estructurados y no estructurados.
+
+#### 2.) JSON anidado a DataFrame
+
+Descargue el siguiente JSON público con datos de usuarios (incluye campos anidados address y company):
+
+```{r}
+library(jsonlite); library(dplyr); library(tibble)
+url  <- "https://jsonplaceholder.typicode.com/users"
+raw  <- fromJSON(url)
+
+```
+
+### 2-1.) Explore la estructura con str(raw). ¿Qué columnas son listas anidadas?
+
+```{r}
+str(raw)
+```
+
+Las variables que estan anidadas son address y company. Además, dentro de la lista address existe una variable llamada geo, la cual esta doblemente anidada.
+
+### 2-2.) Aplane el objeto a un tibble con una fila por usuario, extrayendo al menos: name, email, address.city, address.geo.lat, address.geo.lng y company.name.
+
+```{r}
+#| warning: false
+library(tidyverse)
+
+usuarios <- raw %>%
+  unnest(address) %>%
+  unnest(geo) %>%
+  unnest(company, names_sep = "_") %>%
+  select(
+    name,
+    email,
+    city,
+    lat,
+    lng,
+    company_name
+  ) %>%
+  rename(
+    address.city = city,
+    address.geo.lat = lat,
+    address.geo.lng = lng,
+    company.name = company_name
+  )
+
+usuarios
+```
+
+### 2-3.) ¿Qué tipo de dato es esta fuente? ¿Por qué fromJSON no produce directamente un tibble plano?
+
+El tipo de datos de esta fuente es semi-estructurada (debido a son JSON), este ordena la información mediante claves y valores y además permite tener datos anidados. fromJSON() no produce directamente un tibble plano ya que existen variables que son anidada.
+
+##### Ejercicio 3: matriz de diseño
+
+Con titanic.csv y las variables age, fare, sibsp, parch (elimine NA):
+
+### 3-1.) Construya X centrada y escalada con scale(). Reporte sus dimensiones y la memoria que ocupa.
+
+```{r}
+
+#datos titatic.csv
+titanic <- read.csv(
+  "https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv"
+)
+
+# Seleccionar variables y eliminar NA
+data <- titanic[, c("Age", "Fare", "SibSp", "Parch")]
+data <- na.omit(data)
+
+# Construir x centrada con scale
+x <- scale(data)
+
+# Dimension de x
+dim(x)
+
+# Memoria de x
+object.size(x)
+
+```
+
+### 3-2.) Calcule XTX. ¿Qué representa la diagonal cuando X está escalada?
+
+```{r}
+# Calcular x'x
+xtx <- t(x) %*% x
+xtx
+
+# Diagonal de X'X
+diag(xtx)
+```
+
+### 3-3.) Construya la versión dispersa con Matrix(X, sparse = TRUE). Compare el tamaño en memoria con object.size(). ¿Tiene sentido usar formato disperso aquí?
+
+```{r}
+# Crear versión dispersa
+x_dispersa <- Matrix(x, sparse = TRUE)
+
+# Comparar memoria
+object.size(x)
+object.size(x_dispersa)
+```
+
+¿Tiene sentido usar formato disperso aquí?
+
+```{r}
+# Proporción de ceros
+mean(x == 0)
+
+```
+
+Para este caso no tiene sentido usar un formato disperso, cuando hacemos un conteo de 0 y realizamos la media de estos, damos cuenta de que la media es 0. Es decir, que no hay espacios, por lo que usar una matriz dispersa no funciona.

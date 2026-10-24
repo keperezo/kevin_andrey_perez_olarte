@@ -1,0 +1,56 @@
+{
+  "ejecucion": "20261010T112641_53bf109b",
+  "comercio": "larebaja",
+  "inicio": "2026-10-10T11:26:57-05:00",
+  "estado": "parcial",
+  "categorias": [
+    {
+      "categoria": "5/31",
+      "esperados": 194,
+      "obtenidos": 192,
+      "estado": "parcial",
+      "paginas": [
+        "5-31_0000.json.gz",
+        "5-31_0050.json.gz",
+        "5-31_0100.json.gz",
+        "5-31_0150.json.gz"
+      ],
+      "error": "No se pudo verificar igualdad con el total publicado"
+    },
+    {
+      "categoria": "5/28/168",
+      "esperados": 48,
+      "obtenidos": 48,
+      "estado": "completa",
+      "paginas": [
+        "5-28-168_0000.json.gz"
+      ],
+      "error": null
+    },
+    {
+      "categoria": "5/28/580",
+      "esperados": 16,
+      "obtenidos": 16,
+      "estado": "completa",
+      "paginas": [
+        "5-28-580_0000.json.gz"
+      ],
+      "error": null
+    },
+    {
+      "categoria": "5/28/166",
+      "esperados": 39,
+      "obtenidos": 39,
+      "estado": "completa",
+      "paginas": [
+        "5-28-166_0000.json.gz"
+      ],
+      "error": null
+    }
+  ],
+  "auxiliares": [
+    "categorias.json.gz",
+    "robots.txt.gz"
+  ],
+  "fin": "2026-10-10T11:27:08-05:00"
+}

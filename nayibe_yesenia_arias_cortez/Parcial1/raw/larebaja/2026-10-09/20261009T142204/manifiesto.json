@@ -1,0 +1,121 @@
+{
+ "comercio": "larebaja",
+ "id_ejecucion": "20261009T142204",
+ "inicio": "2026-10-09T14:22:04-05:00",
+ "fin": "2026-10-09T14:22:26-05:00",
+ "user_agent": "TallerMineriaDatos-UNAL/1.0 (curso Mineria de Datos, Universidad Nacional de Colombia; uso academico; +https://github.com/Yesenia-AriasC/dm_2016325_2026_2)",
+ "estado": "completa",
+ "error": null,
+ "ramas": {
+  "/5/29/": {
+   "total_sitio": 375,
+   "productos_obtenidos": 375,
+   "peticiones": 8,
+   "nota": null
+  },
+  "/8/585/": {
+   "total_sitio": 8,
+   "productos_obtenidos": 8,
+   "peticiones": 1,
+   "nota": null
+  },
+  "/1316/": {
+   "total_sitio": 3,
+   "productos_obtenidos": 3,
+   "peticiones": 1,
+   "nota": null
+  }
+ },
+ "archivos": [
+  {
+   "archivo": "C5_29__from00000.json.gz",
+   "rama": "/5/29/",
+   "url": "https://www.larebajavirtual.com/api/catalog_system/pub/products/search?fq=C%3A%2F5%2F29%2F&_from=0&_to=49",
+   "status": 206,
+   "fecha_hora_consulta": "2026-10-09T14:22:07-05:00",
+   "resources": "0-49/375",
+   "productos": 50
+  },
+  {
+   "archivo": "C5_29__from00050.json.gz",
+   "rama": "/5/29/",
+   "url": "https://www.larebajavirtual.com/api/catalog_system/pub/products/search?fq=C%3A%2F5%2F29%2F&_from=50&_to=99",
+   "status": 206,
+   "fecha_hora_consulta": "2026-10-09T14:22:09-05:00",
+   "resources": "50-99/375",
+   "productos": 50
+  },
+  {
+   "archivo": "C5_29__from00100.json.gz",
+   "rama": "/5/29/",
+   "url": "https://www.larebajavirtual.com/api/catalog_system/pub/products/search?fq=C%3A%2F5%2F29%2F&_from=100&_to=149",
+   "status": 206,
+   "fecha_hora_consulta": "2026-10-09T14:22:11-05:00",
+   "resources": "100-149/375",
+   "productos": 50
+  },
+  {
+   "archivo": "C5_29__from00150.json.gz",
+   "rama": "/5/29/",
+   "url": "https://www.larebajavirtual.com/api/catalog_system/pub/products/search?fq=C%3A%2F5%2F29%2F&_from=150&_to=199",
+   "status": 206,
+   "fecha_hora_consulta": "2026-10-09T14:22:12-05:00",
+   "resources": "150-199/375",
+   "productos": 50
+  },
+  {
+   "archivo": "C5_29__from00200.json.gz",
+   "rama": "/5/29/",
+   "url": "https://www.larebajavirtual.com/api/catalog_system/pub/products/search?fq=C%3A%2F5%2F29%2F&_from=200&_to=249",
+   "status": 206,
+   "fecha_hora_consulta": "2026-10-09T14:22:15-05:00",
+   "resources": "200-249/375",
+   "productos": 50
+  },
+  {
+   "archivo": "C5_29__from00250.json.gz",
+   "rama": "/5/29/",
+   "url": "https://www.larebajavirtual.com/api/catalog_system/pub/products/search?fq=C%3A%2F5%2F29%2F&_from=250&_to=299",
+   "status": 206,
+   "fecha_hora_consulta": "2026-10-09T14:22:18-05:00",
+   "resources": "250-299/375",
+   "productos": 50
+  },
+  {
+   "archivo": "C5_29__from00300.json.gz",
+   "rama": "/5/29/",
+   "url": "https://www.larebajavirtual.com/api/catalog_system/pub/products/search?fq=C%3A%2F5%2F29%2F&_from=300&_to=349",
+   "status": 206,
+   "fecha_hora_consulta": "2026-10-09T14:22:20-05:00",
+   "resources": "300-349/375",
+   "productos": 50
+  },
+  {
+   "archivo": "C5_29__from00350.json.gz",
+   "rama": "/5/29/",
+   "url": "https://www.larebajavirtual.com/api/catalog_system/pub/products/search?fq=C%3A%2F5%2F29%2F&_from=350&_to=399",
+   "status": 200,
+   "fecha_hora_consulta": "2026-10-09T14:22:22-05:00",
+   "resources": "350-399/375",
+   "productos": 25
+  },
+  {
+   "archivo": "C8_585__from00000.json.gz",
+   "rama": "/8/585/",
+   "url": "https://www.larebajavirtual.com/api/catalog_system/pub/products/search?fq=C%3A%2F8%2F585%2F&_from=0&_to=49",
+   "status": 200,
+   "fecha_hora_consulta": "2026-10-09T14:22:25-05:00",
+   "resources": "0-49/8",
+   "productos": 8
+  },
+  {
+   "archivo": "C1316__from00000.json.gz",
+   "rama": "/1316/",
+   "url": "https://www.larebajavirtual.com/api/catalog_system/pub/products/search?fq=C%3A%2F1316%2F&_from=0&_to=49",
+   "status": 200,
+   "fecha_hora_consulta": "2026-10-09T14:22:26-05:00",
+   "resources": "0-49/3",
+   "productos": 3
+  }
+ ]
+}

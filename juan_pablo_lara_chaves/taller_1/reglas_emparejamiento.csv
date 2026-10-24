@@ -1,0 +1,25 @@
+producto_id,comercio,patron,excluir,confianza,nota
+NOVARIX_ANTIEMBOLICA_RODILLA_18-22_UNISEX,farmatodo,^(?=.*no-varix)(?=.*antiemb)(?=.*rodilla)(?=.*18-22),NA,alta,Antiembólica (T.V.P.) a la rodilla 18-22 mmHg unisex
+NOVARIX_ANTIEMBOLICA_RODILLA_18-22_UNISEX,ortopedicos_futuro,^(?=.*no-varix)(?=.*antiemb)(?=.*rodilla)(?=.*18-22),NA,alta,Mismo texto y precio que Farmatodo
+NOVARIX_ANTIEMBOLICA_RODILLA_18-22_UNISEX,locatel,^(?=.*no-varix)(?=.*tvp)(?=.*rodilla)(?=.*18-22),NA,alta,TVP = antiembólica; Locatel no escribe 'unisex'
+NOVARIX_MEDIA_RODILLA_MUJER_8-15,farmatodo,^(?=.*medias? de compresion)(?=.*no-varix)(?=.*mujer)(?=.*8-15),NA,media,Incluye variantes de color/talla de igual precio
+NOVARIX_MEDIA_RODILLA_MUJER_8-15,ortopedicos_futuro,^(?=.*medias? de compresion)(?=.*no-varix)(?=.*mujer)(?=.*8-15),NA,media,
+NOVARIX_MEDIA_RODILLA_MUJER_8-15,locatel,^media rodilla 8-15 no-varix$,NA,media,Locatel no indica sexo; precio casi igual (40.100 vs 40.900)
+NOVARIX_MEDIA_HOMBRE_20-30,farmatodo,^(?=.*medias? de compresion)(?=.*no-varix)(?=.*hombre)(?=.*20-30),clasica,media,
+NOVARIX_MEDIA_HOMBRE_20-30,ortopedicos_futuro,^(?=.*medias? de compresion)(?=.*no-varix)(?=.*hombre)(?=.*20-30),clasica,media,Se excluye 'hombre clásica 20-30' (otro modelo y precio)
+NOVARIX_MEDIA_HOMBRE_20-30,locatel,^calcetin hombre 20-30 no-varix$,NA,media,Locatel la llama 'calcetín'
+NOVARIX_MEDIA_HOMBRE_15-20,farmatodo,^(?=.*medias? de compresion)(?=.*no-varix)(?=.*hombre)(?=.*15-20),jasped|algodon|cobre|fibras,media,
+NOVARIX_MEDIA_HOMBRE_15-20,ortopedicos_futuro,^(?=.*medias? de compresion)(?=.*no-varix)(?=.*hombre)(?=.*15-20),jasped|algodon|cobre|fibras,media,"Se excluyen jaspeado, algodón, cobre y fibras"
+NOVARIX_MEDIA_HOMBRE_15-20,locatel,^calcetin hombres? (compresion )?15-20 no-varix$,NA,media,
+NOVARIX_MEDIA_MUJER_15-20_DIAMANTE,farmatodo,^(?=.*no-varix)(?=.*mujer)(?=.*15-20)(?=.*diamante),NA,media,
+NOVARIX_MEDIA_MUJER_15-20_DIAMANTE,ortopedicos_futuro,^(?=.*no-varix)(?=.*mujer)(?=.*15-20)(?=.*diamante),NA,media,Incluye diamante grande y pequeño
+NOVARIX_MEDIA_MUJER_15-20_DIAMANTE,locatel,^calcetin no-varix 15-20 diamante$,NA,media,Locatel no indica sexo ni tamaño del diamante
+KAMEX_RODILLERA_MAGNETICA,farmatodo,^rodillera kamex magnetica,NA,media,
+KAMEX_RODILLERA_MAGNETICA,ortopedicos_futuro,^rodillera kamex magnetica,NA,media,
+KAMEX_RODILLERA_MAGNETICA,locatel,^rodillera magnetica kamex,NA,media,Modelo MG012 talla universal
+ACTIMOVE_RODILLA_PATELA_ABIERTA_M,farmatodo,soporte deportivo para rodilla patela abierta actimove m ,NA,alta,El precio de lista de Ortopédicos Futuro coincide con el precio de Farmatodo (mismo SKU)
+ACTIMOVE_RODILLA_PATELA_ABIERTA_M,ortopedicos_futuro,soporte deportivo para rodilla patela abierta actimove m$,NA,alta,
+ACTIMOVE_RODILLA_PATELA_ABIERTA_M,locatel,^soporte rodilla actimove abierta talla m$,NA,media,
+RECOVERY_ANILLO_DINAMICO_SMALL,farmatodo,^anillo dinamico dissan small,NA,media,El precio de lista de Ortopédicos Futuro coincide con el precio de Farmatodo
+RECOVERY_ANILLO_DINAMICO_SMALL,ortopedicos_futuro,^anillo dinamico dissan small$,NA,media,
+RECOVERY_ANILLO_DINAMICO_SMALL,locatel,^anillo dinamico pequeno recovery$,NA,media,Pequeño = Small

@@ -1,0 +1,234 @@
+---
+title: "Practica 3"
+format: html
+editor: visual
+---
+
+
+
+# Ejercicio 1: 
+
+```{r}
+url_chinook <- "https://raw.githubusercontent.com/lerocha/chinook-database/master/ChinookDatabase/DataSources/Chinook_Sqlite.sqlite"
+ruta_db     <- "chinook.db"
+
+if (!file.exists(ruta_db)) {
+  download.file(url_chinook, destfile = ruta_db, mode = "wb")
+  cat("Base de datos descargada en:", ruta_db, "\n")
+} else {
+  cat("La base de datos ya existe:", ruta_db, "\n")
+}
+
+# Instalamos los paquetes necesarios
+paquetes  <- c("DBI", "RSQLite", "dplyr", "knitr")
+instalados <- rownames(installed.packages())
+pendientes <- setdiff(paquetes, instalados)
+if (length(pendientes) > 0) install.packages(pendientes)
+
+library(DBI)
+library(RSQLite)
+library(dplyr)
+
+# Abrimos la conexión
+con <- dbConnect(RSQLite::SQLite(), "chinook.db")
+cat("Conexión establecida.\n")
+
+# Listamos las tablas disponibles
+dbListTables(con)
+```
+
+## Análisis descriptivo de la colección musical
+
+Con la base de datos Chinook, responde las siguientes preguntas usando sentencias SQL.
+
+### ¿Cuántas pistas hay en total en la base de datos?
+
+```{r}
+resultado_1 <- dbGetQuery(con, "
+  SELECT COUNT(*)                    AS total_pistas
+  FROM   Track;
+")
+resultado_1
+```
+existen `r resultado_1` pistas en la base de datos.
+
+### ¿Cuántos géneros distintos existen?
+
+```{r}
+resultado_2 <- dbGetQuery(con, "
+  SELECT COUNT(DISTINCT GenreId)     AS generos_distintos
+  FROM   Track;
+")
+resultado_2
+```
+
+existen `r resultado_2` tipos de generos distintos en la base de datos.
+
+### Obtén el nombre del género, el número de pistas y la duración promedio (en minutos) para cada género. Ordena de mayor a menor número de pistas.
+
+```{r}
+resultado_3 <- dbGetQuery(con, "
+  SELECT
+    g.Name                                    AS genero,
+    COUNT(t.TrackId)                          AS n_pistas,
+    ROUND(AVG(t.Milliseconds)/60000.0,  2)   AS duracion_media_min
+  FROM     Track t
+  JOIN     Genre g ON t.GenreId = g.GenreId
+  GROUP BY g.Name
+  ORDER BY n_pistas DESC;
+")
+resultado_3
+```
+
+### ¿Cuáles son las 5 pistas más largas? Muestra el nombre, el álbum y la duración en minutos.
+
+```{r}
+# Columnas de la tabla Track
+# dbListFields(con, "Album")
+
+resultado_4 <- dbGetQuery(con, "
+  SELECT
+    t.Name                              AS pista,
+    a.Title                             AS album,
+    ROUND(t.Milliseconds / 60000.0, 2) AS duracion_min
+  FROM     Track t
+  JOIN     Album a ON t.AlbumId = a.AlbumId
+  ORDER BY duracion_min DESC
+  LIMIT  5;
+")
+resultado_4
+```
+
+
+### ¿Cuántas pistas tienen un UnitPrice superior a $0.99? ¿Qué porcentaje representan del total?
+
+```{r}
+resultado_5.1 <- dbGetQuery(con, "
+  SELECT COUNT(*)  AS frecuencia
+  FROM   Track
+  WHERE  UnitPrice  > 0.99;
+")
+resultado_5.1
+
+resultado_5.2 <- dbGetQuery(con, "
+  SELECT COUNT(*)  AS frecuencia
+  FROM   Track;
+")
+resultado_5.2
+
+# frecuencia del total
+porcentaje_6 <- resultado_5.1/resultado_5.2*100
+```
+
+existen 213 pistasque tiene un `UnitPrice` superior a $0.99 y representa un `r porcentaje_6`% del total de pistas.
+
+### Calcula la media, mínimo, máximo y varianza (en SQL) de la duración en milisegundos de todas las pistas.
+
+```{r}
+resultado <- dbGetQuery(con, "
+  SELECT
+    ROUND(AVG(t.Milliseconds),  2)   AS duracion_media_min,
+    ROUND(MIN(t.Milliseconds),  2)   AS duracion_min_min,
+    ROUND(MAX(t.Milliseconds),  2)   AS duracion_max_min,
+    ROUND(AVG(t.UnitPrice),             2)   AS precio_medio,
+    ROUND( AVG(t.Milliseconds * t.Milliseconds) - AVG(t.Milliseconds) * AVG(t.Milliseconds),0)  AS varianza_ms
+  FROM     Track t;
+")
+resultado
+```
+
+# Ejercicio 2: 
+
+## Análisis descriptivo de ventas
+
+Usando las tablas Invoice e InvoiceLine, responde:
+
+### ¿Cuál es el total de ingresos generados por la tienda? ¿Y el promedio por factura?
+
+```{r}
+# dbListFields(con, "Invoice")
+resultado_7 <- dbGetQuery(con, "
+  SELECT   CustomerId             AS Tienda,
+           ROUND(SUM(Total), 2)       AS total_ventas,
+           ROUND(AVG(Total), 2)       AS factura_media
+  FROM     Invoice
+  GROUP BY CustomerId
+  ORDER BY CustomerId DESC;
+")
+head(resultado_7)
+```
+
+si caracterizamos las tiendas por numero de tienda, y mostramos unicamente las 6 primeras tiendas.
+
+### ¿Cuántas facturas se emitieron por año? Ordena cronológicamente.
+
+```{r}
+resultado_8 <- dbGetQuery(con, "
+  SELECT   SUBSTR(InvoiceDate, 1, 4)  AS anho,
+           COUNT(*)                   AS n_facturas
+  FROM     Invoice
+  GROUP BY anho
+  ORDER BY anho DESC;
+")
+resultado_8
+```
+
+se emitieron esta cantidad de facturas por año.
+
+### Identifica los 5 países con más ingresos. Muestra: país, número de facturas, ingreso total y promedio por factura.
+
+```{r}
+resultado_9 <- dbGetQuery(con, "
+  SELECT
+    BillingCountry              AS pais,
+    COUNT(*)                    AS n_facturas,
+    ROUND(SUM(Total),    2)     AS total_ventas,
+    ROUND(AVG(Total),    2)     AS media_factura
+  FROM   Invoice
+  GROUP BY BillingCountry
+  ORDER BY total_ventas DESC
+  LIMIT  5;
+")
+resultado_9
+```
+
+los cinco paises que registran mas ingresos son estos; ademas muestra la informacion del número de facturas, ingreso total y promedio por factura, en cada uno de ellos.
+
+### ¿Cuál es la desviación estándar del total de facturas? Calcula primero la varianza en SQL y luego obtén la raíz en R o Python. Encuentra los meses con mayor y menor ingreso promedio.
+
+```{r}
+resultado_10 <- dbGetQuery(con, "
+  SELECT
+    ROUND(
+      AVG(Total * Total) - AVG(Total) * AVG(Total),2)  AS varianza_total
+  FROM   Invoice;
+")
+# resultado_10
+```
+
+la desviacion estandar del total de facturas es: `r sqrt(resultado_10)`, siendo la varianza `r resultado_10`
+
+```{r}
+resultado_11 <- dbGetQuery(con, "
+  SELECT   SUBSTR(InvoiceDate, 6, 2)  AS mes,
+           ROUND(AVG(Total),    2)    AS media_factura
+  FROM     Invoice
+  GROUP BY mes
+  ORDER BY media_factura DESC
+  LIMIT 1;
+")
+resultado_11
+
+resultado_12 <- dbGetQuery(con, "
+  SELECT   SUBSTR(InvoiceDate, 6, 2)  AS mes,
+           ROUND(AVG(Total),    2)    AS media_factura
+  FROM     Invoice
+  GROUP BY mes
+  ORDER BY media_factura ASC
+  LIMIT 1;
+")
+resultado_12
+```
+
+luego el mes con mayor ingreso promedio `r resultado_12[1]` con un ingreso promedio de `r resultado_12[2]` y menor ingreso promedio es `r resultado_11[1]` con un ingreso promedio de `r resultado_11[2]`.
+

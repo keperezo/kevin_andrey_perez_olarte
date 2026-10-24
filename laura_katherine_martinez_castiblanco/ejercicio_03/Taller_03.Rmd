@@ -1,0 +1,833 @@
+---
+title: "Taller 3 - Tipos de Datos y Estructuras"
+author: "Laura Katherine Martinez Castiblanco"
+output:
+  html_document:
+    theme: flatly
+    toc: false
+    self_contained: true
+    code_folding: hide
+    mathjax: default
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+
+```{r librerias y conexion, include=FALSE}
+# Instalamos los paquetes necesarios
+paquetes  <- c("DBI", "RSQLite", "dplyr", "knitr")
+instalados <- rownames(installed.packages())
+pendientes <- setdiff(paquetes, instalados)
+if (length(pendientes) > 0) install.packages(pendientes)
+
+library(DBI)
+library(RSQLite)
+library(dplyr)
+library(knitr)
+library(kableExtra) 
+
+```
+
+
+```{r librerias, include=FALSE}
+# Instalamos y cargamos los paquetes necesarios para el Taller 3
+paquetes  <- c("dplyr", "tibble", "tidyr", "readr", "jsonlite", "xml2", "rvest", "stringr", "janitor", "knitr", "kableExtra")
+instalados <- rownames(installed.packages())
+pendientes <- setdiff(paquetes, instalados)
+if (length(pendientes) > 0) install.packages(pendientes)
+
+library(dplyr)
+library(tibble)
+library(tidyr)
+library(readr)
+library(jsonlite)
+library(xml2)
+library(rvest)
+library(stringr)
+library(janitor)
+library(knitr)
+library(kableExtra)
+```
+
+# Ejercicio 1: Clasificación de tipos de datos 
+
+Para cada fuente de datos, indique: (a) si es estructurada, semi-estructurada o no estructurada; (b) la razón; (c) el paso de preprocesamiento mínimo para convertirla en un tibble analizable.
+
+```{r tabla_sintesis_ejercicio1, eval=FALSE, include=FALSE, results='asis'}
+# Construcción del dataframe sintético con la clasificación de las 5 fuentes
+tabla_e1 <- tibble(
+  Fuente = c(
+    "1. Microdatos GEIH del DANE (.csv)",
+    "2. API JSON datos.gov.co (Calidad del aire)",
+    "3. Audio de audiencias judiciales (.mp3/.wav)",
+    "4. Factura electrónica DIAN (.xml)",
+    "5. Tabla HTML de Wikipedia (Scraping)"
+  ),
+  Tipo_Dato = c(
+    "Estructurado",
+    "Semi-estructurado",
+    "No estructurado",
+    "Semi-estructurado",
+    "Semi-estructurado"
+  ),
+  Razon_Teorica = c(
+    "Esquema rígido en filas y columnas con tipos de datos fijos predefinidos.",
+    "Formato auto-descriptivo clave-valor con listas/arreglos anidados.",
+    "Serie temporal continua de ondas sonoras sin atributos ni campos tabulares.",
+    "Documento jerárquico basado en un árbol de etiquetas XML / UBL.",
+    "Estructura tabular delimitada por marcado HTML (<table>, <tr>, <td>)."
+  ),
+  Preprocesamiento_Minimo = c(
+    "readr::read_csv() con tipos de columna explícitos y manejo de NAs.",
+    "jsonlite::fromJSON() + tidyr::hoist() / unnest_wider() para aplanar listas.",
+    "ASR (Speech-to-Text) a texto -> Tokenización/TF-IDF O extracción de MFCC.",
+    "xml2::read_xml() + XPath para extraer nodos -> purrr/map_dfr() a tibble.",
+    "rvest::read_html() + html_element('table') %>% html_table() + clean_names()."
+  )
+)
+
+# Renderizado de la tabla interactiva HTML
+kable(
+  tabla_e1, 
+  format = "html",
+  caption = "Tabla 1.1: Clasificación taxonómica y flujo de preprocesamiento mínimo por fuente de datos",
+  col.names = c("Fuente de Datos", "Tipo de Dato", "Justificación", "Preprocesamiento Mínimo en R"),
+  table.attr = 'class="table table-striped table-hover table-bordered table-condensed"'
+) %>%
+  kable_styling(full_width = TRUE, bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+
+### 1. Microdatos GEIH del DANE (Archivo `.csv` de 300.000 filas)
+
+* **(a) Clasificación:** **Estructurado**.
+* **(b) Razón:** Posee un esquema explícito rígido predefinido donde cada columna representa una variable con tipo de dato fijo (entero, numérico, carácter) y cada fila corresponde a una observación (hogar/persona). No requiere parsing de árbol ni inferencia de etiquetas en memoria.
+* **(c) Paso de preprocesamiento mínimo:**
+  1. Lectura directa mediante `readr::read_csv()` por su eficiencia computacional en archivos de gran tamaño (300k+ filas).
+  2. Especificación explícita de tipos de columna (`col_types`) y codificación de caracteres (`locale = locale(encoding = "Latin1")`).
+  3. Estandarización de nombres con `janitor::clean_names()` y tratamiento de valores faltantes (`NA`).
+
+```{r e1_demostracion_geih, eval=FALSE, echo=TRUE}
+# Ejemplo
+geih_raw <- readr::read_csv(
+  file = "geih_microdatos.csv",
+  locale = readr::locale(encoding = "Latin1"),
+  show_col_types = FALSE
+) %>%
+  janitor::clean_names()
+```
+
+---
+
+### 2. Respuesta JSON de la API pública datos.gov.co (Calidad del aire)
+
+* **(a) Clasificación:** **Semi-estructurado**.
+* **(b) Razón:** No sigue un esquema relacional estricto, sino una auto-descripción jerárquica mediante pares clave-valor (`key-value`). Aunque `jsonlite::fromJSON()` convierte arreglos simples automáticamente, los campos anidados (como coordenadas o listas de sensores) impiden que sea una matriz o tabla plana bidimensional inmediata.
+* **(c) Paso de preprocesamiento mínimo:**
+  1. Consumo del endpoint o archivo local con `jsonlite::fromJSON()`.
+  2. Aplanamiento jerárquico (*flattening*) y desanidado de listas mediante `tidyr::hoist()` o `tidyr::unnest_wider()` para extraer las métricas (PM2.5, PM10) a vectores numéricos en columnas.
+  3. Conversión de las marcas de tiempo a objetos `POSIXct` de fecha/hora.
+
+```{r e1_demostracion_json, eval=FALSE, echo=TRUE}
+# Ejemplo
+json_raw <- jsonlite::fromJSON("https://datos.gov.co/resource/calidad_aire.json")
+json_tbl <- as_tibble(json_raw) %>%
+  tidyr::hoist(ubicacion, latitud = "lat", longitud = "lng") %>%
+  dplyr::mutate(concentracion_pm25 = as.numeric(concentracion_pm25))
+```
+
+---
+
+### 3. Grabaciones de audio de audiencias judiciales de la Rama Judicial
+
+* **(a) Clasificación:** **No estructurado**.
+* **(b) Razón:** Es una señal física/acústica continua representada como una secuencia temporal de amplitudes sonoras sin campos, columnas o etiquetas semánticas predefinidas. Un algoritmo de minería tradicional (ej. árboles de decisión o regresión) no puede operar directamente sobre el archivo binario sin una transformación representacional.
+* **(c) Paso de preprocesamiento mínimo (Dos enfoques según el objetivo de KDD):**
+  * **Opción A (Minería de Texto / NLP):** Transcripción automática mediante un modelo ASR (*Automatic Speech Recognition* como OpenAI Whisper), seguido de limpieza de texto, remoción de *stop words*, tokenización y vectorización en una matriz de términos-documentos (TF-IDF o *embeddings*).
+  * **Opción B (Procesamiento de Señal Acústica):** Ventaneo del audio y extracción de características espectrales numéricas (Coeficientes Cepstrales en las Frecuencias de Mel - MFCC, tono, energía) agrupadas en un `tibble` o matriz bidimensional \(X \in \mathbb{R}^{n \times p}\).
+
+---
+
+### 4. Factura electrónica emitida por la DIAN (Formato XML)
+
+* **(a) Clasificación:** **Semi-estructurado**.
+* **(b) Razón:** Está estructurado jerárquicamente en forma de árbol (*XML Schema* / UBL) utilizando etiquetas delimitadoras (`<Invoice>`, `<LegalMonetaryTotal>`, `<InvoiceLine>`). Posee léxico estructural estandarizado, pero no es una tabla rectangular bidimensional directa.
+* **(c) Paso de preprocesamiento mínimo:**
+  1. Lectura del documento XML con `xml2::read_xml()`.
+  2. Extracción de nodos clave con expresiones XPath (`xml2::xml_find_all()`, `xml2::xml_text()`).
+  3. Mapeo estructurado con `purrr::map_dfr()` o `dplyr::bind_rows()` para definir la granularidad deseada (ej. 1 fila por factura o 1 fila por ítem/producto facturado).
+
+```{r e1_demostracion_xml, eval=FALSE, echo=TRUE}
+# Ejemplo
+xml_doc <- xml2::read_xml("factura_dian.xml")
+items_nodos <- xml2::xml_find_all(xml_doc, "//cac:InvoiceLine")
+
+factura_items <- tibble::tibble(
+  item_id     = xml2::xml_text(xml2::xml_find_first(items_nodos, ".//cbc:ID")),
+  descripcion = xml2::xml_text(xml2::xml_find_first(items_nodos, ".//cbc:Description")),
+  precio      = as.numeric(xml2::xml_text(xml2::xml_find_first(items_nodos, ".//cbc:PriceAmount")))
+)
+```
+
+---
+
+### 5. Tabla HTML de Wikipedia scrapeada con `rvest`
+
+* **(a) Clasificación:** **Semi-estructurado**.
+* **(b) Razón:** Se encuentra delimitada visualmente por el marcado HTML (`<table>`, `<tr>`, `<td>`), pero está embebida en el DOM de una página web, mezclada con código de maquetación, hipervínculos, estilos y cadenas de texto que contienen símbolos o referencias a pie de página (``, `[nota]`).
+* **(c) Paso de preprocesamiento mínimo:**
+  1. Descarga y parseo del documento con `rvest::read_html()`.
+  2. Selección del nodo con `rvest::html_element("table")` y extracción nativa con `rvest::html_table()`.
+  3. Limpieza de nombres de columna con `janitor::clean_names()` y remoción de caracteres de ruido mediante expresiones regulares (`stringr::str_replace_all()`, `str_squish()`) para convertir texto a vectores numéricos reales.
+
+```{r e1_demostracion_html, eval=FALSE, echo=TRUE}
+# Ejemplo
+tabla_wiki <- rvest::read_html("https://es.wikipedia.org/wiki/Ejemplo") %>%
+  rvest::html_element("table.wikitable") %>%
+  rvest::html_table() %>%
+  janitor::clean_names() %>%
+  dplyr::mutate(
+    poblacion = stringr::str_replace_all(poblacion, "\\[.*\\]|,", "") %>% as.numeric()
+  )
+```
+
+
+# Ejercicio 2: JSON anidado a DataFrame
+
+Descargue el siguiente JSON público con datos de usuarios (incluye campos anidados `address` y `company`):
+
+```{r e2_descarga, echo=TRUE}
+library(jsonlite)
+library(dplyr)
+library(tibble)
+library(tidyr)
+library(knitr)
+library(kableExtra)
+
+url <- "https://jsonplaceholder.typicode.com/users"
+raw <- fromJSON(url)
+```
+
+---
+
+### 1. Explore la estructura con `str(raw)`. ¿Qué columnas son listas anidadas?
+
+Inspeccionamos la jerarquía del objeto capturado desde la API web mediante `str()`:
+
+```{r e2_exploracion, echo=TRUE}
+# Inspección de la estructura interna del objeto raw
+str(raw, max.level = 3)
+```
+
+Al ejecutar `str(raw)`, se evidencia que `fromJSON()` convierte la respuesta JSON en un `data.frame` base de 10 observaciones y 8 variables principales. Sin embargo, no todas las variables son vectores atómicos simples (`int` o `chr`):
+
+* **`address`**: Es una columna que contiene un `data.frame` embebido de 10 filas y 5 variables (`street`, `suite`, `city`, `zipcode`, `geo`).
+* **`address$geo`**: Es una sub-estructura anidada dentro de `address`, que a su vez es otro `data.frame` embebido de 2 variables (`lat` y `lng`).
+* **`company`**: Es un `data.frame` embebido de 10 filas y 3 variables (`name`, `catchPhrase`, `bs`).
+
+Por lo tanto, las columnas **`address`** (junto con su sub-campo **`geo`**) y **`company`** corresponden a estructuras/listas anidadas en el dataframe base.
+
+---
+
+### 2. Aplane el objeto a un `tibble` con una fila por usuario, extrayendo al menos: `name`, `email`, `address.city`, `address.geo.lat`, `address.geo.lng` y `company.name`.
+
+Para la transformación de esta fuente semi-estructurada a una estructura analítica tabular plana, implementamos y comparamos dos soluciones modulares en R:
+
+#### Método 1: Aplanamiento directo con `jsonlite::flatten()` (más eficiente)
+
+La función `jsonlite::flatten()` colapsa recursivamente los `data.frame` anidados dentro de las columnas principales, concatenando los nombres con punto (`.`).
+
+```{r e2_aplanamiento_flatten, echo=TRUE}
+# 1. Aplanamiento recursivo de data.frames anidados
+raw_flat <- jsonlite::flatten(raw)
+
+# 2. Conversión a tibble y selección de columnas requeridas por el taller
+usuarios_tbl <- as_tibble(raw_flat) %>%
+  select(
+    name,
+    email,
+    address.city,
+    address.geo.lat  = address.geo.lat,
+    address.geo.lng  = address.geo.lng,
+    company.name     = company.name
+  )
+
+# Renderizado de la tabla resultante con kableExtra
+kable(
+  usuarios_tbl,
+  format = "html",
+  caption = "Tabla 2.1: Dataset plano de usuarios aplanado desde JSON",
+  col.names = c("Nombre (name)", "Email (email)", "Ciudad (address.city)", "Latitud (address.geo.lat)", "Longitud (address.geo.lng)", "Empresa (company.name)"),
+  table.attr = 'class="table table-striped table-hover table-bordered table-condensed"'
+) %>%
+  kable_styling(full_width = TRUE, bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+#### Método 2: Desempaquetado explícito con `tidyr::unpack()` (Enfoque Tidyverse)
+
+También podemos aplicar `tidyr::unpack()` paso a paso para desanidar los bloques jerárquicos:
+
+```{r e2_aplanamiento_tidyverse, echo=TRUE}
+# Alternativa usando el flujo tidyverse con unpack()
+usuarios_tbl_tidy <- as_tibble(raw) %>%
+  unpack(address, names_sep = ".") %>%
+  unpack(address.geo, names_sep = ".") %>%
+  unpack(company, names_sep = ".") %>%
+  select(
+    name,
+    email,
+    address.city,
+    address.geo.lat,
+    address.geo.lng,
+    company.name
+  )
+
+# Verificación de equivalencia entre ambos métodos
+identical(usuarios_tbl, usuarios_tbl_tidy)
+```
+
+
+Ambos métodos llevan al mismo `tibble` plano con 10 filas (usuarios) y 6 columnas.
+
+---
+
+### 3. ¿Qué tipo de dato es esta fuente? ¿Por qué `fromJSON` no produce directamente un `tibble` plano?
+
+* **¿Qué tipo de dato es esta fuente?**
+  Es un tipo de dato **semi-estructurado**. Posee una organización propia basada en etiquetas auto-descriptivas y pares clave-valor (`key-value`), pero carece de un esquema relacional estricto o de una disposición matricial bidimensional rígida inmediata.
+
+* **¿Por qué `fromJSON` no produce directamente un `tibble` plano?**
+  1. **Naturaleza Árbol del Formato JSON:** Los archivos JSON representan relaciones jerárquicas complejas donde un nodo (ej. `address`) puede contener múltiples sub-nodos u objetos anidados.
+  2. **Preservación del Modelo de Datos por `jsonlite`:** Para no asumir decisiones arbitrarias de nombrado o perder la semántica de la jerarquía original, `jsonlite::fromJSON()` simplifica vectores idénticos convirtiéndolos en `data.frames` embebidos dentro del dataframe padre.
+  3. **Exigencia de la Fase de Preprocesamiento KDD:** En el ciclo de vida KDD, R delega en el analista la responsabilidad de definir la granularidad deseada mediante técnicas de aplanamiento (*flattening* o *un-nesting*). Esto garantiza la correcta creación de la matriz de características rectangular requerida por los algoritmos de clasificación, clustering o regresión.
+
+
+
+# Ejercicio 3: Matriz de diseño
+
+Con `titanic.csv` y las variables `age`, `fare`, `sibsp`, `parch` (elimine `NA`):
+
+---
+
+```{r e3_librerias, echo=TRUE, message=FALSE, warning=FALSE}
+library(dplyr)
+library(tibble)
+library(readr)
+library(Matrix)
+library(knitr)
+library(kableExtra)
+```
+
+### 1. Construya \(\mathbf{X}\) centrada y escalada con `scale()`. Reporte sus dimensiones y la memoria que ocupa.
+
+Cargamos el archivo `titanic.csv`, filtramos las columnas cuantitativas requeridas, removemos las observaciones incompletas y aplicamos la estandarización Z-score mediante `scale()`:
+
+```{r e3_matriz_escalada, echo=TRUE}
+# 1. Carga, limpieza y construcción de X centrada y escalada
+library(here)
+titanic_raw <- read_csv("../titanic.csv", show_col_types = FALSE)
+
+datos_cuant <- titanic_raw %>%
+  select(age, fare, sibsp, parch) %>%
+  na.omit()
+
+X_scale <- scale(as.matrix(datos_cuant))
+
+# Extracción corregida de dimensiones
+dim_X      <- dim(X_scale)
+n <- nrow(X_scale)
+p <- ncol(X_scale)
+mem_bytes <- object.size(X_scale)
+
+# Tabla 3.1: Propiedades de la Matriz X
+tibble(
+  Métrica = c("Número de Observaciones (n)", "Número de Predictores (p)", "Dimensiones Totales", "Memoria Ocupada"),
+  Valor   = c(as.character(n), as.character(p), paste(n, "x", p), format(mem_bytes, units = "Kb"))
+) %>%
+  kable(
+    format = "html",
+    caption = "Tabla 3.1: Propiedades de la Matriz de Diseño Escalada X",
+    table.attr = 'class="table table-striped table-hover table-bordered table-condensed"'
+  )
+```
+
+---
+
+### 2. Calcule $\mathbf{X}^T \mathbf{X}$. ¿Qué representa la diagonal cuando \(\mathbf{X}\) está escalada?
+
+
+Calculamos el producto matricial de la traspuesta por sí misma (\(\mathbf{X}^T \mathbf{X}\)) utilizando la función optimizada `crossprod()`:
+
+```{r e3_crossprod, echo=TRUE}
+# Cálculo eficiente de X^T %*% X
+XtX <- crossprod(X_scale)
+
+# Inspección de la matriz resultante
+print(round(XtX, 2))
+
+# Inspección específica de la diagonal principal
+diag_vals <- diag(XtX)
+print(round(diag_vals, 2))
+```
+
+Cuando una variable \(x_j\) ha sido estandarizada con `scale()` (centrada en media \(\mu_j = 0\) y dividida por su desviación estándar muestral \(s_j = 1\)), cada elemento de la diagonal principal \([ \mathbf{X}^T \mathbf{X} ]_{jj}\) corresponde a la suma de cuadrados de la columna \(j\):
+
+\[[ \mathbf{X}^T \mathbf{X} ]_{jj} = \sum_{i=1}^{n} x_{ij}^2\]
+
+Dado que la varianza muestral está definida como \(s_j^2 = \frac{1}{n-1} \sum_{i=1}^{n} (x_{ij} - \bar{x}_j)^2 = 1\), al despejar la suma de cuadrados obtenemos:
+
+\[\sum_{i=1}^{n} x_{ij}^2 = (n - 1) \cdot s_j^2 = (n - 1) \cdot 1 = n - 1\]
+
+En esta base de datos con \(n = `r dim_X[1]`\) (observaciones completas, la diagonal toma exactamente el valor de \(n - 1 = `r dim_X[1] - 1`\). Adicionalmente, los elementos fuera de la diagonal principal \([ \mathbf{X}^T \mathbf{X} ]_{jk}\) representan \((n - 1) \cdot r_{jk}\), donde \(r_{jk}\) es el coeficiente de correlación de Pearson entre la variable \(j\) y la variable \(k\).
+
+---
+
+### 3. Construya la versión dispersa con `Matrix(X, sparse = TRUE)`. Compare el tamaño en memoria con `object.size()`. ¿Tiene sentido usar formato disperso aquí?
+
+Convertimos la matriz densa a formato disperso comprimido por columnas (CSC - `dgCMatrix`) mediante el paquete `Matrix` y comparamos el impacto en memoria:
+
+```{r e3_sparse_matrix, echo=TRUE}
+# Construcción de la matriz dispersa
+X_sparse <- Matrix(X_scale, sparse = TRUE)
+
+# Obtención del tamaño en bytes
+size_densa  <- as.numeric(object.size(X_scale))
+size_sparse <- as.numeric(object.size(X_sparse))
+
+# Porcentaje de ceros en la matriz (Sparsity)
+pct_ceros <- mean(X_scale == 0) * 100
+
+# Cuadro comparativo
+resumen_memoria <- tibble(
+  `Estructura`       = c("Matriz Densa (matrix)", "Matriz Dispersa (dgCMatrix)"),
+  `Tamaño (Bytes)`   = c(size_densa, size_sparse),
+  `Tamaño Formateado` = c(format(object.size(X_scale), units = "Kb"), format(object.size(X_sparse), units = "Kb")),
+  `Diferencia (%)`   = c("Base (100%)", paste0(round((size_sparse / size_densa) * 100, 2), "%"))
+)
+
+kable(
+  resumen_memoria,
+  format = "html",
+  caption = "Tabla 3.2: Comparación de consumo de memoria entre Matriz Densa y Matriz Dispersa",
+  table.attr = 'class="table table-striped table-hover table-bordered table-condensed"'
+) %>%
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+**¿Tiene sentido usar formato disperso aquí?**
+
+**No,** pues una matriz dispersa (`dgCMatrix`) solo es eficiente cuando la densidad de datos es extremadamente baja ( \(> 90\%\) o \(99\%\) de ceros). Las matrices dispersas almacenan internamente vectores adicionales de índices de filas (`@i`), punteros de columnas (`@p`) y valores no nulos (`@x`). 
+
+Como las variables `age` y `fare` son continuas reales y fueron centradas (su media es 0 pero casi ningún valor individual es exactamente 0.0000), la proporción de ceros reales es de \(`r round(pct_ceros, 2)`\%\). Por lo tanto, intentar usar un formato disperso para datos densos introduce una sobrecarga estructural (*overhead*) que **incrementa la memoria requerida** en lugar de reducirla.
+
+---
+
+### 4. ¿Qué estructura de datos usaría para modelar las relaciones familiares entre pasajeros (`sibsp`, `parch`)? Justifique.
+
+
+Para este caso la mejor estructura es un **Grafo o Red Complaja** \(G = (V, E)\):
+
+* **Nodos (\(V\) - Vértices):** Cada pasajero del Titanic representa un nodo individual en la red \(v_i \in V\).
+* **Aristas (\(E\) - Edges/Enlaces):** Las conexiones familiares directas codificadas por `sibsp` (hermanos/cónyuges) y `parch` (padres/hijos) forman las aristas \(e_{ij} = (v_i, v_j) \in E\) entre pasajeros de la misma familia.
+
+```
+     [Pasajero A (Padre)]
+          /         \
+         /           \
+  [Pasajero B] --- [Pasajero C]
+   (Hijo 1)  sibsp  (Hijo 2)
+```
+
+Las columnas tabulares `sibsp` y `parch` se limitan a agregar un conteo escalar (ej. "2 familiares a bordo"), **destruyendo la topología de la red familiar**. No permiten identificar qué pasajeros pertenecen al mismo núcleo, la presencia de componentes conectados (familias completas), ni el grado de centralidad de cada miembro. 
+
+Mediante una estructura de **Grafo** (\(G\)), es posible aplicar algoritmos de minería de grafos (como detección de comunidades, PageRank o propagación de etiquetas) para medir si la supervivencia de un individuo estuvo condicionada por la tasa de supervivencia de su red familiar cercana.
+
+# Ejercicio 4: Concentración de distancias
+
+Replique la demostración de la clase para \(p \in \{1, 2, 5, 10, 50, 100, 500, 1000, 5000\}\) (use `set.seed(42)`):
+
+```{r e4_librerias, echo=TRUE, message=FALSE, warning=FALSE}
+library(dplyr)
+library(tibble)
+library(ggplot2)
+library(gridExtra)
+library(knitr)
+library(kableExtra)
+```
+
+---
+
+### 1. Para cada \(p\), genere 500 puntos uniformes en \([0,1]^p\) y calcule 200 distancias euclidianas entre pares. Reporte la distancia media y el coeficiente de variación (CV).
+
+Generamos las matrices de observaciones \(X \in \mathbb{R}^{500 \times p}\) bajo la distribución uniforme \(U^p\) para cada dimensión \(p\), calculando \(200\) distancias euclidianas entre pares de observaciones (\(x_i\) vs \(x_{i+200}\)):
+
+```{r e4_simulacion_euclidiana, echo=TRUE}
+# Fijamos la semilla para reproducibilidad exacta
+set.seed(42)
+
+dimensiones <- c(1, 2, 5, 10, 50, 100, 500, 1000, 5000)
+
+# Función de simulación para distancia Euclidiana
+simular_euclidiana <- function(p_vec, n_puntos = 500, n_pares = 200) {
+  sapply(p_vec, function(p) {
+    # Generación de n_puntos en p dimensiones (disposición column-major en R)
+    puntos <- matrix(runif(n_puntos * p), nrow = n_puntos, ncol = p)
+    
+    # Cálculo de n_pares de distancias euclidianas entre la fila i y la fila i+200
+    dists <- sapply(1:n_pares, function(i) {
+      sqrt(sum((puntos[i, ] - puntos[i + 200, ])^2))
+    })
+    
+    media <- mean(dists)
+    desv  <- sd(dists)
+    cv    <- (desv / media) * 100
+    
+    c(media = media, desv = desv, cv_pct = cv)
+  })
+}
+
+# Ejecución del experimento
+res_euc <- simular_euclidiana(dimensiones)
+
+# Estructuración de la tabla de resultados
+tabla_euc <- tibble(
+  Dimension_p      = dimensiones,
+  Distancia_Media  = round(res_euc["media", ], 4),
+  Desviacion_Std   = round(res_euc["desv", ], 4),
+  CV_Porcentaje    = round(res_euc["cv_pct", ], 2)
+)
+
+# Renderizado en tabla HTML
+kable(
+  tabla_euc,
+  format = "html",
+  caption = "Tabla 4.1: Distancia Euclidiana Media y Coeficiente de Variación (CV) según la dimensión p",
+  col.names = c("Dimensión (p)", "Distancia Media (μ)", "Desviación Estándar (σ)", "CV (%)"),
+  table.attr = 'class="table table-striped table-hover table-bordered table-condensed"'
+) %>%
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+Para variables independientes \(X_j, Y_j \sim U\), el valor esperado de la diferencia cuadrática es \(\mathbb{E}[(X_j - Y_j)^2] = 1/6\). 
+
+Por la Ley de los Grandes Números, la distancia euclidiana esperada crece a una tasa de \(\mathbb{E}[D_p] \approx \sqrt{p/6} \approx 0.408 \cdot \sqrt{p}\). Sin embargo, la varianza relativa disminuye a medida que \(p \to \infty\), haciendo que el Coeficiente de Variación \(CV = \sigma / \mu \propto 1/\sqrt{p}\) decaiga asintóticamente hacia cero.
+
+---
+
+### 2. Grafique distancia media y CV vs. \(p\) (escala logarítmica en \(p\)) con `ggplot2`.
+
+Graficamos la evolución de la distancia media y el Coeficiente de Variación en función de la dimensión \(p\) en escala logarítmica:
+
+```{r e4_graficos_euclidiana, echo=TRUE, fig.width=10, fig.height=4.5}
+# Gráfico A: Crecimiento de la Distancia Media
+p1 <- ggplot(tabla_euc, aes(x = Dimension_p, y = Distancia_Media)) +
+  geom_line(color = "#2c3e50", size = 1) +
+  geom_point(color = "#e74c3c", size = 2.5) +
+  scale_x_log10(breaks = dimensiones) +
+  labs(
+    title = "A. Crecimiento de la Distancia Media",
+    x = "Dimensión p (Escala Log10)",
+    y = "Distancia Media Euclidiana (μ)"
+  ) +
+  theme_minimal()
+
+# Gráfico B: Decaimiento del Coeficiente de Variación (CV)
+p2 <- ggplot(tabla_euc, aes(x = Dimension_p, y = CV_Porcentaje)) +
+  geom_line(color = "#2980b9", size = 1) +
+  geom_point(color = "#27ae60", size = 2.5) +
+  geom_hline(yintercept = 5, linetype = "dashed", color = "red", size = 0.8) +
+  annotate("text", x = 50, y = 8, label = "Umbral Crítico CV = 5%", color = "red", size = 3.5) +
+  scale_x_log10(breaks = dimensiones) +
+  labs(
+    title = "B. Decaimiento del Coeficiente de Variación",
+    x = "Dimensión p (Escala Log10)",
+    y = "CV (%)"
+  ) +
+  theme_minimal()
+
+# Disposición en paralelo
+grid.arrange(p1, p2, ncol = 2)
+```
+
+---
+
+### 3. ¿A partir de qué \(p\) el CV cae por debajo del 5%? ¿Qué implica esto para K-NN?
+
+* **¿A partir de qué \(p\) el CV cae por debajo del 5%?**
+  Observando la Tabla 4.1 y la Gráfica B, para \(p = 100\) el \(CV\) es de **\(5.98\%\)**, mientras que para \(p = 500\) cae a **\(2.61\%\)**. Por consiguiente, el Coeficiente de Variación cruza el umbral crítico del **5%** en el intervalo \(p \in (100, 500)\), consolidándose de manera definitiva por debajo del 5% a partir de **\(p \ge 500\)**.
+
+* **¿Qué implica esto para el algoritmo K-NN (K-Nearest Neighbors)?**
+  Esta disminución drástica del \(CV\) constituye la **manifestación geométrica de la Maldición de la Dimensionalidad** (*Curse of Dimensionality*, Bellman 1961). Matemáticamente, Beyer et al. (1999) demostraron que bajo condiciones de alta dimensionalidad:
+
+  \[\lim_{p \to \infty} \frac{d_{\max} - d_{\min}}{d_{\min}} = 0\]
+
+  1. **Pérdida de Contraste y Discriminación:** Cuando el \(CV < 5\%\), la distancia entre la observación de interés y su vecino más cercano (\(d_{\min}\)) es prácticamente idéntica a la distancia hacia su vecino más lejano (\(d_{\max}\)). Todos los puntos del hipercubo pasan a ser casi equidistantes entre sí.
+  2. **Pérdida de Localidad:** Para capturar una fracción \(r\) del volumen del espacio en dimensión alta, el radio de la hiperesfera contenedora debe abarcar casi la totalidad del rango de cada variable (\(\ell = r^{1/p}\)). En consecuencia, la noción de "vecino cercano local" deja de existir; las observaciones promediadas por K-NN se encuentran geométricamente lejanas en el espacio original, degradando la precisión del clasificador a niveles similares a una asignación aleatoria.
+
+---
+
+### 4. Repita el punto 1 usando distancia coseno en lugar de euclidiana. ¿Se concentra igual de rápido?
+
+La distancia coseno se define a partir de la similitud angular entre dos vectores \(u, v \in \mathbb{R}^p\):
+
+\[d_{\text{cos}}(u, v) = 1 - \frac{\langle u, v \rangle}{\|u\|_2 \|v\|_2} = 1 - \frac{\sum_{j=1}^p u_j v_j}{\sqrt{\sum_{j=1}^p u_j^2} \sqrt{\sum_{j=1}^p v_j^2}}\]
+
+Replicamos el procedimiento utilizando la distancia Coseno:
+
+```{r e4_simulacion_coseno, echo=TRUE}
+# Función auxiliar para distancia coseno entre dos vectores
+dist_coseno_vec <- function(u, v) {
+  norm_u <- sqrt(sum(u^2))
+  norm_v <- sqrt(sum(v^2))
+  if (norm_u == 0 || norm_v == 0) return(0)
+  sim_cos <- sum(u * v) / (norm_u * norm_v)
+  return(1 - sim_cos)
+}
+
+# Simulación para Distancia Coseno
+set.seed(42)
+res_cos <- sapply(dimensiones, function(p) {
+  puntos <- matrix(runif(500 * p), nrow = 500, ncol = p)
+  
+  if (p == 1) {
+    # En p = 1, vectores reales positivos en tienen ángulo 0° (coseno = 1, dist = 0)
+    return(c(media = 0, desv = 0, cv_pct = 0))
+  }
+  
+  dists <- sapply(1:200, function(i) {
+    dist_coseno_vec(puntos[i, ], puntos[i + 200, ])
+  })
+  
+  media <- mean(dists)
+  desv  <- sd(dists)
+  cv    <- (desv / media) * 100
+  
+  c(media = media, desv = desv, cv_pct = cv)
+})
+
+# Construcción de la tabla comparativa
+tabla_comparativa <- tibble(
+  Dimension_p   = dimensiones,
+  Euc_Media     = round(res_euc["media", ], 4),
+  Euc_CV_pct    = round(res_euc["cv_pct", ], 2),
+  Cos_Media     = round(res_cos["media", ], 4),
+  Cos_CV_pct    = round(res_cos["cv_pct", ], 2)
+)
+
+kable(
+  tabla_comparativa,
+  format = "html",
+  caption = "Tabla 4.2: Comparación de Concentración de Distancias: Euclidiana vs. Coseno",
+  col.names = c("Dimensión (p)", "Media Euclidiana", "CV Euclidiano (%)", "Media Coseno", "CV Coseno (%)"),
+  table.attr = 'class="table table-striped table-hover table-bordered table-condensed"'
+) %>%
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+
+**No se concentra con la misma velocidad en dimensiones bajas/moderadas, pero sufre la misma convergencia asintótica final:**
+
+1. **Estabilización de la Métrica Media:** Mientras que la distancia Euclidiana crece indefinidamente hacia infinito a tasa \(\mathcal{O}(\sqrt{p})\), la distancia Coseno converge a un valor constante asintótico de **\(0.25\)**. Esto se debe a que para vectores i.i.d. \(U^p\), \(\mathbb{E}[u_j v_j] = 1/4\) y \(\mathbb{E}[u_j^2] = 1/3\), por lo que la similitud coseno tiende a \(\frac{1/4}{1/3} = 0.75\), lo que implica \(d_{\text{cos}} \to 1 - 0.75 = 0.25\).
+2. **Tasa de Decaimiento del CV:** El Coeficiente de Variación de la distancia Coseno disminuye a un ritmo más lento que el de la distancia Euclidiana en dimensiones intermedias. Por ejemplo, en \(p = 100\), el \(CV\) Euclidiano ya es de \(5.98\%\), mientras que el \(CV\) de Coseno es de \(12.86\%\). La distancia Coseno cruza el umbral del \(5\%\) recién hacia **\(p \approx 1000\)** (\(CV = 4.10\%\)).
+
+
+# Ejercicio 5: PCA y Reducción de Dimensionalidad
+
+Con las variables numéricas del Titanic escaladas (`age`, `fare`, `sibsp`, `parch`, `pclass`):
+
+
+```{r e5_librerias, echo=TRUE, message=FALSE, warning=FALSE}
+library(dplyr)
+library(tibble)
+library(readr)
+library(ggplot2)
+library(gridExtra)
+library(knitr)
+library(kableExtra)
+```
+
+---
+
+### 1. Aplique PCA con `prcomp(..., scale. = TRUE)`. ¿Cuántos componentes son necesarios para retener \(\ge 80\%\) de la varianza? ¿Y para \(\ge 95\%\)?
+
+Cargamos el dataset, seleccionamos las variables numéricas junto con la respuesta `survived`, eliminamos los datos faltantes con `na.omit()` y ejecutamos la descomposición espectral mediante `prcomp()`:
+
+```{r e5_pca_calculo, echo=TRUE}
+# 1. Carga de datos y filtrado de registros completos
+titanic_sub <- read_csv("../titanic.csv", show_col_types = FALSE) %>%
+  select(age, fare, sibsp, parch, pclass, survived) %>%
+  na.omit()
+
+# Separación de predictores cuantitativos y variable objetivo
+X_df <- titanic_sub %>% select(age, fare, sibsp, parch, pclass)
+y_survived <- titanic_sub$survived
+
+# 2. Ejecución de PCA sobre las variables escaladas
+pca_titanic <- prcomp(X_df, center = TRUE, scale. = TRUE)
+
+# 3. Cálculo de la varianza explicada e individual
+var_prop <- pca_titanic$sdev^2 / sum(pca_titanic$sdev^2)
+var_acum <- cumsum(var_prop)
+
+# Tabla resumen de varianza por componente
+tabla_var <- tibble(
+  Componente           = paste0("PC", 1:5),
+  Desviacion_Std       = round(pca_titanic$sdev, 4),
+  Varianza_Explicada   = round(var_prop * 100, 2),
+  Varianza_Acumulada   = round(var_acum * 100, 2)
+)
+
+kable(
+  tabla_var,
+  format = "html",
+  caption = "Tabla 5.1: Proporción y acumulación de varianza explicada por Componente Principal",
+  col.names = c("Componente", "Desviación Estándar (σ)", "Varianza Explicada (%)", "Varianza Acumulada (%)"),
+  table.attr = 'class="table table-striped table-hover table-bordered table-condensed"'
+) %>%
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+* **Para retener \(\ge 80\%\) de la varianza:** Se requieren **3 componentes principales** (PC1, PC2 y PC3), los cuales acumulan el **\(80.92\%\)** de la variabilidad total de la población.
+* **Para retener \(\ge 95\%\) de la varianza:** Se requieren los **5 componentes principales** (\(100.00\%\)), dado que con 4 componentes se alcanza únicamente el \(92.72\%\) de la varianza explicada.
+
+---
+
+### 2. Grafique el *scree plot* (varianza acumulada vs. número de componente) con `ggplot2`.
+
+Visualizamos la contribución individual y acumulada de cada componente principal mediante `ggplot2`:
+
+```{r e5_scree_plot, echo=TRUE, fig.width=10, fig.height=4.5}
+# Gráfico de varianza explicada acumulada
+p_scree <- ggplot(tabla_var, aes(x = 1:5, y = Varianza_Acumulada)) +
+  geom_line(color = "#2c3e50", size = 1.2) +
+  geom_point(color = "#e74c3c", size = 3) +
+  geom_hline(yintercept = 80, linetype = "dashed", color = "#27ae60", size = 0.9) +
+  geom_hline(yintercept = 95, linetype = "dashed", color = "#c0392b", size = 0.9) +
+  annotate("text", x = 1.5, y = 83, label = "Umbral 80% (PC3 = 80.92%)", color = "#27ae60", fontface = "bold") +
+  annotate("text", x = 1.5, y = 98, label = "Umbral 95% (PC5 = 100.00%)", color = "#c0392b", fontface = "bold") +
+  scale_x_continuous(breaks = 1:5, labels = paste0("PC", 1:5)) +
+  scale_y_continuous(limits = c(30, 105), breaks = seq(30, 100, by = 10)) +
+  labs(
+    title = "Scree Plot: Varianza Acumulada por Componente Principal",
+    x = "Componentes Principales",
+    y = "Varianza Acumulada (%)"
+  ) +
+  theme_minimal()
+
+print(p_scree)
+```
+
+---
+
+### 3. Examine los *loadings* de PC1 y PC2. ¿Qué variables dominan cada componente? Proponga una interpretación en el contexto del Titanic.
+
+Analizamos la matriz de rotación o autovectores \(\mathbf{W} \in \mathbb{R}^{p \times p}\) (`pca_titanic$rotation`), la cual determina la contribución lineal de cada variable original sobre los componentes principales:
+
+```{r e5_loadings, echo=TRUE}
+# Matriz de Cargas (Loadings / Rotación)
+loadings_df <- as.data.frame(pca_titanic$rotation) %>%
+  rownames_to_column(var = "Variable") %>%
+  as_tibble()
+
+kable(
+  loadings_df,
+  format = "html",
+  caption = "Tabla 5.2: Matriz de Cargas (Loadings) de cada variable en los Componentes Principales",
+  table.attr = 'class="table table-striped table-hover table-bordered table-condensed"'
+) %>%
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+* **PC1:**
+  * `pclass` (\(+0.6213\)), `age` (\(-0.5459\)) y `fare` (\(-0.4201\)).
+  * PC1 contrapone el nivel socioeconómico frente a la edad. Un valor muy **positivo** en PC1 describe a pasajeros de **3ª clase**, más **jóvenes/niños** y que pagaron una **tarifa baja**. Por el contrario, valores **negativos** en PC1 corresponden a pasajeros adultos de **1ª clase** con billetes de alto costo.
+* **PC2:**
+  * `parch` (\(+0.5630\)), `sibsp` (\(+0.5399\)) y `fare` (\(+0.5267\)).
+  * PC2 captura el gradiente de **responsabilidad familiar**. Valores altos en PC2 identifican a grupos familiares numerosos (padres, hijos, hermanos, cónyuges) que viajaban juntos y acumulaban tarifas totales elevadas.
+
+---
+
+### 4. **Reto:** Aplique K-Means (\(k = 2\)) sobre \(\mathbf{X}\) original escalada y sobre los 2 primeros PCs por separado. Compare los grupos resultantes con la variable `survived`. ¿En cuál representación los grupos coinciden mejor con la supervivencia?
+
+
+Evaluamos el impacto de la reducción de dimensionalidad aplicando K-Means (\(k=2\)) sobre:
+1. La matriz escalada original \(\mathbf{X}_{\text{scale}} \in \mathbb{R}^{714 \times 5}\).
+2. Las coordenadas proyectadas en los 2 primeros componentes \(\mathbf{Z}_2 \in \mathbb{R}^{714 \times 2}\).
+
+```{r e5_kmeans_reto, echo=TRUE}
+set.seed(42)
+
+# 1. Matriz original escalada
+X_scaled <- scale(X_df)
+
+# 2. Matriz reducida a 2 PCs
+Z_2PC <- pca_titanic$x[, 1:2]
+
+# 3. K-Means en Espacio Original
+km_orig <- kmeans(X_scaled, centers = 2, nstart = 25)
+
+# 4. K-Means en Espacio Reducido (2D - PCs)
+km_pca <- kmeans(Z_2PC, centers = 2, nstart = 25)
+
+# Función para calcular coincidencia/precisión óptima con 'survived'
+evaluar_coincidencia <- function(cluster_labels, target) {
+  acc_directa  <- mean(cluster_labels == target)
+  acc_invertida <- mean((1 - (cluster_labels - 1)) == target)
+  
+  if (acc_directa >= acc_invertida) {
+    acc <- acc_directa
+    pred <- cluster_labels - 1
+  } else {
+    acc <- acc_invertida
+    pred <- 1 - (cluster_labels - 1)
+  }
+  
+  cm <- table(Real = target, Predicho = pred)
+  return(list(accuracy = acc, cm = cm))
+}
+
+res_orig <- evaluar_coincidencia(km_orig$cluster, y_survived)
+res_pca  <- evaluar_coincidencia(km_pca$cluster, y_survived)
+
+# Función auxiliar para aplanar la matriz de confusión a texto (TN | FP | FN | TP)
+fmt_cm <- function(cm) {
+  paste(cm[1, 1], cm[1, 2], cm[2, 1], cm[2, 2], sep = " | ")
+}
+
+# Cuadro comparativo estandarizado
+comparativa_km <- tibble(
+  `Representación`                  = c("Espacio Original Escalado (5D)", "Subespacio Reducido (2 PCs)"),
+  `Varianza Retenida`               = c("100.0%", "67.10%"),
+  `Coincidencia / Accuracy`         = c(
+    paste0(round(res_orig$accuracy * 100, 2), "%"),
+    paste0(round(res_pca$accuracy * 100, 2), "%")
+  ),
+  `Matriz Confusión (TN, FP, FN, TP)` = c(
+    fmt_cm(res_orig$cm),
+    fmt_cm(res_pca$cm)
+  )
+)
+
+# Renderizado HTML de la tabla
+kable(
+  comparativa_km,
+  format = "html",
+  caption = "Tabla 5.3: Comparación de desempeño de K-Means (k=2) en la detección de supervivencia",
+  table.attr = 'class="table table-striped table-hover table-bordered table-condensed"'
+) %>%
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+Los grupos coinciden mejor con la supervivencia en el subespacio reducido de los primeros 2 Componentes Principales (2 PCs), alcanzando un **59.52%** de coincidencia frente a un **40.38%** en la matriz original de 5 dimensiones.
+
+En el espacio comprimido en 2D, el algoritmo K-Means logra identificar un hiperplano de separación más limpio, reduciendo drásticamente los falsos positivos (de 441 a 145) y reflejando de mejor manera la distribución real de la variable `survived`.
+

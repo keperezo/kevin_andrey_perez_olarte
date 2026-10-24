@@ -1,0 +1,1149 @@
+---
+title: "Taller 1 — Comparador de precios de antiinfecciosos de uso sistémico"
+subtitle: "Minería de Datos (2016325) · Universidad Nacional de Colombia · 2026-2"
+author: "Marlon Jiménez Valencia"
+date: today
+lang: es
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    code-fold: show
+    code-tools: true
+    embed-resources: true
+    theme: cosmo
+jupyter: python3
+execute:
+  warning: false
+---
+
+```{python}
+#| label: setup
+#| code-fold: true
+# Configuración. El documento NO duplica el código de extracción: llama a las
+# funciones de scraper.py, categoria.py y limpieza.py.
+import json
+import sqlite3
+import textwrap
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import pandas as pd
+from IPython.display import Markdown, display
+
+import categoria
+import limpieza
+import scraper
+
+# Cambia a True solo si quieres volver a recolectar al renderizar.
+RECOLECTAR_EN_LINEA = False      # consulta los tres sitios (~10-15 min)
+REPROCESAR_SIN_CONEXION = False  # reconstruye la base desde raw/ sin internet
+
+if RECOLECTAR_EN_LINEA:
+    display(scraper.ejecutar_recoleccion())
+elif REPROCESAR_SIN_CONEXION:
+    display(scraper.ejecutar_recoleccion(sin_conexion=True))
+
+con = scraper.conectar(scraper.DB_PATH)
+
+# Correspondencia verificada a mano (ver sección 3.3)
+RUTA_CORRESPONDENCIA = Path("correspondencia.csv")
+if RUTA_CORRESPONDENCIA.exists():
+    limpieza.cargar_correspondencia(con, RUTA_CORRESPONDENCIA)
+
+# Ejecución de referencia: la que se analiza en el texto (la última en la que los tres
+# comercios quedaron completos cuando escribimos el documento). Si se recolecta otra vez,
+# las tablas siguen sobre esta ejecución para que coincidan con el texto; la nueva corrida
+# aparece en la tabla de ejecuciones y en el cambio de precios entre fechas.
+EJEC = "E20261009T235057"
+hay_datos = pd.read_sql_query("SELECT COUNT(*) FROM observaciones WHERE id_ejecucion = ?",
+                              con, params=[EJEC]).iloc[0, 0]
+if not hay_datos:
+    # Si no está en la base, la más reciente en la que los tres comercios quedaron
+    # completos (con observaciones guardadas); si ninguna está completa, la más reciente.
+    completas = pd.read_sql_query("""
+        SELECT e.id_ejecucion FROM ejecuciones e
+        WHERE e.modo = 'en_linea'
+          AND EXISTS (SELECT 1 FROM observaciones o WHERE o.id_ejecucion = e.id_ejecucion)
+        GROUP BY e.id_ejecucion
+        HAVING SUM(e.estado = 'completa') = COUNT(*) AND COUNT(*) >= 3
+        ORDER BY e.id_ejecucion DESC LIMIT 1""", con)
+    EJEC = completas.iloc[0, 0] if len(completas) else pd.read_sql_query(
+        "SELECT MAX(id_ejecucion) FROM observaciones", con).iloc[0, 0]
+
+NOMBRES = {"larebaja": "La Rebaja", "locatel": "Locatel", "cafam": "Cafam", "colsubsidio": "Colsubsidio"}
+# Paleta categórica validada (3 primeros colores: distinguibles con daltonismo)
+COLORES = {"larebaja": "#2a78d6", "locatel": "#eb6834", "cafam": "#1baf7a", "colsubsidio": "#4a3aa7"}
+ORDEN = ["larebaja", "locatel", "cafam"]
+
+plt.rcParams.update({
+    "figure.dpi": 110, "font.size": 9.5, "axes.edgecolor": "#c9c8c3",
+    "axes.labelcolor": "#52514e", "xtick.color": "#52514e", "ytick.color": "#52514e",
+    "axes.spines.top": False, "axes.spines.right": False, "axes.grid": True,
+    "grid.color": "#ecebe7", "grid.linewidth": 0.8, "axes.axisbelow": True,
+    "figure.facecolor": "#fcfcfb", "axes.facecolor": "#fcfcfb",
+})
+
+
+def consulta(sql: str, **params) -> pd.DataFrame:
+    """Muestra la consulta SQL y devuelve su resultado como DataFrame."""
+    display(Markdown(f"```sql\n{sql.strip()}\n```"))
+    return pd.read_sql_query(sql, con, params=params)
+
+
+def cop(x) -> str:
+    return "—" if pd.isna(x) else f"${x:,.0f}".replace(",", ".")
+
+display(Markdown(f"**Ejecución de referencia para las comparaciones:** `{EJEC}`"))
+```
+
+# Introducción
+
+**Categoría registrada:** *Medicamentos antiinfecciosos de uso sistémico* — antibióticos,
+antivirales, antimicóticos sistémicos y antiparasitarios. Se excluyen los tratamientos
+locales asignados a piel, ojos u oídos.
+
+**Comercios:** La Rebaja Virtual, Locatel Colombia y Droguerías Cafam, tres cadenas de
+droguerías con venta en línea en Colombia.
+
+**Objetivo:** identificar, para las mismas presentaciones de medicamentos, en qué comercio
+resulta más económico comprarlas y qué presentación ofrece el menor precio por unidad,
+solo cuando la comparación es válida (mismo principio activo, concentración, laboratorio
+y forma farmacéutica).
+
+Los antiinfecciosos son una compra que casi nunca se puede aplazar: se compran cuando
+alguien ya está enfermo, con una fórmula médica que fija el medicamento, la dosis y los días
+de tratamiento. El paciente no decide cuánto comprar, solo dónde. Además, una misma molécula
+la venden varios laboratorios (genéricos como MK, Genfar o La Santé, y la marca original), y
+la misma caja, con el mismo código de barras, puede tener un precio distinto en cada
+droguería. Por eso tiene sentido comparar presentaciones idénticas entre comercios.
+
+Se eligieron diez presentaciones comparables, una por principio activo:
+
+| Id | Presentación | Laboratorio |
+|---|---|---|
+| P01 | Amoxicilina 875 mg, caja × 20 tabletas | Tecnoquímicas (MK) |
+| P02 | Amoxicilina + ácido clavulánico 875/125 mg, caja × 14 tabletas (Clavulin) | GSK |
+| P03 | Nitazoxanida 500 mg, caja × 6 tabletas | Tecnoquímicas (MK) |
+| P04 | Cefalexina 500 mg, caja × 10 cápsulas | Genfar |
+| P05 | Fluconazol 150 mg, caja × 1 cápsula | Tecnoquímicas (MK) |
+| P06 | Azitromicina 500 mg, caja × 3 tabletas | Tecnoquímicas (MK) |
+| P07 | Aciclovir 800 mg, caja × 10 tabletas | Tecnoquímicas (MK) |
+| P08 | Trimetoprim + sulfametoxazol 80/400 mg, caja × 100 tabletas | Tecnoquímicas (MK) |
+| P09 | Ciprofloxacina 500 mg, caja × 10 tabletas | Tecnoquímicas (MK) |
+| P10 | Levofloxacina 750 mg, caja × 5 tabletas | Tecnoquímicas (MK) |
+
+::: {.callout-important}
+## Advertencia
+Este trabajo compara precios publicados. Un precio menor **no** es una recomendación de
+cambiar un medicamento por otro: la elección de un antiinfeccioso y su dosis corresponde
+al médico tratante, y la mayoría de estos productos requieren fórmula médica.
+:::
+
+# Fuentes y scraping
+
+## Comercios, secciones y revisión de condiciones de uso
+
+```{python}
+#| label: tbl-comercios
+#| code-fold: true
+comercios = pd.read_sql_query(
+    "SELECT id_comercio, nombre, url_base, plataforma, secciones, robots FROM comercios "
+    "WHERE id_comercio IN (SELECT DISTINCT id_comercio FROM ejecuciones WHERE estado <> 'fallida')", con)
+comercios["secciones"] = comercios["secciones"].map(
+    lambda s: "; ".join(f"{n} (`{fq}`)" for fq, n in json.loads(s)))
+display(Markdown(comercios.to_markdown(index=False)))
+```
+
+**Herramientas.** Python con `requests` (peticiones HTTP), `pandas`, `sqlite3` y
+`matplotlib`. No se usa automatización de navegador.
+
+**Estrategia de extracción.** Los tres sitios están construidos sobre la plataforma VTEX,
+pero no se leen igual, porque se respetó lo que permite el `robots.txt` de cada uno
+(revisado el 3 de octubre de 2026).
+
+**La Rebaja y Locatel (servicio interno en JSON).** Al abrir una categoría, la página pide
+sus productos a un servicio interno que responde en JSON. Su `robots.txt` no restringe esa
+ruta. El servicio se identificó en la pestaña *Red* (Network) de las herramientas de
+desarrollador del navegador:
+
+```
+GET https://<sitio>/api/catalog_system/pub/products/search
+    ?fq=C:/<ids de categoría>/      filtro de categoría
+    &fq=P:[<min> TO <max>]          filtro de precio (solo para partir secciones grandes)
+    &_from=0&_to=49                 paginación: máximo 50 productos por petición
+    &O=OrderByNameASC               orden estable entre páginas
+```
+
+- **Paginación.** El total de productos llega en la cabecera HTTP `resources`
+  (por ejemplo, `0-49/4306`). El código recorre `_from` de 50 en 50 hasta ese total.
+- **Límite de VTEX.** El servicio responde con error 400 si `_from` supera
+  aproximadamente 2.500. Cuando una sección tiene más productos, el código la parte por
+  rangos de precio (`P:[a TO b]`) de forma recursiva hasta que cada parte tenga 2.500
+  productos o menos. Luego verifica que la suma de las partes coincida con el total.
+- **Codificación del filtro.** El filtro de precio se envía con los espacios como `%20`
+  (`P:[0%20TO%205000000]`). Con `+` el cortafuegos de los sitios responde 400 (*"Scripts are
+  not allowed!"*): eso hizo fallar la primera ejecución (`E20261003T161407`), que quedó
+  registrada como `fallida`.
+- **Catálogo en movimiento.** Mientras se pasan las páginas, el sitio puede actualizar su
+  catálogo y un producto puede "correrse" de página: sale dos veces y otro no alcanza a
+  salir. Por eso, si un rango trae menos productos distintos que su total, se recorre una
+  segunda vez y se juntan los resultados. En la ejecución `E20261003T231325`, que todavía no
+  tenía esta segunda vuelta, La Rebaja quedó `parcial` por esto (4.222 de 4.225; los 3
+  productos que faltaron no son antiinfecciosos).
+
+**Cafam (páginas HTML de categoría).** El `robots.txt` de Cafam prohíbe `/api/` (y los
+parámetros `?O=`, `?PS=`, `?q=` y `map=ft`), pero permite las páginas de categoría con
+`?page=N`. Por eso Cafam se lee desde esas páginas:
+
+```
+GET https://www.drogueriascafam.com.co/salud-y-medicamentos/<subcategoría>?page=N
+```
+
+- Cada página trae, dentro del HTML, un bloque JSON (`__STATE__ = {...}`) con los 12
+  productos que muestra: nombre, EAN, precio, precio antes del descuento, unidades
+  disponibles y la ficha técnica (principio activo, laboratorio, vía de administración,
+  contenido).
+- El total de la sección y el de cada subcategoría vienen en ese mismo bloque
+  (`recordsFiltered`). Las páginas de categoría de VTEX IO no muestran más de 50 páginas
+  (600 productos) por listado, así que se recorren las subcategorías de "Salud y
+  medicamentos" una por una.
+- **Medicamentos RX** tiene unos 1.970 productos, más de 600. Esa subcategoría se parte por
+  rangos de precio con el filtro de la propia página, `?priceRange=A TO B`, que el
+  `robots.txt` no prohíbe (sí prohíbe `initialMap=`, `map=ft`, `?O=`, `?PS=` y `?q=`). Se
+  empieza por los tres rangos de la faceta "Precio" que muestra el sitio y cada rango se
+  parte a la mitad hasta que tenga 600 productos o menos. Los extremos de los rangos son
+  inclusivos: un producto con precio igual al borde sale en los dos rangos y se guarda una
+  sola vez. En la ejecución del 4 de octubre quedaron 10 rangos con productos, que suman
+  exactamente los 1.969 productos de la subcategoría.
+- El orden de la página es por relevancia (el `robots.txt` no permite cambiarlo con `?O=`).
+  Si al terminar un listado faltan productos, se recorre una segunda vez y se juntan los
+  resultados.
+- **Productos que el sitio cuenta pero no muestra.** En algunos rangos de Medicamentos RX
+  (dos el 4 de octubre y tres el 9 de octubre), una página trae 11 productos en vez de 12,
+  en las dos vueltas y siempre en la misma página.
+  Cafam cuenta esos productos en `recordsFiltered`, pero no los muestra (tampoco a un
+  visitante). Quedan anotados en el `manifest.json` (`no_mostrados_por_seccion`) y la
+  sección se considera completa si se descargó todo lo que el sitio muestra. Por eso en la
+  tabla de ejecuciones Cafam aparece con 2 o 3 productos menos que el total reportado.
+- La página muestra un solo SKU por producto (el primero disponible).
+- Antes de decidir leer Cafam desde el HTML, la primera ejecución (fallida) y unas pruebas
+  alcanzaron a hacer cerca de 10 peticiones a `/api/` de Cafam (3 de octubre). Desde
+  entonces el código no usa esa ruta en Cafam.
+
+**Para los tres comercios:**
+
+- **Buenas prácticas.** Una petición por segundo, reintentos con espera creciente ante
+  errores 429/5xx (los demás errores no se reintentan), un `User-Agent` que identifica el uso
+  académico y ninguna página privada (carrito, cuenta, pagos).
+- **Copias crudas.** Cada respuesta se guarda comprimida en
+  `raw/<comercio>/<fecha>/<id_ejecucion>/pagina_NNNN.json.gz`, junto con un
+  `manifest.json` con los conteos. En La Rebaja y Locatel se guarda el JSON completo y el
+  árbol de categorías. En Cafam se guarda el bloque `__STATE__` de cada página con los
+  productos, sin las facetas de los filtros ni el `priceToken` (una firma de la sesión), y la
+  lista de subcategorías con sus conteos. `scraper.ejecutar_recoleccion(sin_conexion=True)`
+  reconstruye la base completa a partir de esas copias sin consultar los sitios.
+
+## Ejecuciones y verificación de completitud
+
+```{python}
+#| label: tbl-ejecuciones
+#| code-fold: true
+ejec = pd.read_sql_query("""
+    SELECT id_ejecucion, id_comercio, inicio, modo, paginas,
+           total_reportado_sitio, productos_recorridos, registros_categoria, excluidos, estado
+    FROM ejecuciones ORDER BY id_ejecucion, id_comercio""", con)
+ejec["completitud_%"] = (100 * ejec["productos_recorridos"] / ejec["total_reportado_sitio"]).round(1)
+ejec
+```
+
+`total_reportado_sitio` es la cifra que reporta el propio sitio: la cabecera `resources`
+de cada sección en La Rebaja y Locatel, y el total de "Salud y medicamentos"
+(`recordsFiltered`) en Cafam. `productos_recorridos` cuenta los productos distintos que se
+descargaron. La ejecución queda `completa` si no hubo errores y **cada sección** trajo todos
+los productos que reporta el sitio (se revisa por sección porque un producto puede aparecer
+en dos secciones).
+
+**¿Quedó completa la recolección?** En la ejecución de referencia (`E20261009T235057`, que
+empezó el 9 de octubre a las 23:50; Cafam se consultó pasada la medianoche) los tres
+comercios quedaron `completa`. En La Rebaja y Locatel se descargaron exactamente los
+productos que reporta el sitio (4.245 y 3.305). En Cafam se descargaron 3.150 de 3.153: la
+diferencia son tres productos que Cafam cuenta pero no muestra, uno en cada uno de tres rangos
+de Medicamentos RX, y se repitió igual en las dos vueltas (sección 2.1). La ejecución del 4 de
+octubre (`E20261004T182736`), que se usa para comparar fechas, también quedó completa en los
+tres (en Cafam, 3.102 de 3.104 por la misma razón).
+
+Las demás filas muestran cómo se fue corrigiendo el scraper:
+
+- `E20261003T161407` quedó `fallida` en los tres comercios por el error 400 del filtro de
+  precio codificado con `+`.
+- En `E20261003T161622` se detuvo Cafam a propósito al empezar (alcanzó a pedir su árbol de
+  categorías por `/api/`), cuando se decidió no usar ese servicio. Por eso no tiene fila de
+  Cafam.
+- `E20261003T231325` quedó `parcial`. En La Rebaja y Locatel faltaron 3 y 1 productos porque
+  el catálogo se movió mientras se pasaban las páginas (después se agregó la segunda
+  vuelta), y en Cafam solo se alcanzaron 1.731 de 3.098 porque el código todavía no partía
+  Medicamentos RX en listados de 600.
+- En `E20261004T175657` Cafam quedó `parcial` porque el código todavía no reconocía los
+  productos que el sitio cuenta pero no muestra. Sus datos son los mismos de una ejecución
+  completa, pero la fila conserva el estado con el que se registró.
+
+Los conteos de la categoría (`registros_categoria` y `excluidos`) de todas las ejecuciones
+se recalcularon desde `raw/` en modo sin conexión con las reglas finales de `categoria.py`,
+así que son comparables entre ejecuciones.
+
+**Prueba en un entorno limpio.** El 10 de octubre se copió el proyecto (código, `raw/` y
+`correspondencia.csv`, sin la base) a una carpeta nueva y se instaló un entorno virtual nuevo
+solo con `requirements.txt` (Python 3.13.2, en el mismo computador). Desde ahí,
+`python scraper.py --sin-conexion` reconstruyó la base completa a partir de `raw/` y quedó
+idéntica a la entregada: mismas observaciones y precios, mismos anuncios y mismos excluidos.
+El documento también se renderizó sin errores desde ese entorno.
+
+Para probarlo en un computador distinto se incluye el cuaderno `prueba_colab.ipynb`, que se
+abre en Google Colab desde el enlace del `README.md`. Clona el repositorio, instala
+`requirements.txt`, reconstruye la base sin conexión, la compara con la entregada y corre el
+scraper en línea con un comercio.
+
+# Preparación de los datos
+
+## Delimitación de la categoría
+
+Ningún comercio tiene una sección idéntica a la delimitación de la planilla. La Rebaja y
+Cafam ponen todos los medicamentos con fórmula en una sola sección, y la sección
+"Antiinfecciosos" de Locatel incluye productos que no lo son, como los lisados
+bacterianos. Por eso se recorre la sección completa de medicamentos de cada comercio y la
+categoría se define con reglas explícitas (`categoria.py`), basadas en el principio activo
+publicado y en la vía de administración:
+
+```{python}
+#| label: reglas
+#| code-fold: true
+display(Markdown(categoria.describir_reglas()))
+```
+
+**Productos excluidos por la delimitación** (antiinfecciosos de uso local, o productos de
+secciones antiinfecciosas del comercio que no son antiinfecciosos sistémicos):
+
+```{python}
+#| label: tbl-excluidos
+#| code-fold: true
+excl = pd.read_sql_query("""
+    SELECT id_comercio, motivo, COUNT(*) AS n
+    FROM excluidos WHERE id_ejecucion = :e
+    GROUP BY id_comercio, motivo ORDER BY id_comercio, n DESC""", con, params={"e": EJEC})
+excl
+```
+
+```{python}
+#| label: tbl-excluidos-ejemplos
+#| code-fold: true
+# Dos ejemplos de cada motivo (muestra fija, para que no cambie en cada render)
+pd.read_sql_query("""
+    SELECT id_comercio, nombre_original, principio_activo, motivo
+    FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY motivo ORDER BY id_comercio, sku_comercio) AS k
+          FROM excluidos WHERE id_ejecucion = :e)
+    WHERE k <= 2
+    ORDER BY motivo, id_comercio""", con, params={"e": EJEC})
+```
+
+## Limpieza y estandarización
+
+Los textos originales se conservan sin cambios (`observaciones.texto_original`,
+`anuncios.*_original`). Las versiones estandarizadas se guardan en columnas propias
+(`limpieza.py`):
+
+| Paso | Regla |
+|---|---|
+| Precio | El JSON trae el precio como número en COP. Un precio en 0 de un producto agotado se guarda como `NULL`, nunca como 0. Se conserva el precio antes del descuento (`precio_lista`) y `promocion = 1` si `precio < precio_lista`. |
+| Marca y laboratorio | Mayúsculas, sin tildes ni puntuación, sin sufijos societarios (S.A., S.A.S.). Se unifican alias: MK → TECNOQUIMICAS, AG → AMERICAN GENERICS. |
+| Principio activo | Nombre estándar a partir del diccionario de `categoria.py` (p. ej., CIPROFLOXACINO → CIPROFLOXACINA). Si Locatel no trae la ficha "Principio activo", se lee de su descripción ("Principio Activo: CEFALEXINA Registro Sanitario…"). |
+| Forma farmacéutica | Se revisan los campos en orden (nombre, presentación, principio activo, unidad de medida) y se usa el primero que diga la forma. Así "CAJA X 14 CAP" en la presentación gana sobre un "Tab" genérico de otro campo. |
+| Unidades y contenido | Se usan los campos estructurados de la ficha (unidad de medida y cantidad) y se comparan con lo que dice el nombre ("X 100Ml", "Caja X 20.00 Tab"). Si no coinciden, se usa el nombre, porque en Locatel el campo "PUM - Medida" a veces trae otro número (p. ej. Bactrim F "Susp X 100Ml" con 20). En los líquidos se ignora el "/5 mL" de la concentración. La fuente y la diferencia quedan en `fuente_cantidad`. |
+| EAN | Se valida el dígito de control. Los códigos internos (p. ej., `45582` en Locatel) quedan con `ean_valido = 0`. |
+
+```{python}
+#| label: tbl-estandarizacion
+#| code-fold: true
+# Cuatro anuncios de cada comercio (muestra fija)
+pd.read_sql_query("""
+    SELECT id_comercio, nombre_original, presentacion_original,
+           principio_activo_std, concentracion_std, laboratorio_std, forma_std,
+           unidades, contenido, unidad_contenido, fuente_cantidad
+    FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY id_comercio ORDER BY sku_comercio) AS k
+          FROM anuncios)
+    WHERE k <= 4
+    ORDER BY id_comercio""", con)
+```
+
+## Correspondencia de productos
+
+La regla para **proponer** correspondencias es: mismo EAN (código de barras), mismo número
+de unidades por empaque (o mismo contenido en mL) y presencia en los tres comercios dentro
+de la misma ejecución. El EAN identifica laboratorio, concentración y tamaño del empaque,
+pero no basta solo. Por ejemplo, La Rebaja vende con el mismo EAN la caja completa y un
+blíster fraccionado (`CAJA X 60 CAP` frente a `BLISTER X 10`), así que también se exige el
+mismo número de unidades.
+
+```{python}
+#| label: tbl-propuesta
+#| code-fold: true
+propuesta = limpieza.proponer_correspondencias(con, EJEC, n_comercios=len(ORDEN))
+# Plantilla para revisar a mano: se copia a correspondencia.csv con verificado = 1
+limpieza.plantilla_correspondencia(propuesta).to_csv("correspondencia_propuesta.csv", index=False)
+propuesta[["ean", "principio_activo", "concentracion", "forma", "laboratorio",
+           "unidades", "contenido_ml", "nombres"]]
+```
+
+La propuesta se revisó a mano: marca, variante, concentración, número de unidades y forma
+farmacéutica. Las presentaciones elegidas, con un identificador común, quedan en
+`correspondencia.csv` y se cargan en las tablas `productos` y `correspondencia` (y en
+`anuncios.comparable = 1`).
+
+```{python}
+#| label: tbl-comparables
+#| code-fold: true
+pd.read_sql_query("""
+    SELECT p.id_producto, p.descripcion, a.id_comercio, a.sku_comercio, a.ean, a.nombre_original
+    FROM productos p JOIN anuncios a ON a.id_producto = p.id_producto
+    ORDER BY p.id_producto, a.id_comercio""", con)
+```
+
+**Cómo se eligieron y verificaron las diez presentaciones.** Los comparables se eligieron con
+la ejecución del 4 de octubre (`E20261004T182736`), en la que la regla automática dio 98
+candidatos. (Con las reglas finales de la categoría son 100 en esa ejecución; la tabla de
+arriba muestra los 98 de la ejecución de referencia, del 9 de octubre.) De ahí se escogieron
+así:
+
+1. **Disponibles en los tres comercios y con un solo anuncio por comercio** para ese EAN y
+   tamaño. Quedaron 63 candidatos. Este filtro descarta los productos agotados en algún
+   comercio y los casos en que un comercio tiene dos anuncios con el mismo código y el mismo
+   tamaño, porque no se sabría cuál de los dos precios comparar. (La caja y el blíster que La
+   Rebaja vende con el mismo código ya quedan separados por la regla del número de unidades.)
+2. **Una presentación por principio activo**, para los diez principios con más anuncios en
+   los tres comercios juntos. No hay datos de ventas, así que el número de anuncios se usó
+   como aproximación a qué tan común es cada medicamento.
+3. **El genérico de Tecnoquímicas (MK) cuando existía**, porque es el laboratorio que más
+   aparece en los tres comercios y así casi toda la comparación es del mismo producto. Las
+   excepciones son la cefalexina (Genfar, porque la de MK no estaba en los tres comercios) y
+   la amoxicilina con ácido clavulánico (Clavulin, la marca original).
+
+Cada correspondencia se revisó con los nombres publicados en los tres comercios: marca o
+laboratorio, concentración, forma farmacéutica y número de unidades. Por ejemplo, P01 aparece
+como "AMOXICILINA 875 MG (MK)" en La Rebaja, "Amoxicilina Mk 875Mg X 20 Tabletas
+Recubiertas" en Locatel y "Amoxicilina Mk 875 Mg Caja con 20 Tabletas" en Cafam. La Rebaja
+casi nunca pone el número de unidades en el nombre (lo pone en la ficha "Presentación", por
+ejemplo `CAJA X 20 TAB`) y Locatel a veces tampoco. En esos casos el número de unidades se
+confirmó con la ficha y con el nombre de los otros comercios. En `correspondencia.csv` se
+corrigieron a mano dos datos descriptivos, nunca precios: la concentración de Clavulin, que
+salió como "1 G" porque La Rebaja lo publica como "CLAVULIN 1 GR" (875 mg + 125 mg; Locatel y
+Cafam escriben 875/125 mg), y el laboratorio de la nitazoxanida y la azitromicina MK, que
+había salido con el nombre del principio activo.
+
+Las diez presentaciones también están, con precio, en los tres comercios en la ejecución del
+9 de octubre (`E20261009T235057`), que es la ejecución de referencia de las consultas.
+
+# Base SQLite
+
+```{python}
+#| label: esquema
+#| code-fold: true
+tablas = pd.read_sql_query(
+    "SELECT name, type FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%'", con)
+tablas["registros"] = [pd.read_sql_query(f"SELECT COUNT(*) FROM {n}", con).iloc[0, 0] for n in tablas["name"]]
+tablas
+```
+
+**Estructura.** `comercios` (1) → `anuncios` (N): cada SKU de cada comercio, con campos
+originales y estandarizados. `anuncios` (1) → `observaciones` (N): precio en una fecha y
+hora. `ejecuciones` registra cada corrida por comercio. `productos` y `correspondencia`
+guardan el identificador común de las presentaciones comparables. `excluidos` guarda lo
+que quedó fuera de la categoría. La vista `v_observaciones` reúne en una sola tabla los
+campos mínimos que pide el taller.
+
+**Validaciones.**
+
+```{python}
+#| label: validaciones
+#| code-fold: true
+pd.read_sql_query("""
+    SELECT 'Observaciones sin fecha de consulta' AS chequeo, COUNT(*) AS n FROM observaciones WHERE fecha_consulta IS NULL
+    UNION ALL SELECT 'Fechas que no están en formato ISO 8601 con -05:00', COUNT(*) FROM observaciones
+              WHERE fecha_consulta NOT GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]-05:00'
+    UNION ALL SELECT 'Observaciones repetidas (comercio, SKU, fecha)', COUNT(*) FROM (
+              SELECT 1 FROM observaciones GROUP BY id_comercio, sku_comercio, fecha_consulta HAVING COUNT(*) > 1)
+    UNION ALL SELECT 'Precios iguales a 0', COUNT(*) FROM observaciones WHERE precio = 0
+    UNION ALL SELECT 'Observaciones sin URL o sin texto original', COUNT(*) FROM observaciones
+              WHERE url_extraccion IS NULL OR texto_original IS NULL""", con)
+```
+
+La restricción `UNIQUE (id_comercio, sku_comercio, fecha_consulta)` impide insertar dos
+veces la misma observación. Por eso reprocesar `raw/` sin conexión sobre la misma base no
+duplica registros.
+
+# Consultas SQL
+
+## P1. ¿Cuántos comercios, presentaciones y observaciones hay? ¿Cuántos productos aporta cada comercio?
+
+```{python}
+#| echo: false
+consulta("""
+SELECT (SELECT COUNT(DISTINCT id_comercio) FROM observaciones)  AS comercios,
+       (SELECT COUNT(*) FROM anuncios)                          AS anuncios_en_categoria,
+       (SELECT COUNT(*) FROM productos)                         AS presentaciones_comparables,
+       (SELECT COUNT(*) FROM observaciones)                     AS observaciones,
+       (SELECT COUNT(DISTINCT id_ejecucion) FROM observaciones) AS ejecuciones
+""")
+```
+
+```{python}
+#| echo: false
+consulta("""
+SELECT c.nombre                              AS comercio,
+       COUNT(DISTINCT a.id_producto_comercio) AS productos,
+       COUNT(*)                               AS skus,
+       SUM(a.comparable)                      AS skus_comparables
+FROM anuncios a
+JOIN comercios c ON c.id_comercio = a.id_comercio
+GROUP BY c.nombre
+ORDER BY productos DESC
+""")
+```
+
+La base tiene los tres comercios, 901 anuncios de la categoría (SKU distintos que aparecieron
+en alguna de las cinco ejecuciones con datos), las 10 presentaciones comparables y 4.090
+observaciones de precio. La Rebaja es la que más aporta (364 productos y 373 SKU), seguida
+de Locatel (284 y 297) y Cafam (231 y 231). En Cafam cada producto tiene un solo SKU porque
+su página muestra solo el primero disponible. Más anuncios no quiere decir más
+medicamentos distintos: en la ejecución de referencia Locatel tiene 68 principios activos
+distintos, La Rebaja 56 y Cafam 45. La Rebaja tiene más presentaciones de cada principio
+(en promedio 6,6 SKU por principio activo, frente a 5,1 en Cafam y 4,4 en Locatel): más
+tamaños y más laboratorios del mismo medicamento. Cada comercio aporta un SKU por cada una de
+las 10 presentaciones comparables.
+
+## P2. ¿Hay al menos 24 observaciones comparables en una misma ejecución? ¿Hay repetidos?
+
+```{python}
+#| echo: false
+consulta("""
+SELECT o.id_ejecucion,
+       COUNT(*)                                       AS obs_comparables,
+       COUNT(DISTINCT a.id_producto)                  AS presentaciones,
+       COUNT(DISTINCT o.id_comercio)                  AS comercios,
+       COUNT(DISTINCT a.id_producto || '|' || o.id_comercio) AS pares_presentacion_comercio
+FROM observaciones o
+JOIN anuncios a ON a.id_comercio = o.id_comercio AND a.sku_comercio = o.sku_comercio
+WHERE a.comparable = 1 AND o.precio IS NOT NULL
+GROUP BY o.id_ejecucion
+ORDER BY o.id_ejecucion
+""")
+```
+
+```{python}
+#| echo: false
+consulta("""
+-- Repetidos: misma presentación y mismo comercio más de una vez en una ejecución
+SELECT o.id_ejecucion, a.id_producto, o.id_comercio, COUNT(*) AS veces
+FROM observaciones o
+JOIN anuncios a ON a.id_comercio = o.id_comercio AND a.sku_comercio = o.sku_comercio
+WHERE a.comparable = 1
+GROUP BY o.id_ejecucion, a.id_producto, o.id_comercio
+HAVING COUNT(*) > 1
+""")
+```
+
+Sí. Las dos ejecuciones del 4 de octubre y la del 9 de octubre tienen 30 observaciones
+comparables cada una: las 10 presentaciones en los 3 comercios, más que las 24 que se exigen
+(8 × 3). La primera corrida que funcionó (`E20261003T161622`) tiene 20 porque no incluyó
+Cafam, y `E20261003T231325` tiene 26 porque Cafam quedó parcial y solo alcanzó a traer 6 de
+las 10. La segunda tabla sale vacía: ninguna presentación aparece dos veces en el mismo
+comercio y la misma ejecución, así que no hay registros repetidos.
+
+## P3. Precio mínimo, máximo y promedio de cada presentación. ¿Qué comercio ofrece el menor precio (con empates)?
+
+```{python}
+#| echo: false
+p3 = consulta("""
+WITH obs AS (
+    SELECT a.id_producto, p.descripcion, o.id_comercio, o.precio
+    FROM observaciones o
+    JOIN anuncios  a ON a.id_comercio = o.id_comercio AND a.sku_comercio = o.sku_comercio
+    JOIN productos p ON p.id_producto = a.id_producto
+    WHERE o.id_ejecucion = :ejec AND a.comparable = 1 AND o.precio IS NOT NULL
+),
+est AS (
+    SELECT id_producto, descripcion,
+           MIN(precio) AS precio_min, MAX(precio) AS precio_max,
+           ROUND(AVG(precio), 0) AS precio_promedio, COUNT(*) AS n_comercios
+    FROM obs GROUP BY id_producto, descripcion
+)
+SELECT e.*,
+       GROUP_CONCAT(o.id_comercio, ', ') AS comercio_mas_barato,
+       COUNT(o.id_comercio)              AS n_empatados
+FROM est e
+JOIN obs o ON o.id_producto = e.id_producto AND o.precio = e.precio_min
+GROUP BY e.id_producto
+ORDER BY e.descripcion
+""", ejec=EJEC)
+p3
+```
+
+En la ejecución de referencia, Cafam tiene el menor precio en 6 de las 10 presentaciones
+(amoxicilina 875 mg, Clavulin, nitazoxanida, azitromicina, aciclovir y ciprofloxacina),
+Locatel en 3 (fluconazol, levofloxacina y trimetoprim + sulfametoxazol) y La Rebaja en 1 (la
+cefalexina, que ese día tenía 25 % de descuento). No hubo empates: `n_empatados` es 1 en
+todas. La Rebaja tiene el precio más alto en 9 de las 10.
+
+Este resultado depende de la fecha. El 9 de octubre Cafam tenía un descuento del 10 % en
+buena parte de la categoría (122 de sus 228 productos estaban en promoción). En la ejecución
+del 4 de octubre, sin esa promoción, el más barato era Locatel en 7 de las 10 y Cafam en las
+otras 3 (ver "Cambio de precios entre fechas").
+
+## P4. Ahorro en COP y en % al elegir la oferta más económica
+
+```{python}
+#| echo: false
+p4 = consulta("""
+WITH obs AS (
+    SELECT a.id_producto, p.descripcion, o.precio
+    FROM observaciones o
+    JOIN anuncios  a ON a.id_comercio = o.id_comercio AND a.sku_comercio = o.sku_comercio
+    JOIN productos p ON p.id_producto = a.id_producto
+    WHERE o.id_ejecucion = :ejec AND a.comparable = 1 AND o.precio IS NOT NULL
+)
+SELECT id_producto, descripcion,
+       MAX(precio) AS precio_max,
+       MIN(precio) AS precio_min,
+       MAX(precio) - MIN(precio)                               AS ahorro_cop,
+       ROUND(100.0 * (MAX(precio) - MIN(precio)) / MAX(precio), 1) AS ahorro_pct
+FROM obs
+GROUP BY id_producto, descripcion
+ORDER BY descripcion
+""", ejec=EJEC)
+p4
+```
+
+El ahorro de comprar en el comercio más barato va de 1,9 % (Clavulin, $2.400) a 22,8 %
+(amoxicilina 875 mg MK, $17.685), y en 7 de las 10 presentaciones es de 17 % o más. En pesos,
+los ahorros más grandes están en las cajas más caras: amoxicilina 875 mg ($17.685),
+levofloxacina ($14.550) y nitazoxanida ($9.045). En cambio, el fluconazol tiene un ahorro alto
+en porcentaje (18,9 %), pero son solo $1.150 porque la caja trae una sola cápsula. Para quien
+compra, el porcentaje dice qué tan distintos son los precios, y el ahorro en pesos dice
+cuánto le vale la pena buscar.
+
+## P5. Tamaños distintos del mismo producto: ¿qué presentación y comercio tienen el menor precio por unidad?
+
+Se agrupan las presentaciones del mismo producto (principio activo, concentración,
+laboratorio, marca y forma). La marca evita mezclar un medicamento de marca con el genérico
+del mismo laboratorio (por ejemplo, Ambigel y la ampicilina genérica de Coaspharma). El
+precio por unidad se calcula por **tableta/cápsula/sobre** en las formas sólidas y por
+**mL** en los líquidos, y las dos unidades nunca se mezclan en un mismo ranking. No se
+calcula el precio por mg de principio activo.
+
+```{python}
+#| echo: false
+p5 = consulta("""
+WITH lab_por_marca AS (
+    -- Locatel no publica el laboratorio: se usa el que publican los otros comercios para
+    -- la misma marca, solo si esa marca tiene un único laboratorio
+    SELECT marca_std, MIN(laboratorio_std) AS laboratorio
+    FROM anuncios
+    WHERE laboratorio_original IS NOT NULL AND marca_std IS NOT NULL
+    GROUP BY marca_std
+    HAVING COUNT(DISTINCT laboratorio_std) = 1
+),
+base AS (
+    SELECT a.principio_activo_std, a.concentracion_std,
+           CASE WHEN a.laboratorio_original IS NULL AND l.laboratorio IS NOT NULL
+                THEN l.laboratorio ELSE a.laboratorio_std END               AS laboratorio_std,
+           a.marca_std, a.forma_std,
+           CASE WHEN a.unidad_contenido = 'ML' AND a.contenido > 0 THEN 'mL'
+                WHEN a.unidades > 0 THEN 'unidad' END                       AS unidad_comparacion,
+           CASE WHEN a.unidad_contenido = 'ML' AND a.contenido > 0 THEN a.contenido
+                ELSE a.unidades END                                         AS cantidad,
+           o.id_comercio, a.nombre_original, o.precio
+    FROM observaciones o
+    JOIN anuncios a ON a.id_comercio = o.id_comercio AND a.sku_comercio = o.sku_comercio
+    LEFT JOIN lab_por_marca l ON l.marca_std = a.marca_std
+    WHERE o.id_ejecucion = :ejec AND o.precio IS NOT NULL
+),
+grupos AS (
+    SELECT principio_activo_std, concentracion_std, laboratorio_std, marca_std, forma_std, unidad_comparacion
+    FROM base
+    WHERE cantidad > 0
+    GROUP BY 1, 2, 3, 4, 5, 6
+    HAVING COUNT(DISTINCT cantidad) >= 2
+)
+SELECT b.principio_activo_std AS principio_activo, b.concentracion_std AS concentracion,
+       b.laboratorio_std AS laboratorio, b.marca_std AS marca, b.forma_std AS forma, b.unidad_comparacion,
+       b.cantidad, b.id_comercio, b.precio,
+       ROUND(b.precio / b.cantidad, 1) AS precio_por_unidad,
+       RANK() OVER (PARTITION BY b.principio_activo_std, b.concentracion_std, b.laboratorio_std,
+                                 b.marca_std, b.forma_std, b.unidad_comparacion
+                    ORDER BY b.precio / b.cantidad) AS puesto
+FROM base b
+JOIN grupos g
+  ON  b.principio_activo_std IS g.principio_activo_std
+  AND b.concentracion_std    IS g.concentracion_std
+  AND b.laboratorio_std      IS g.laboratorio_std
+  AND b.marca_std            IS g.marca_std
+  AND b.forma_std            IS g.forma_std
+  AND b.unidad_comparacion   IS g.unidad_comparacion
+WHERE b.cantidad > 0
+ORDER BY 1, 2, 3, 4, 5, 6, 11   -- producto, unidad de comparación y puesto
+""", ejec=EJEC)
+print(f"{p5.groupby(['principio_activo','concentracion','laboratorio','marca','forma']).ngroups} productos con dos o más tamaños")
+p5.head(40)
+```
+
+Hay 72 productos que se venden en dos o más tamaños. Si se mira cada producto dentro de un
+mismo comercio (77 casos), el empaque más grande tiene menor precio por unidad en 49, el mismo
+precio por unidad en 21 (diferencia menor a 0,5 %) y mayor precio por unidad en 7. La
+diferencia típica es pequeña: la mediana es 1,9 % menos por unidad en el empaque grande.
+
+Hay que distinguir el **desembolso** (lo que se paga por el empaque) del **precio por
+unidad**. Por ejemplo, en Cafam el aciclovir 800 mg de American Generics cuesta $17.360 la caja
+de 10 y $45.120 la de 30: la caja grande exige pagar 2,6 veces más, pero sale a $1.504 por
+tableta frente a $1.736 (13 % menos). En otros casos no hay ninguna ventaja: en Locatel la
+amikacina 500 mg cuesta lo mismo por ampolla suelta que en caja de 10 ($6.390), y en La
+Rebaja la amoxicilina 500 mg de Coaspharma vale $630 por cápsula en caja de 10 y en caja de
+100. Y a veces el empaque grande sale más caro: en Locatel la caja de 2 cápsulas de fluconazol
+150 mg Genfar ($8.700) cuesta más que dos cajas de 1 cápsula ($3.600 cada una), y en Cafam
+Enitrax sale a $3.200 la cápsula en caja de 30 y a $2.925 en caja de 14.
+
+## P6. ¿Cuáles son las mayores diferencias de precio entre comercios?
+
+```{python}
+#| echo: false
+p6 = consulta("""
+WITH obs AS (
+    SELECT a.id_producto, p.descripcion, o.id_comercio, o.precio
+    FROM observaciones o
+    JOIN anuncios  a ON a.id_comercio = o.id_comercio AND a.sku_comercio = o.sku_comercio
+    JOIN productos p ON p.id_producto = a.id_producto
+    WHERE o.id_ejecucion = :ejec AND a.comparable = 1 AND o.precio IS NOT NULL
+)
+SELECT descripcion,
+       MAX(precio) - MIN(precio)                                   AS diferencia_cop,
+       ROUND(100.0 * (MAX(precio) - MIN(precio)) / MAX(precio), 1) AS ahorro_pct,
+       ROUND(1.0 * MAX(precio) / MIN(precio), 2)                   AS veces_mas_caro
+FROM obs
+GROUP BY id_producto, descripcion
+ORDER BY ahorro_pct DESC
+""", ejec=EJEC)
+p6
+```
+
+Ordenadas por ahorro porcentual, las mayores diferencias están en los genéricos: en 7 de las
+10 presentaciones (seis de MK y la cefalexina Genfar) el comercio más caro cobra entre 1,20 y
+1,30 veces lo que cobra el más barato. La amoxicilina 875 mg es la más dispersa (1,30 veces).
+La menor diferencia es la de Clavulin (1,02 veces), la única marca original de la lista, que
+tiene casi el mismo precio en los tres comercios. Una posible explicación es que en los
+genéricos cada cadena tiene más margen para fijar su precio y hacer promociones; con diez
+presentaciones no se puede comprobar, es solo una hipótesis.
+
+## P7. ¿Qué datos faltantes o inconsistentes afectan la comparación?
+
+```{python}
+#| echo: false
+consulta("""
+SELECT 'Observaciones sin precio (agotado o sin publicar)' AS problema, COUNT(*) AS n
+  FROM observaciones WHERE precio IS NULL
+UNION ALL
+SELECT 'Anuncios sin EAN válido (código interno o vacío)', COUNT(*)
+  FROM anuncios WHERE ean_valido = 0
+UNION ALL
+SELECT 'Anuncios sin principio activo publicado', COUNT(*)
+  FROM anuncios WHERE principio_activo_original IS NULL
+UNION ALL
+SELECT 'Anuncios sin laboratorio publicado', COUNT(*)
+  FROM anuncios WHERE laboratorio_original IS NULL
+UNION ALL
+SELECT 'Anuncios sin unidades ni contenido identificables', COUNT(*)
+  FROM anuncios WHERE unidades IS NULL AND contenido IS NULL
+UNION ALL
+SELECT 'Anuncios sin concentración identificable', COUNT(*)
+  FROM anuncios WHERE concentracion_std IS NULL
+UNION ALL
+SELECT 'Mismo EAN con distinto número de unidades (fraccionados)', COUNT(*)
+  FROM (SELECT ean FROM anuncios WHERE ean_valido = 1
+        GROUP BY ean HAVING COUNT(DISTINCT COALESCE(unidades, contenido, -1)) > 1)
+UNION ALL
+SELECT 'Observaciones con precio mayor que el precio de lista', COUNT(*)
+  FROM observaciones WHERE precio > precio_lista
+UNION ALL
+SELECT 'Comparables sin precio en la ejecución de referencia', COUNT(*)
+  FROM anuncios a
+  WHERE a.comparable = 1 AND NOT EXISTS (
+        SELECT 1 FROM observaciones o
+        WHERE o.id_comercio = a.id_comercio AND o.sku_comercio = a.sku_comercio
+          AND o.id_ejecucion = :ejec AND o.precio IS NOT NULL)
+UNION ALL
+SELECT 'Productos excluidos por la delimitación (uso local, etc.)', COUNT(*)
+  FROM excluidos WHERE id_ejecucion = :ejec
+""", ejec=EJEC)
+```
+
+Ningún faltante afecta directamente la comparación principal: las 30 observaciones
+comparables de la ejecución de referencia tienen precio y ningún precio es mayor que su precio
+de lista. Lo que más pesa es la **identificación** de los productos:
+
+- **297 anuncios sin laboratorio**: son todos los de Locatel, que no publica ese campo. Por eso
+  la correspondencia no puede depender del laboratorio y se apoya en el EAN y en el nombre.
+- **41 códigos EAN con distinto número de unidades**: en 32 de ellos es La Rebaja la que usa
+  el mismo código para la caja y para el producto fraccionado. Si se comparara solo por EAN,
+  se mezclaría el precio de una caja con el de un blíster; por eso la regla exige también el
+  mismo número de unidades.
+- **49 anuncios sin EAN válido** (35 de La Rebaja, 10 de Locatel y 4 de Cafam): son códigos
+  internos o vacíos, así que esos productos no pueden entrar a la propuesta automática de
+  comparables.
+- **66 anuncios sin concentración identificable** (48 de La Rebaja) y **17 sin principio
+  activo publicado** (13 de Locatel y 4 de Cafam): no tocan a los comparables, pero sí a la
+  clasificación de la categoría y a la comparación por tamaños. Para los que no traen
+  principio activo se usó el nombre y una lista corta de marcas revisadas a mano.
+- **40 observaciones sin precio** en toda la base (productos agotados o sin precio
+  publicado): se guardan como `NULL` y no entran en ningún cálculo.
+- **544 productos excluidos** por la delimitación en la ejecución de referencia, en su mayoría
+  antiinfecciosos de uso local (cremas, gotas, óvulos) o de acción intestinal.
+
+## P8. Productos de la categoría por comercio y ejecución; calidad de la información
+
+```{python}
+#| echo: false
+consulta("""
+SELECT o.id_ejecucion,
+       c.nombre AS comercio,
+       COUNT(DISTINCT a.id_producto_comercio) AS productos,
+       COUNT(*)                               AS skus,
+       ROUND(100.0 * AVG(CASE WHEN TRIM(COALESCE(json_extract(o.texto_original, '$.descripcion'), '')) <> ''
+                              THEN 1 ELSE 0 END), 1) AS pct_con_descripcion,
+       ROUND(100.0 * AVG(a.marca_std IS NOT NULL), 1)                          AS pct_con_marca,
+       ROUND(100.0 * AVG(a.unidades IS NOT NULL OR a.contenido IS NOT NULL), 1) AS pct_con_contenido,
+       ROUND(100.0 * AVG(a.principio_activo_original IS NOT NULL), 1)          AS pct_con_principio_activo
+FROM observaciones o
+JOIN anuncios  a ON a.id_comercio = o.id_comercio AND a.sku_comercio = o.sku_comercio
+JOIN comercios c ON c.id_comercio = o.id_comercio
+GROUP BY o.id_ejecucion, c.nombre
+ORDER BY o.id_ejecucion, productos DESC
+""")
+```
+
+```{python}
+#| echo: false
+consulta("""
+-- Tamaño de la oferta por subcategoría en la ejecución de referencia
+SELECT a.subcategoria,
+       SUM(o.id_comercio = 'larebaja') AS la_rebaja,
+       SUM(o.id_comercio = 'locatel')  AS locatel,
+       SUM(o.id_comercio = 'cafam')    AS cafam
+FROM observaciones o
+JOIN anuncios a ON a.id_comercio = o.id_comercio AND a.sku_comercio = o.sku_comercio
+WHERE o.id_ejecucion = :ejec
+GROUP BY a.subcategoria
+ORDER BY la_rebaja + locatel + cafam DESC
+""", ejec=EJEC)
+```
+
+El tamaño de la oferta casi no cambia entre fechas: en todas las ejecuciones La Rebaja tiene
+363 productos (372 SKU) y Locatel 284 (297), y Cafam 229 el 4 de octubre y 228 el 9 de
+octubre. (Cafam aparece con 59 en `E20261003T231325` porque esa corrida quedó parcial.) La
+Rebaja tiene la oferta más amplia en todas las subcategorías: 226 antibióticos frente a 199
+en Locatel y 155 en Cafam, y en antiparasitarios casi duplica a los otros dos (90 frente a 46
+y 37). Los antibióticos son más de la mitad de la oferta en los tres comercios (entre 61 % y
+68 %).
+
+La información publicada es buena en los tres: el 98 % o más de los productos trae
+descripción, marca y contenido identificable. La diferencia está en el principio activo: La
+Rebaja lo publica en el 100 % de sus productos, Cafam en el 98,2 % y Locatel en el 95,6 %. En
+Locatel algunos productos solo traen la marca (por ejemplo, Zinnat o Curam) y para ellos se
+usó la lista de marcas revisadas a mano de `categoria.py`.
+
+## Canasta común (complemento de la sección 4.3)
+
+Solo se compara una canasta cuando cada comercio tiene **todas** las presentaciones de la
+misma ejecución.
+
+```{python}
+#| echo: false
+canasta = consulta("""
+WITH precio_comercio AS (
+    SELECT o.id_comercio, a.id_producto, MIN(o.precio) AS precio
+    FROM observaciones o
+    JOIN anuncios a ON a.id_comercio = o.id_comercio AND a.sku_comercio = o.sku_comercio
+    WHERE o.id_ejecucion = :ejec AND a.comparable = 1 AND o.precio IS NOT NULL
+    GROUP BY o.id_comercio, a.id_producto
+)
+SELECT id_comercio,
+       COUNT(*)    AS presentaciones,
+       (SELECT COUNT(*) FROM productos) AS presentaciones_canasta,
+       SUM(precio) AS costo_canasta_cop
+FROM precio_comercio
+GROUP BY id_comercio
+HAVING COUNT(*) = (SELECT COUNT(*) FROM productos)
+ORDER BY costo_canasta_cop
+""", ejec=EJEC)
+canasta
+```
+
+Comprar las diez presentaciones en un solo comercio costaba, el 9 de octubre, $454.725 en
+Cafam, $466.200 en Locatel y $506.970 en La Rebaja: comprarlas en Cafam y no en La Rebaja
+ahorraba $52.245 (10,3 %). Si se compra cada presentación en el comercio más barato el total
+es $448.140, apenas $6.585 menos que la canasta de Cafam, así que repartir la compra entre
+comercios casi no compensa. Esta canasta sí es comparable entre comercios porque tiene
+exactamente las mismas presentaciones y cantidades, con cobertura completa, en una misma
+ejecución (sección 4.3 del enunciado). No dice que un comercio sea más barato en toda la
+categoría.
+
+## Cambio de precios entre fechas
+
+Se compara el precio de cada presentación comparable en la primera y en la última
+ejecución en la que los tres comercios quedaron completos.
+
+```{python}
+#| echo: false
+cambios = consulta("""
+WITH completas AS (
+    SELECT id_ejecucion FROM ejecuciones
+    GROUP BY id_ejecucion
+    HAVING COUNT(*) >= 3 AND SUM(estado = 'completa') = COUNT(*)
+),
+extremos AS (SELECT MIN(id_ejecucion) AS primera, MAX(id_ejecucion) AS ultima FROM completas),
+precios AS (
+    SELECT o.id_ejecucion, a.id_producto, p.descripcion, o.id_comercio, MIN(o.precio) AS precio
+    FROM observaciones o
+    JOIN anuncios  a ON a.id_comercio = o.id_comercio AND a.sku_comercio = o.sku_comercio
+    JOIN productos p ON p.id_producto = a.id_producto
+    WHERE a.comparable = 1 AND o.precio IS NOT NULL
+    GROUP BY o.id_ejecucion, a.id_producto, o.id_comercio
+)
+SELECT x.primera AS ejecucion_antes, x.ultima AS ejecucion_despues,
+       a.descripcion, a.id_comercio,
+       a.precio AS precio_antes, d.precio AS precio_despues,
+       d.precio - a.precio AS cambio_cop,
+       ROUND(100.0 * (d.precio - a.precio) / a.precio, 1) AS cambio_pct
+FROM extremos x
+JOIN precios a ON a.id_ejecucion = x.primera
+JOIN precios d ON d.id_ejecucion = x.ultima
+              AND d.id_producto = a.id_producto AND d.id_comercio = a.id_comercio
+ORDER BY ABS(d.precio - a.precio) DESC, a.descripcion, a.id_comercio
+""")
+cambios
+```
+
+Entre el 4 y el 9 de octubre cambiaron 10 de los 30 precios comparables. Ocho son de Cafam,
+todos con 10 % menos: ese día su precio de lista era el mismo precio del 4 de octubre, así que
+se trata de una promoción y no de una baja permanente (solo Clavulin y la levofloxacina
+quedaron igual). Los otros dos cambios son la cefalexina de La Rebaja, con 25 % de descuento
+($12.900 a $9.670), y el trimetoprim + sulfametoxazol de Locatel, que subió $700 (1,8 %).
+
+Esa promoción cambió el resultado de la comparación. El 4 de octubre la canasta más barata era
+la de Locatel ($465.500, frente a $477.700 en Cafam y $510.200 en La Rebaja) y Locatel era el
+más barato en 7 de las 10 presentaciones; el 9 de octubre la más barata fue la de Cafam y
+Cafam pasó a ser el más barato en 6 de 10. La Rebaja fue la más cara en las dos fechas.
+
+# Visualizaciones
+
+```{python}
+#| label: fig-precios
+#| fig-cap: "Precio de cada presentación comparable por comercio (COP, ejecución de referencia)."
+#| code-fold: true
+datos = pd.read_sql_query("""
+    SELECT p.descripcion, o.id_comercio, MIN(o.precio) AS precio
+    FROM observaciones o
+    JOIN anuncios  a ON a.id_comercio = o.id_comercio AND a.sku_comercio = o.sku_comercio
+    JOIN productos p ON p.id_producto = a.id_producto
+    WHERE o.id_ejecucion = :e AND a.comparable = 1 AND o.precio IS NOT NULL
+    GROUP BY p.descripcion, o.id_comercio""", con, params={"e": EJEC})
+
+if datos.empty:
+    print("Aún no hay presentaciones comparables cargadas (correspondencia.csv).")
+else:
+    productos_lista = sorted(datos["descripcion"].unique())
+    n = len(productos_lista); columnas = 2; filas = -(-n // columnas)
+    fig, ejes = plt.subplots(filas, columnas, figsize=(10, 1.75 * filas + 0.6), squeeze=False)
+    for eje, prod in zip(ejes.flat, productos_lista):
+        d = datos[datos["descripcion"] == prod].set_index("id_comercio").reindex(ORDEN)
+        minimo = d["precio"].min()
+        eje.barh([NOMBRES[c] for c in d.index], d["precio"], color=[COLORES[c] for c in d.index],
+                 height=0.62, edgecolor="#fcfcfb", linewidth=2)
+        for i, (c, v) in enumerate(d["precio"].items()):
+            if pd.notna(v):
+                eje.text(v, i, " " + cop(v) + ("  ← menor" if v == minimo else ""),
+                         va="center", fontsize=8, color="#0b0b0b")
+        eje.set_title(textwrap.fill(prod, 55), fontsize=9, loc="left", color="#0b0b0b")
+        eje.set_xlim(0, d["precio"].max() * 1.55); eje.invert_yaxis()
+        eje.xaxis.set_major_locator(plt.MaxNLocator(4))   # pocas marcas para que no se monten
+        eje.xaxis.set_major_formatter(lambda x, _: f"{x/1000:g} mil".replace(".", ","))
+        eje.grid(axis="y", visible=False)
+    for eje in list(ejes.flat)[n:]:
+        eje.axis("off")
+    fig.supxlabel("Precio del empaque (COP)", fontsize=9, color="#52514e")
+    fig.tight_layout()
+    plt.show()
+```
+
+Cada panel es una presentación y cada barra el precio del empaque en un comercio, con el
+mismo color para cada comercio en todo el documento. A simple vista, la barra de La Rebaja es
+la más larga en 9 de las 10 presentaciones, y las de Cafam y Locatel suelen quedar muy cerca
+entre sí. En Clavulin las tres barras son casi iguales.
+
+Limitaciones: cada panel tiene su propia escala (no se deben comparar longitudes entre
+presentaciones distintas); es una sola fecha, y ese día Cafam tenía un descuento del 10 %; y
+es el precio publicado en línea, sin costo de envío.
+
+```{python}
+#| label: fig-unitario
+#| fig-cap: "Precio por unidad de contenido en productos con varios tamaños (cada panel tiene su propia unidad)."
+#| code-fold: true
+if p5.empty:
+    print("No hay productos con dos o más tamaños en la ejecución de referencia.")
+else:
+    # Se muestran 6 productos, uno por principio activo: los que tienen más tamaños
+    # distintos y, entre ellos, los que están en más comercios
+    clave = ["principio_activo", "concentracion", "laboratorio", "marca", "forma", "unidad_comparacion"]
+    resumen = (p5.groupby(clave, dropna=False)
+                 .agg(tamanos=("cantidad", "nunique"), comercios=("id_comercio", "nunique"),
+                      barras=("precio", "size"))
+                 .sort_values(["tamanos", "comercios", "barras"], ascending=False, kind="stable")
+                 .reset_index().drop_duplicates("principio_activo").head(6))
+    top = [tuple(fila) for fila in resumen[clave].itertuples(index=False)]
+    def filas_de(k):
+        m = pd.Series(True, index=p5.index)
+        for col, val in zip(clave, k):
+            m &= (p5[col] == val) | (p5[col].isna() & pd.isna(val))
+        return p5[m].sort_values("precio_por_unidad")
+    # el alto de cada panel depende de cuántas barras tiene
+    barras = [len(filas_de(k)) for k in top]
+    fig, ejes = plt.subplots(len(top), 1, figsize=(9, sum(0.32 * n + 1.1 for n in barras)),
+                             squeeze=False, gridspec_kw={"height_ratios": barras})
+    for eje, k in zip(ejes.flat, top):
+        d = filas_de(k)
+        etiquetas = [f"{NOMBRES.get(c, c)} · {q:g} {k[5] if k[5] == 'mL' else 'und'}"
+                     for c, q in zip(d["id_comercio"], d["cantidad"])]
+        # posiciones numéricas: dos anuncios pueden tener la misma etiqueta
+        # (mismo comercio y tamaño) y deben quedar en barras distintas
+        posiciones = range(len(d))
+        eje.barh(posiciones, d["precio_por_unidad"], color=[COLORES.get(c, "#888") for c in d["id_comercio"]],
+                 height=0.6, edgecolor="#fcfcfb", linewidth=2)
+        eje.set_yticks(posiciones, etiquetas)
+        for i, v in enumerate(d["precio_por_unidad"]):
+            eje.text(v, i, " " + cop(v), va="center", fontsize=8)
+        eje.set_title(f"{k[0]} {k[1] or ''} · {k[3] or ''} ({k[2] or ''}) · {k[4] or ''}", fontsize=9, loc="left")
+        eje.set_xlabel(f"COP por {k[5]}", fontsize=8.5)
+        eje.set_xlim(0, d["precio_por_unidad"].max() * 1.35); eje.invert_yaxis(); eje.grid(axis="y", visible=False)
+    fig.tight_layout()
+    plt.show()
+```
+
+Cada panel es un mismo producto (principio activo, concentración, laboratorio, marca y forma)
+vendido en varios tamaños, con las barras ordenadas de menor a mayor precio por unidad. Se
+eligió un producto por principio activo, entre los que tienen más tamaños y están en los tres
+comercios. El gráfico muestra que el empaque grande no siempre gana:
+
+- En la cefalexina MK la caja de 30 sale más barata por cápsula que la de 10 en La Rebaja y en
+  Locatel, los dos comercios que venden ambos tamaños, y la más barata de todas es la caja de
+  30 de Cafam ($860 por cápsula).
+- En Enitrax todas las opciones están entre $2.879 y $3.200 por cápsula, y la caja de 30 de
+  Cafam es la más cara por unidad. Aquí importa más el comercio que el tamaño.
+- En el fluconazol Genfar la caja de 1 cápsula de Locatel ($3.600) sale más barata por
+  cápsula que las cajas de 2 de los tres comercios (entre $4.185 y $4.550 por cápsula).
+- En el metronidazol MK la caja de 40 cuesta lo mismo por tableta en Locatel y en Cafam
+  ($324), y en La Rebaja casi lo mismo en caja de 40 o de 10 ($392 y $400).
+
+Limitaciones: solo aparecen seis productos de los 72 que tienen varios tamaños; el precio por
+unidad no dice cuántas unidades necesita un tratamiento (si la fórmula pide 14 tabletas, una
+caja de 30 deja sobrantes); y en Locatel, que no publica el laboratorio, se usó el laboratorio
+que publican los otros comercios para la misma marca.
+
+```{python}
+#| label: fig-ahorro
+#| fig-cap: "Ahorro potencial al comprar en el comercio más económico frente al más caro (misma presentación, misma ejecución)."
+#| code-fold: true
+if p4.empty:
+    print("Aún no hay presentaciones comparables cargadas.")
+else:
+    d = p4.sort_values("ahorro_pct")
+    fig, eje = plt.subplots(figsize=(8.5, 0.42 * len(d) + 1))
+    eje.barh(d["descripcion"], d["ahorro_pct"], color="#2a78d6", height=0.6)
+    for i, (pct, cop_) in enumerate(zip(d["ahorro_pct"], d["ahorro_cop"])):
+        eje.text(pct, i, f"  {pct:.1f} % ({cop(cop_)})".replace(".", ",", 1), va="center", fontsize=8)
+    eje.set_xlabel("Ahorro (% del precio más alto)")
+    eje.set_xlim(0, max(d["ahorro_pct"].max() * 1.45, 5)); eje.grid(axis="y", visible=False)
+    fig.tight_layout()
+    plt.show()
+```
+
+El gráfico ordena las presentaciones por el ahorro de comprar en el comercio más barato
+frente al más caro, con el ahorro en pesos al lado. Vale la pena buscar el comercio más
+barato en siete de ellas, que van de 17 % a 22,8 % (amoxicilina 875 mg, cefalexina,
+fluconazol, nitazoxanida, aciclovir, azitromicina y ciprofloxacina). En Clavulin casi da
+igual dónde comprar (1,9 %).
+
+Limitaciones: compara el precio más barato con el más caro de esa ejecución; si alguien ya
+iba a comprar en el comercio de precio intermedio, su ahorro sería menor. El porcentaje no
+dice cuánta plata es: en el fluconazol el 18,9 % son $1.150, y en la amoxicilina 875 mg el
+22,8 % son $17.685. Tampoco incluye el costo de envío ni la disponibilidad en cada ciudad.
+
+# Limitaciones y conclusiones
+
+## Limitaciones
+
+- **Promociones.** El 4 de octubre ninguno de los 30 precios comparables era promocional. El 9
+  de octubre lo eran 9 de los 30: ocho de Cafam, todos con 10 % de descuento, y la cefalexina
+  de La Rebaja, con 25 %. En toda la categoría, ese día estaban en promoción 122 de los 228
+  productos de Cafam, 37 de los 372 de La Rebaja y 6 de los 297 de Locatel. Las promociones
+  cambiaron quién es el más barato (sección "Cambio de precios entre fechas"), así que los
+  resultados no se pueden tomar como permanentes.
+- **Alcance de los precios.** Son los precios publicados en línea en la fecha y hora de cada
+  ejecución, con la configuración por defecto de cada sitio (sin escoger ciudad ni iniciar
+  sesión) y sin costo de envío. No incluyen el precio en la droguería física ni descuentos
+  para clientes registrados.
+- **Pocas fechas.** Hay dos ejecuciones completas en fechas distintas (4 y 9 de octubre).
+  Alcanzan para ver que los precios cambian, pero no para hablar de tendencias.
+- **Fórmula médica y fraccionamiento.** Casi todos estos medicamentos requieren fórmula
+  médica, y el precio no incluye la consulta. La Rebaja vende varios productos por blíster con
+  el mismo código de la caja (32 códigos); esos casos no se compararon con la caja completa
+  porque el número de unidades es distinto.
+- **Correspondencia.** Se compararon solo presentaciones con el mismo EAN y el mismo número
+  de unidades, verificadas con los nombres de los tres comercios. Esto da confianza porque el
+  código de barras corresponde a un producto y un tamaño concretos. Los 49 anuncios sin EAN
+  válido no pudieron entrar a la propuesta automática. Además, son 10 presentaciones elegidas
+  por ser comunes: no permiten decir que un comercio es más barato en toda la categoría.
+- **Delimitación de la categoría.** Se definió con reglas sobre el principio activo y la vía
+  de administración (`categoria.py`). Algunas decisiones son discutibles: la furazolidona, la
+  nifuroxazida y la rifaximina quedaron fuera por actuar en el intestino; los antipalúdicos
+  como la hidroxicloroquina quedaron dentro por su código ATC; los óvulos y cremas vaginales
+  quedaron fuera por ser de uso local. Para nueve marcas que Locatel publica sin principio
+  activo se usó una lista revisada a mano.
+
+## Conclusiones para el consumidor
+
+1. **Dónde comprar cada presentación** (ejecución del 9 de octubre): en Cafam la amoxicilina
+   875 mg MK, Clavulin, la nitazoxanida, la azitromicina, el aciclovir y la ciprofloxacina; en
+   Locatel el fluconazol, la levofloxacina y el trimetoprim + sulfametoxazol; y en La Rebaja
+   la cefalexina Genfar, por su promoción del 25 %. Sin la promoción de Cafam (4 de octubre),
+   Locatel era el más barato en 7 de las 10.
+2. **La Rebaja fue la más cara** para estas presentaciones en las dos fechas (9 de 10 el 9 de
+   octubre y 8 de 10 el 4 de octubre), salvo en productos con promoción puntual.
+3. **Entre Cafam y Locatel la diferencia es pequeña y depende de las promociones.** Conviene
+   revisar los dos antes de comprar. Para una compra de varios medicamentos, la canasta en el
+   comercio más barato de cada fecha ahorró entre $44.700 (4 de octubre) y $52.245 (9 de
+   octubre) frente a La Rebaja, y repartir la compra entre comercios solo agregaba unos pocos
+   miles de pesos de ahorro.
+4. **Ahorro en porcentaje no es lo mismo que ahorro en pesos.** En el fluconazol la diferencia
+   llega al 18,9 %, pero son $1.150; en la amoxicilina 875 mg el 22,8 % son $17.685. Vale la
+   pena buscar sobre todo en las cajas caras.
+5. **El empaque grande no siempre sale más barato por unidad.** Fue más barato por unidad en
+   49 de 77 casos, igual en 21 y más caro en 7 (por ejemplo, el fluconazol Genfar en Locatel:
+   la caja de 1 cápsula sale más barata por cápsula que la de 2). Además, el empaque grande
+   exige un desembolso mayor. Como la cantidad la fija la fórmula, lo razonable es comprar el
+   empaque que cubre el tratamiento y, si hay varios que lo cubren, mirar el precio por
+   unidad.
+6. **Condiciones de compra.** Al precio hay que sumarle el envío y revisar la disponibilidad
+   en la ciudad y la fórmula médica. Un precio menor tampoco es una razón para cambiar de
+   medicamento: eso lo decide el médico.
+
+```{python}
+#| include: false
+con.close()
+```

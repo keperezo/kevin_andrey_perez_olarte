@@ -1,0 +1,1023 @@
+---
+title: "Taller 1: Minería de Datos - Comparador de Precios de Protectores Solares"
+author: "Angela Tatiana Rincón Barrera"
+date: "2026-10-10"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    theme: cosmo
+    embed-resources: true
+    code-fold: show
+    code-summary: "Mostrar código"
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+# 1. Introducción
+
+## 1.1 Objetivo
+
+En este taller se construye un comparador de precios de protectores solares vendidos en línea en Colombia. Se tomaron tres comercios con tienda virtual (Bella Piel, Drogas La Rebaja y Locatel), se descargó su oferta de la categoría y se guardó todo en una base SQLite (`comparador_precios.sqlite`). Con esa base se responden preguntas sobre cuánto varían los precios de un mismo producto entre tiendas, dónde conviene comprar y cuánto se puede ahorrar.
+
+## 1.2 Categoría y criterios de inclusión
+
+La categoría asignada es *protectores solares faciales, corporales y labiales; productos para después del sol, incluidos los protectores infantiles*.
+
+Se consideran dentro de la categoría (`en_categoria = 1`):
+
+- Protectores faciales, con o sin color, en fluido, gel, crema o polvo con FPS;
+- Protectores corporales (lociones, sprays y leches solares);
+- Protectores infantiles y para bebés;
+- Protectores labiales con FPS;
+- Productos para después del sol, como geles de aloe *after-sun*.
+
+Quedan por fuera (`en_categoria = 0`), pero no se borran de la base, porque se guarda el `motivo_exclusion`:
+
+- Hidratantes, cremas antiedad o despigmentantes en los que el FPS es secundario;
+- Maquillaje, sérums y otros cosméticos sin fotoprotección como función principal;
+- Autobronceadores sin filtro UV;
+- Suplementos y fotoprotectores orales;
+- Limpiadores, jabones faciales o aguas micelares presentes en la categoría;
+- Kits o combos que mezclan productos de distintas categorías (por ejemplo, protector más agua micelar).
+
+---
+
+# 2. Fuentes y extracción de datos
+
+## 2.1 Revisión de `robots.txt` y comercios descartados
+
+Antes de escoger los comercios se revisó el `robots.txt` de cada sitio, para no recolectar datos de rutas que el sitio pide no rastrear. Dos de las tiendas que se pensaron al principio quedaron descartadas por esta razón:
+
+1. **Droguerías Colsubsidio** (`drogueriascolsubsidio.com`). Su `robots.txt` bloquea la API del catálogo y las búsquedas por texto:
+   ```text
+   Disallow: /api/
+   Disallow: /*?*ft=*
+   ```
+   Como la consulta del catálogo depende justamente de esas rutas, no se incluyó.
+
+2. **Medipiel** (`medipiel.com.co`). Su `robots.txt` bloquea cualquier URL con parámetros:
+   ```text
+   Disallow: /*?*
+   ```
+   Para recorrer el catálogo por páginas hacen falta parámetros como `?_from=...&_to=...`, así que tampoco se incluyó.
+
+3. **Bella Piel, Drogas La Rebaja y Locatel.** En estos sitios las rutas usadas para consultar el catálogo no están bloqueadas. Al hacer la recolección se tuvieron en cuenta 2 cuidados:
+   - Entre una petición y otra hay una pausa de medio segundo (`time.sleep(0.5)`), para no cargar los servidores;
+   - Las respuestas originales se guardan comprimidas (`.json.gz`) en `raw/<comercio>/<fecha>/`, de modo que el análisis se puede repetir sin volver a consultar los sitios.
+
+El siguiente bloque carga los datos desde esas copias (modo sin conexión) y calcula las cifras que se usan en el texto.
+
+```{python}
+import sqlite3
+import json
+import gzip
+from pathlib import Path
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import scraper
+
+# Configuración estética de gráficos
+sns.set_theme(style="whitegrid", palette="muted")
+plt.rcParams["figure.figsize"] = (10, 6)
+plt.rcParams["font.sans-serif"] = "DejaVu Sans"
+
+# Ejecución reproducible a partir de copias crudas en modo offline
+resumen_extraccion = scraper.ejecutar_recoleccion(
+    offline=True,
+    db_path="comparador_precios.sqlite",
+    raw_base="raw"
+)
+
+conn = sqlite3.connect("comparador_precios.sqlite")
+
+# Cálculo de la Corrida de Referencia (REF):
+q_ref = """
+WITH prods_con_precio AS (
+    SELECT 
+        o.id_corrida,
+        o.comercio,
+        COUNT(DISTINCT o.id_producto_comun) AS n_prods
+    FROM observaciones o
+    WHERE o.comparable = 1 
+      AND o.en_categoria = 1 
+      AND o.precio_actual IS NOT NULL 
+      AND o.precio_actual > 0
+    GROUP BY o.id_corrida, o.comercio
+),
+corridas_validas AS (
+    SELECT id_corrida
+    FROM prods_con_precio
+    WHERE n_prods >= 8
+    GROUP BY id_corrida
+    HAVING COUNT(DISTINCT comercio) = 3
+)
+SELECT COALESCE(MAX(id_corrida), 1) AS id_corrida_ref
+FROM corridas_validas;
+"""
+REF = int(pd.read_sql_query(q_ref, conn).iloc[0]["id_corrida_ref"])
+
+# Totales por categoría desde copias crudas
+with gzip.open(sorted(Path("raw/locatel").glob("**/*.json.gz"))[-1], "rt", encoding="utf-8") as f:
+    tot_loc_dict = json.load(f)["total_esperado"]["totales_por_categoria"]
+tot_loc_c2 = tot_loc_dict["C:/2/17/"]
+tot_loc_c1 = tot_loc_dict["C:/1/8/55/"]
+
+with gzip.open(sorted(Path("raw/larebaja").glob("**/*.json.gz"))[-1], "rt", encoding="utf-8") as f:
+    tot_lr_dict = json.load(f)["total_esperado"]["totales_por_categoria"]
+tot_lr_c5 = tot_lr_dict["C:/5/35/"]
+tot_lr_c8 = tot_lr_dict["C:/8/465/"]
+
+# Auditoría de ejecuciones en la corrida REF
+df_ej = pd.read_sql_query(f"SELECT * FROM ejecuciones WHERE id_corrida = {REF}", conn)
+ej_map = {row["comercio"]: row for _, row in df_ej.iterrows()}
+
+rep_bp = int(ej_map["Bella Piel"]["total_reportado_sitio"])
+obt_bp = int(ej_map["Bella Piel"]["total_obtenido"])
+dif_bp = abs(rep_bp - obt_bp)
+est_bp = ej_map["Bella Piel"]["estado"]
+
+rep_lr = int(ej_map["La Rebaja"]["total_reportado_sitio"])
+obt_lr = int(ej_map["La Rebaja"]["total_obtenido"])
+dif_lr = abs(rep_lr - obt_lr)
+est_lr = ej_map["La Rebaja"]["estado"]
+
+rep_loc = int(ej_map["Locatel"]["total_reportado_sitio"])
+obt_loc = int(ej_map["Locatel"]["total_obtenido"])
+dif_loc = abs(obt_loc - rep_loc)
+est_loc = ej_map["Locatel"]["estado"]
+
+# Catálogo de comparables y observaciones en REF
+q_comp = f"SELECT COUNT(DISTINCT id_producto_comun) AS n_comp, COUNT(*) AS n_obs FROM observaciones WHERE comparable = 1 AND en_categoria = 1 AND id_corrida = {REF};"
+row_comp = pd.read_sql_query(q_comp, conn).iloc[0]
+n_comparables = int(row_comp["n_comp"])
+n_obs_comparables = int(row_comp["n_obs"])
+
+# Cobertura y duplicados
+q_cob = f"SELECT COUNT(*) AS total_con_precio FROM observaciones WHERE comparable = 1 AND en_categoria = 1 AND precio_actual IS NOT NULL AND precio_actual > 0 AND id_corrida = {REF};"
+obs_con_precio_ref = int(pd.read_sql_query(q_cob, conn).iloc[0]["total_con_precio"])
+
+q_dup = f"""
+SELECT COUNT(*) AS n_dup FROM (
+    SELECT id_producto_comun, comercio FROM observaciones
+    WHERE comparable = 1 AND en_categoria = 1 AND id_corrida = {REF}
+    GROUP BY id_producto_comun, comercio HAVING COUNT(*) > 1
+);
+"""
+n_duplicados_ref = int(pd.read_sql_query(q_dup, conn).iloc[0]["n_dup"])
+
+# Liderazgo de precios
+q_lid = f"""
+WITH stats AS (
+    SELECT id_producto_comun, MIN(precio_actual) AS p_min FROM observaciones
+    WHERE comparable = 1 AND en_categoria = 1 AND precio_actual IS NOT NULL AND id_corrida = {REF}
+    GROUP BY id_producto_comun
+)
+SELECT o.comercio, COUNT(*) AS n_lid FROM observaciones o
+JOIN stats s ON o.id_producto_comun = s.id_producto_comun AND o.precio_actual = s.p_min
+WHERE o.comparable = 1 AND o.en_categoria = 1 AND o.id_corrida = {REF}
+GROUP BY o.comercio;
+"""
+df_lid = pd.read_sql_query(q_lid, conn).set_index("comercio")
+n_liderados_lr = int(df_lid["n_lid"].get("La Rebaja", 0))
+n_liderados_bp = int(df_lid["n_lid"].get("Bella Piel", 0))
+n_liderados_loc = int(df_lid["n_lid"].get("Locatel", 0))
+
+# Listas dinámicas de productos líderes por comercio en REF
+q_lider_detalles = f"""
+WITH stats AS (
+    SELECT 
+        o.id_producto_comun,
+        p.nombre_estandar,
+        MIN(o.precio_actual) AS precio_minimo
+    FROM observaciones o
+    JOIN productos_comparables p ON o.id_producto_comun = p.id_producto_comun
+    WHERE o.comparable = 1 AND o.en_categoria = 1 AND o.precio_actual IS NOT NULL AND o.id_corrida = {REF}
+    GROUP BY o.id_producto_comun
+)
+SELECT 
+    o.comercio,
+    s.nombre_estandar,
+    s.precio_minimo
+FROM observaciones o
+JOIN stats s ON o.id_producto_comun = s.id_producto_comun AND o.precio_actual = s.precio_minimo
+WHERE o.comparable = 1 AND o.en_categoria = 1 AND o.id_corrida = {REF}
+GROUP BY o.comercio, s.nombre_estandar
+ORDER BY s.precio_minimo ASC;
+"""
+df_lider_detalles = pd.read_sql_query(q_lider_detalles, conn)
+
+def formatear_lista_lideres(comercio_nombre: str) -> str:
+    sub = df_lider_detalles[df_lider_detalles["comercio"] == comercio_nombre]
+    if sub.empty:
+        return "ningún producto"
+    items = [f"{row['nombre_estandar']} (${row['precio_minimo']:,.0f})" for _, row in sub.iterrows()]
+    if len(items) == 1:
+        return items[0]
+    return ", ".join(items[:-1]) + " y " + items[-1]
+
+prods_lider_lr = formatear_lista_lideres("La Rebaja")
+prods_lider_bp = formatear_lista_lideres("Bella Piel")
+prods_lider_loc = formatear_lista_lideres("Locatel")
+
+fmt_cop = lambda x: f"${x:,.0f}"
+
+# Ahorro de Sunaid
+q_ahorro_sunaid = f"""
+SELECT 
+    ROUND(MAX(precio_actual) - MIN(precio_actual), 2) AS ahorro_cop,
+    ROUND(((MAX(precio_actual) - MIN(precio_actual)) / MAX(precio_actual)) * 100.0, 2) AS ahorro_pct
+FROM observaciones
+WHERE id_producto_comun = 'SUNAID_EVOLUTION_SPF50_40G' AND id_corrida = {REF};
+"""
+row_ahorro_sun = pd.read_sql_query(q_ahorro_sunaid, conn).iloc[0]
+txt_ahorro_cop_sunaid = fmt_cop(row_ahorro_sun["ahorro_cop"])
+txt_ahorro_pct_sunaid = f"{row_ahorro_sun['ahorro_pct']:.2f}%"
+
+# Ahorro en líneas faciales de Eucerin
+q_ahorro_euc = f"""
+SELECT 
+    ROUND(MAX(precio_actual) - MIN(precio_actual), 2) AS ahorro_cop,
+    ROUND(((MAX(precio_actual) - MIN(precio_actual)) / MAX(precio_actual)) * 100.0, 2) AS ahorro_pct
+FROM observaciones
+WHERE id_producto_comun LIKE 'EUCERIN_%' AND id_corrida = {REF}
+GROUP BY id_producto_comun;
+"""
+df_euc = pd.read_sql_query(q_ahorro_euc, conn)
+txt_min_ahorro_cop_eucerin = fmt_cop(df_euc["ahorro_cop"].min())
+txt_max_ahorro_cop_eucerin = fmt_cop(df_euc["ahorro_cop"].max())
+txt_min_ahorro_pct_eucerin = f"{df_euc['ahorro_pct'].min():.1f}%"
+txt_max_ahorro_pct_eucerin = f"{df_euc['ahorro_pct'].max():.1f}%"
+
+# Ahorro global min y max en faciales
+q_ahorro_global = f"""
+SELECT 
+    ROUND(((MAX(precio_actual) - MIN(precio_actual)) / MAX(precio_actual)) * 100.0, 2) AS ahorro_pct
+FROM observaciones
+WHERE comparable = 1 AND en_categoria = 1 AND id_corrida = {REF}
+GROUP BY id_producto_comun;
+"""
+df_ahorro_glob = pd.read_sql_query(q_ahorro_global, conn)
+txt_min_ahorro_pct_global = f"{df_ahorro_glob['ahorro_pct'].min():.0f}%"
+txt_max_ahorro_pct_global = f"{df_ahorro_glob['ahorro_pct'].max():.2f}%"
+
+# Canasta consolidada y óptima
+q_canasta_comercios_calc = f"""
+SELECT comercio, SUM(precio_actual) AS costo_canasta
+FROM observaciones
+WHERE comparable = 1 AND en_categoria = 1 AND precio_actual IS NOT NULL AND id_corrida = {REF}
+GROUP BY comercio;
+"""
+df_can_calc = pd.read_sql_query(q_canasta_comercios_calc, conn).set_index("comercio")
+txt_canasta_lr = fmt_cop(df_can_calc.loc["La Rebaja", "costo_canasta"])
+txt_canasta_bp = fmt_cop(df_can_calc.loc["Bella Piel", "costo_canasta"])
+txt_canasta_loc = fmt_cop(df_can_calc.loc["Locatel", "costo_canasta"])
+
+q_canasta_opt_calc = f"""
+WITH min_p AS (
+    SELECT MIN(precio_actual) AS min_p FROM observaciones
+    WHERE comparable = 1 AND en_categoria = 1 AND precio_actual IS NOT NULL AND id_corrida = {REF}
+    GROUP BY id_producto_comun
+)
+SELECT SUM(min_p) AS costo_optimo FROM min_p;
+"""
+costo_opt_val = float(pd.read_sql_query(q_canasta_opt_calc, conn).iloc[0]["costo_optimo"])
+txt_canasta_optima = fmt_cop(costo_opt_val)
+
+ahorro_canasta_loc_val = df_can_calc.loc["Locatel", "costo_canasta"] - costo_opt_val
+pct_canasta_loc_val = (ahorro_canasta_loc_val / df_can_calc.loc["Locatel", "costo_canasta"]) * 100.0
+txt_ahorro_canasta_loc = fmt_cop(ahorro_canasta_loc_val)
+txt_pct_canasta_loc = f"{pct_canasta_loc_val:.2f}%"
+
+ahorro_canasta_lr_val = df_can_calc.loc["La Rebaja", "costo_canasta"] - costo_opt_val
+pct_canasta_lr_val = (ahorro_canasta_lr_val / df_can_calc.loc["La Rebaja", "costo_canasta"]) * 100.0
+txt_ahorro_canasta_lr = fmt_cop(ahorro_canasta_lr_val)
+txt_pct_canasta_lr = f"{pct_canasta_lr_val:.2f}%"
+```
+
+## 2.2 Secciones consultadas en cada comercio
+
+1. **Bella Piel** (`https://www.bellapiel.com.co`): la sección `/proteccion-solar`.
+2. **Drogas La Rebaja** (`https://www.larebajavirtual.com`): dos categorías del catálogo, consultadas con el filtro `fq`, en bloques de 50 y ordenadas por nombre (`O=OrderByNameASC`):
+   - `fq=C:/5/35/`, *Cuidado personal › Solares*: `{python} tot_lr_c5` productos según la cabecera `resources`;
+   - `fq=C:/8/465/`, *Dermocosmética › Solares*: `{python} tot_lr_c8` productos.
+
+   En total, el sitio reporta `{python} rep_lr` productos.
+3. **Locatel** (`https://www.locatelcolombia.com`): también dos categorías, con el mismo método:
+   - `fq=C:/2/17/`, *Dermocosmética › Cuidado solar*: `{python} tot_loc_c2` productos;
+   - `fq=C:/1/8/55/`, *Cuidado personal › Cuidado piel › Protección solar*: `{python} tot_loc_c1` productos.
+
+   El `robots.txt` de Locatel no bloquea la ruta `/api/catalog_system/pub/products/search` ni los parámetros `fq` y `O`.
+
+## 2.3 Paginación y control de lo descargado
+
+Cada categoría se recorre en bloques de 50 productos (`_from=0&_to=49`, `_from=50&_to=99`, etc.) hasta llegar al total que indica la cabecera `resources` (por ejemplo, en la categoría `C:/2/17/` de Locatel la cabecera indica `{python} tot_loc_c2` productos). Ese total se guarda en la copia cruda, bajo la clave `total_esperado`, para luego compararlo con lo que efectivamente se descargó.
+
+En la corrida analizada, el resultado de esa comparación fue el siguiente:
+
+- **Locatel:** el sitio reporta `{python} rep_loc` productos (`{python} tot_loc_c2` + `{python} tot_loc_c1`, sin productos repetidos entre las dos categorías) y se obtuvieron `{python} obt_loc` SKU distintos. La diferencia de `{python} dif_loc` se explica porque un producto tiene una variante que se vende con su propio SKU. Estado: **`{python} est_loc`**.
+- **La Rebaja:** el sitio reporta `{python} rep_lr` productos y se obtuvieron `{python} obt_lr` SKU distintos, es decir, todos. Estado: **`{python} est_lr`**.
+- **Bella Piel:** el sitio reporta `{python} rep_bp` productos y se obtuvieron `{python} obt_bp` (diferencia de `{python} dif_bp`). Estado: **`{python} est_bp`**.
+
+Otros dos detalles del proceso: si un producto aparece sin precio, no se descarta, sino que se guarda con `precio_actual` en `NULL`; y la fecha y hora de cada consulta se registran en formato ISO 8601 con la hora de Colombia (`-05:00`).
+
+## 2.4 Resumen de la ejecución de `scraper.py`
+
+```{python}
+df_resumen = pd.DataFrame.from_dict(resumen_extraccion, orient="index")
+df_resumen.index.name = "Comercio"
+df_resumen.reset_index(inplace=True)
+df_resumen
+```
+
+---
+
+# 3. Limpieza y delimitación de la categoría
+
+## 3.1 Contenido y precio por unidad
+
+A partir del nombre y la presentación de cada anuncio se extrae, con expresiones regulares, el contenido y su unidad (`mL` o `g`). Con eso se calcula el precio por unidad de contenido:
+
+$$\text{Precio por unidad} = \frac{\text{Precio actual (COP)}}{\text{Contenido}}$$
+
+## 3.2 Productos excluidos
+
+Los productos que no pertenecen a la categoría no se eliminan: quedan en la base con `en_categoria = 0` y con el motivo de exclusión. Primero se selecciona la corrida de referencia (REF) y se muestra su resumen por comercio; después, cuántos productos se excluyeron por cada motivo.
+
+```{python}
+conn = sqlite3.connect("comparador_precios.sqlite")
+
+# Cálculo de la Corrida de Referencia (REF):
+# id_corrida más reciente en el que los 3 comercios tengan precio para al menos 8 productos comparables
+q_ref = """
+WITH prods_con_precio AS (
+    SELECT 
+        o.id_corrida,
+        o.comercio,
+        COUNT(DISTINCT o.id_producto_comun) AS n_prods
+    FROM observaciones o
+    WHERE o.comparable = 1 
+      AND o.en_categoria = 1 
+      AND o.precio_actual IS NOT NULL 
+      AND o.precio_actual > 0
+    GROUP BY o.id_corrida, o.comercio
+),
+corridas_validas AS (
+    SELECT id_corrida
+    FROM prods_con_precio
+    WHERE n_prods >= 8
+    GROUP BY id_corrida
+    HAVING COUNT(DISTINCT comercio) = 3
+)
+SELECT COALESCE(MAX(id_corrida), 1) AS id_corrida_ref
+FROM corridas_validas;
+"""
+REF = int(pd.read_sql_query(q_ref, conn).iloc[0]["id_corrida_ref"])
+print(f"Corrida de referencia seleccionada: REF = {REF}")
+
+# Tabla por comercio con total reportado, total obtenido y estado de la corrida REF
+q_ref_tabla = f"""
+SELECT 
+    comercio AS "Comercio",
+    total_reportado_sitio AS "Total Reportado",
+    total_obtenido AS "Total Obtenido",
+    estado AS "Estado"
+FROM ejecuciones
+WHERE id_corrida = {REF}
+ORDER BY comercio;
+"""
+pd.read_sql_query(q_ref_tabla, conn)
+```
+
+```{python}
+q_excl_resumen = """
+SELECT 
+    motivo_exclusion,
+    COUNT(*) AS cantidad_productos,
+    ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM observaciones WHERE en_categoria = 0), 2) AS porcentaje_exclusiones
+FROM observaciones
+WHERE en_categoria = 0
+GROUP BY motivo_exclusion
+ORDER BY cantidad_productos DESC;
+"""
+pd.read_sql_query(q_excl_resumen, conn)
+```
+
+Algunos ejemplos de productos excluidos, uno por motivo:
+
+```{python}
+q_excl_ejemplos = """
+SELECT 
+    comercio,
+    nombre_original,
+    presentacion_original,
+    motivo_exclusion
+FROM observaciones
+WHERE en_categoria = 0
+GROUP BY motivo_exclusion
+ORDER BY comercio;
+"""
+pd.read_sql_query(q_excl_ejemplos, conn)
+```
+
+## 3.3 Productos comparables y emparejamiento por EAN
+
+Para comparar precios hace falta estar seguros de que se trata exactamente del mismo producto y de la misma presentación en las tres tiendas. Por eso el emparejamiento se hizo así:
+
+- en **Locatel**, únicamente por código EAN (`items[].ean`);
+- en **La Rebaja**, por EAN y, cuando el anuncio no trae EAN (como pasa con Umbrella Acqua), por el nombre;
+- en **Bella Piel**, por nombre, porque el campo `ean` de ese sitio es un código interno; cada caso se verificó a mano contra la marca, la línea y el contenido.
+
+Se dejaron por fuera *ISDIN Fusion Water*, *ISDIN Active Unify* e *ISDIN Spot Prevent*, porque el EAN que aparece en Locatel no coincide con el de La Rebaja y no se podía asegurar que fueran la misma presentación.
+
+Al final quedaron **`{python} n_comparables` presentaciones** que están en los tres comercios, lo que da **`{python} n_obs_comparables` observaciones comparables** (el mínimo pedido era 24):
+
+| # | EAN | Producto |
+|---|---|---|
+| 1 | 3337875797597 | La Roche-Posay Anthelios UVMune 400 Fluido Invisible FPS 50+ (50 mL) |
+| 2 | 3337875797641 | La Roche-Posay Anthelios UVMune 400 Fluido con Color FPS 50+ (50 mL) |
+| 3 | 7612076457430 | Cetaphil Sun Kids Loción Liposomal FPS 50+ (150 mL) |
+| 4 | 7612076457256 | Cetaphil Sun Gel Ligero FPS 50+ (100 mL) |
+| 5 | 4005900994776 | Eucerin Sun Hydro Protect Ultra-Light Fluid FPS 50+ (50 mL) |
+| 6 | 4005900265227 | Eucerin Sun Photoaging Control FPS 50+ (50 mL) |
+| 7 | 4005800241901 | Eucerin Sun Pigment Control FPS 50+ (50 mL) |
+| 8 | 4005900839633 | Eucerin Sun Gel-Crema Oil Control Toque Seco FPS 50+ Tono Medio (50 mL) |
+| 9 | 7703281002451 | Umbrella Urban Fotoprotector FPS 50+ (50 g) |
+| 10 | 7703281021551 | Umbrella Acqua Fotoprotector FPS 50+ (50 g) |
+| 11 | 7707206270598 | Sunaid Evolution Protector Solar Gel FPS 50+ (40 g) |
+
+---
+
+# 4. Estructura de la base de datos
+
+La base `comparador_precios.sqlite` tiene cuatro tablas relacionadas entre sí:
+
+- **`corridas`**: cada recolección completa. Tiene un identificador (`id_corrida`), la fecha y hora de inicio y fin, el número de observaciones y el estado. Una corrida agrupa la extracción de los tres comercios, de modo que los precios comparados corresponden al mismo momento.
+- **`ejecuciones`**: una fila por comercio dentro de cada corrida, con sus horas de inicio y fin, `total_reportado_sitio` (la suma de los totales de la cabecera `resources`), `total_obtenido` (los SKU distintos descargados), `n_registros` y `estado`. El estado se asigna así:
+  - **`completa`**: se obtuvieron al menos tantos SKU como los que reporta el sitio y ninguna petición falló;
+  - **`parcial`**: se obtuvieron menos de los reportados, falló alguna petición o la copia es antigua y no tiene el total reportado;
+  - **`fallida`**: no se obtuvo ningún producto.
+- **`productos_comparables`**: el catálogo de las presentaciones comparables, con un identificador común (`id_producto_comun`), su EAN y los datos estandarizados (marca, tipo, presentación, contenido y unidad).
+- **`observaciones`**: cada anuncio con su precio, en una corrida y ejecución determinadas. Guarda el texto original, el EAN que trae el sitio, si pertenece o no a la categoría, el motivo de exclusión y la fecha y hora de consulta. Para evitar duplicados tiene la restricción `UNIQUE(comercio, id_producto_comercio, fecha_hora_consulta)`.
+
+---
+
+# 5. Consultas SQL y resultados
+
+### Pregunta 1: Contenido de la base y aporte de cada comercio
+
+*¿Cuántos comercios, productos/presentaciones y observaciones contiene la base? ¿Cuántos productos aporta cada comercio?*
+
+```{python}
+q1_global = """
+SELECT 
+    COUNT(DISTINCT comercio) AS total_comercios,
+    COUNT(DISTINCT id_producto_comercio) AS total_productos_presentaciones,
+    COUNT(*) AS total_observaciones,
+    SUM(CASE WHEN en_categoria = 1 THEN 1 ELSE 0 END) AS total_en_categoria,
+    SUM(CASE WHEN en_categoria = 0 THEN 1 ELSE 0 END) AS total_excluidos
+FROM observaciones;
+"""
+pd.read_sql_query(q1_global, conn)
+```
+
+```{python}
+q1_comercio = """
+SELECT 
+    comercio,
+    COUNT(*) AS total_extraidos,
+    SUM(CASE WHEN en_categoria = 1 THEN 1 ELSE 0 END) AS productos_en_categoria,
+    SUM(CASE WHEN en_categoria = 0 THEN 1 ELSE 0 END) AS productos_excluidos,
+    SUM(comparable) AS productos_comparables
+FROM observaciones
+GROUP BY comercio
+ORDER BY total_extraidos DESC;
+"""
+pd.read_sql_query(q1_comercio, conn)
+```
+
+**Resultado.** La base tiene los tres comercios y, en cada uno, todo el catálogo que el sitio mostraba en las secciones consultadas. La mayoría de los productos pertenecen a la categoría; los excluidos son sobre todo kits o combos y, en menor medida, maquillaje, sérums, autobronceadores y productos donde el FPS es secundario. Locatel es el comercio con más productos y La Rebaja el que menos aporta.
+
+---
+
+### Pregunta 2: Observaciones comparables y registros repetidos en la corrida REF
+
+*En una misma ejecución de recolección, ¿se obtuvieron al menos 24 observaciones comparables (ocho productos por tres comercios)? ¿Hay registros repetidos del mismo producto y comercio en esa ejecución?*
+
+```{python}
+q2_corrida_meta = f"""
+SELECT 
+    id_corrida,
+    fecha_hora_inicio,
+    fecha_hora_fin,
+    n_total_observaciones,
+    estado
+FROM corridas
+WHERE id_corrida = {REF};
+"""
+pd.read_sql_query(q2_corrida_meta, conn)
+```
+
+```{python}
+# Tabla por comercio con total reportado, total obtenido y estado de la corrida REF
+q2_tabla_comercio_ref = f"""
+SELECT 
+    comercio AS "Comercio",
+    total_reportado_sitio AS "Total Reportado",
+    total_obtenido AS "Total Obtenido",
+    estado AS "Estado"
+FROM ejecuciones
+WHERE id_corrida = {REF}
+ORDER BY comercio;
+"""
+pd.read_sql_query(q2_tabla_comercio_ref, conn)
+```
+
+```{python}
+# a) Cobertura: número de observaciones comparables con precio en la corrida REF
+q2_cobertura = f"""
+SELECT 
+    o.id_corrida,
+    COUNT(*) AS total_observaciones_con_precio,
+    COUNT(DISTINCT o.id_producto_comun) AS productos_comparables_distintos,
+    COUNT(DISTINCT o.comercio) AS comercios_participantes
+FROM observaciones o
+WHERE o.comparable = 1 
+  AND o.en_categoria = 1 
+  AND o.precio_actual IS NOT NULL 
+  AND o.precio_actual > 0
+  AND o.id_corrida = {REF}
+GROUP BY o.id_corrida;
+"""
+pd.read_sql_query(q2_cobertura, conn)
+```
+
+```{python}
+# Desglose de cobertura por comercio en la corrida REF
+q2_cobertura_comercio = f"""
+SELECT 
+    o.comercio,
+    COUNT(DISTINCT o.id_producto_comun) AS productos_con_precio,
+    COUNT(*) AS total_observaciones_comparables
+FROM observaciones o
+WHERE o.comparable = 1 
+  AND o.en_categoria = 1 
+  AND o.precio_actual IS NOT NULL 
+  AND o.precio_actual > 0
+  AND o.id_corrida = {REF}
+GROUP BY o.comercio;
+"""
+pd.read_sql_query(q2_cobertura_comercio, conn)
+```
+
+```{python}
+# Registros repetidos del mismo producto y comercio en la corrida REF
+q2_duplicados = f"""
+SELECT 
+    o.id_producto_comun,
+    o.comercio,
+    COUNT(*) AS frecuencia
+FROM observaciones o
+WHERE o.comparable = 1 
+  AND o.en_categoria = 1 
+  AND o.id_corrida = {REF}
+GROUP BY o.id_producto_comun, o.comercio
+HAVING COUNT(*) > 1;
+"""
+rep = pd.read_sql_query(q2_duplicados, conn)
+print(f"Total de registros repetidos (mismo producto y comercio en REF={REF}): {len(rep)}")
+```
+
+**Resultado.** En la corrida REF los tres comercios tienen precio para las `{python} n_comparables` presentaciones comparables, lo que suma **`{python} obs_con_precio_ref` observaciones con precio**, por encima de las 24 exigidas. Al agrupar por producto y comercio no aparece ningún caso con más de un registro (`{python} n_duplicados_ref` repetidos).
+
+---
+
+### Pregunta 3: Precio mínimo, máximo y promedio, y comercio más barato
+
+*Para cada presentación comparable, ¿cuáles son el precio mínimo, máximo y promedio? ¿Qué comercio ofrece el menor precio? Incluir los empates.*
+
+```{python}
+# b) Por cada producto comparable: precio mínimo, máximo y promedio, y comercio(s) con menor precio
+q3 = f"""
+WITH stats AS (
+    SELECT 
+        o.id_producto_comun,
+        p.nombre_estandar,
+        p.presentacion_estandar,
+        MIN(o.precio_actual) AS precio_minimo,
+        MAX(o.precio_actual) AS precio_maximo,
+        ROUND(AVG(o.precio_actual), 2) AS precio_promedio
+    FROM observaciones o
+    JOIN productos_comparables p ON o.id_producto_comun = p.id_producto_comun
+    WHERE o.comparable = 1 
+      AND o.en_categoria = 1 
+      AND o.precio_actual IS NOT NULL 
+      AND o.id_corrida = {REF}
+    GROUP BY o.id_producto_comun
+),
+ganadores AS (
+    SELECT 
+        o.id_producto_comun,
+        GROUP_CONCAT(DISTINCT o.comercio) AS comercio_menor_precio
+    FROM observaciones o
+    JOIN stats s ON o.id_producto_comun = s.id_producto_comun AND o.precio_actual = s.precio_minimo
+    WHERE o.comparable = 1 
+      AND o.en_categoria = 1 
+      AND o.id_corrida = {REF}
+    GROUP BY o.id_producto_comun
+)
+SELECT 
+    s.nombre_estandar,
+    s.presentacion_estandar,
+    s.precio_minimo,
+    s.precio_maximo,
+    s.precio_promedio,
+    g.comercio_menor_precio
+FROM stats s
+JOIN ganadores g ON s.id_producto_comun = g.id_producto_comun
+ORDER BY s.precio_minimo ASC;
+"""
+df_q3 = pd.read_sql_query(q3, conn)
+df_q3
+```
+
+**Resultado.**
+
+- **La Rebaja** tiene el precio más bajo en `{python} n_liderados_lr` de las `{python} n_comparables` presentaciones: `{python} prods_lider_lr`.
+- **Locatel** tiene el precio más bajo en `{python} n_liderados_loc`: `{python} prods_lider_loc`.
+- **Bella Piel** tiene el precio más bajo en `{python} n_liderados_bp` (`{python} prods_lider_bp`).
+
+---
+
+### Pregunta 4: Ahorro en pesos y en porcentaje
+
+*¿Cuál es el ahorro en COP y en porcentaje al elegir la oferta más económica de cada presentación?*
+
+```{python}
+# c) Ahorro por producto: precio máximo − precio mínimo en COP y porcentaje sobre precio máximo
+q4 = f"""
+SELECT 
+    p.nombre_estandar,
+    p.presentacion_estandar,
+    MIN(o.precio_actual) AS precio_minimo,
+    MAX(o.precio_actual) AS precio_maximo,
+    ROUND(MAX(o.precio_actual) - MIN(o.precio_actual), 2) AS ahorro_cop,
+    ROUND(((MAX(o.precio_actual) - MIN(o.precio_actual)) / MAX(o.precio_actual)) * 100.0, 2) AS ahorro_porcentaje
+FROM observaciones o
+JOIN productos_comparables p ON o.id_producto_comun = p.id_producto_comun
+WHERE o.comparable = 1 
+  AND o.en_categoria = 1 
+  AND o.precio_actual IS NOT NULL 
+  AND o.id_corrida = {REF}
+GROUP BY o.id_producto_comun
+ORDER BY ahorro_cop DESC;
+"""
+df_q4 = pd.read_sql_query(q4, conn)
+df_q4
+```
+
+**Resultado.** El caso más llamativo es el gel *Sunaid Evolution FPS 50+*: entre La Rebaja y Bella Piel hay una diferencia de `{python} txt_ahorro_cop_sunaid` COP, es decir, un ahorro del `{python} txt_ahorro_pct_sunaid`. Es el mayor ahorro tanto en pesos como en porcentaje. En los cuatro protectores faciales de Eucerin la diferencia va de `{python} txt_min_ahorro_cop_eucerin` a `{python} txt_max_ahorro_cop_eucerin` COP (entre `{python} txt_min_ahorro_pct_eucerin` y `{python} txt_max_ahorro_pct_eucerin`).
+
+---
+
+### Pregunta 5: Precio por unidad de contenido
+
+*Si se incluyeron tamaños comparables del mismo producto, ¿qué presentación y comercio tienen el menor precio por mL, g, mg o unidad?*
+
+```{python}
+# d) Precio por unidad de contenido (COP por mL o por g) en la corrida REF
+q5 = f"""
+SELECT 
+    p.nombre_estandar,
+    p.presentacion_estandar,
+    p.contenido_valor,
+    p.contenido_unidad,
+    o.comercio,
+    o.precio_actual,
+    ROUND(o.precio_por_unidad, 2) AS precio_por_unidad
+FROM observaciones o
+JOIN productos_comparables p ON o.id_producto_comun = p.id_producto_comun
+WHERE o.comparable = 1 
+  AND o.en_categoria = 1 
+  AND o.precio_actual IS NOT NULL 
+  AND o.id_corrida = {REF}
+ORDER BY p.contenido_unidad, o.precio_por_unidad ASC;
+"""
+df_q5 = pd.read_sql_query(q5, conn)
+df_q5.head(15)
+```
+
+**Resultado.** El precio por mL o por g solo tiene sentido para comparar tamaños distintos de un mismo producto (misma marca, línea y FPS). Entre las `{python} n_comparables` presentaciones comparables no hay dos tamaños del mismo producto, así que esta comparación **no aplica** en este caso. La tabla se deja como referencia, pero no sería correcto concluir, por ejemplo, que una loción infantil de 150 mL "rinde más" que un fluido facial de 50 mL: son productos distintos.
+
+---
+
+### Pregunta 6: Productos ordenados por ahorro porcentual
+
+*¿Cuáles son las mayores diferencias de precio entre comercios? Ordenar las presentaciones por ahorro porcentual.*
+
+```{python}
+# e) Productos ordenados de mayor a menor ahorro porcentual, indicando el comercio más barato y el más caro
+q6 = f"""
+WITH stats AS (
+    SELECT 
+        o.id_producto_comun,
+        p.nombre_estandar,
+        p.presentacion_estandar,
+        MIN(o.precio_actual) AS precio_min,
+        MAX(o.precio_actual) AS precio_max,
+        ROUND(MAX(o.precio_actual) - MIN(o.precio_actual), 2) AS diferencia_cop,
+        ROUND(((MAX(o.precio_actual) - MIN(o.precio_actual)) / MAX(o.precio_actual)) * 100.0, 2) AS ahorro_porcentual
+    FROM observaciones o
+    JOIN productos_comparables p ON o.id_producto_comun = p.id_producto_comun
+    WHERE o.comparable = 1 
+      AND o.en_categoria = 1 
+      AND o.precio_actual IS NOT NULL 
+      AND o.id_corrida = {REF}
+    GROUP BY o.id_producto_comun
+),
+baratos AS (
+    SELECT 
+        o.id_producto_comun,
+        GROUP_CONCAT(DISTINCT o.comercio) AS comercio_mas_barato
+    FROM observaciones o
+    JOIN stats s ON o.id_producto_comun = s.id_producto_comun AND o.precio_actual = s.precio_min
+    WHERE o.comparable = 1 
+      AND o.en_categoria = 1 
+      AND o.id_corrida = {REF}
+    GROUP BY o.id_producto_comun
+),
+caros AS (
+    SELECT 
+        o.id_producto_comun,
+        GROUP_CONCAT(DISTINCT o.comercio) AS comercio_mas_caro
+    FROM observaciones o
+    JOIN stats s ON o.id_producto_comun = s.id_producto_comun AND o.precio_actual = s.precio_max
+    WHERE o.comparable = 1 
+      AND o.en_categoria = 1 
+      AND o.id_corrida = {REF}
+    GROUP BY o.id_producto_comun
+)
+SELECT 
+    s.nombre_estandar,
+    s.presentacion_estandar,
+    s.precio_min,
+    s.precio_max,
+    s.diferencia_cop,
+    s.ahorro_porcentual,
+    b.comercio_mas_barato,
+    c.comercio_mas_caro
+FROM stats s
+JOIN baratos b ON s.id_producto_comun = b.id_producto_comun
+JOIN caros c ON s.id_producto_comun = c.id_producto_comun
+ORDER BY s.ahorro_porcentual DESC;
+"""
+df_q6 = pd.read_sql_query(q6, conn)
+df_q6
+```
+
+**Resultado.** El ahorro posible va desde `{python} txt_min_ahorro_pct_global` hasta `{python} txt_max_ahorro_pct_global`. Las diferencias más grandes están en Sunaid y en los protectores faciales de Eucerin y La Roche-Posay, donde La Rebaja suele ser la tienda más barata y Locatel o Bella Piel las más caras. En Cetaphil y Umbrella el precio más bajo lo tiene Locatel y las diferencias son menores; en Umbrella Acqua los tres comercios cobran casi lo mismo.
+
+---
+
+### Pregunta 7: Datos faltantes o inconsistentes en la corrida REF
+
+*¿Qué datos faltantes o inconsistentes afectan la comparación y cuántos son?*
+
+```{python}
+q7 = f"""
+SELECT 
+    comercio,
+    COUNT(*) AS total_observaciones_comparables,
+    SUM(CASE WHEN precio_actual IS NULL OR precio_actual <= 0 THEN 1 ELSE 0 END) AS precio_invalido,
+    SUM(CASE WHEN url IS NULL OR url = '' THEN 1 ELSE 0 END) AS falta_url,
+    SUM(CASE WHEN fecha_hora_consulta IS NULL OR fecha_hora_consulta = '' THEN 1 ELSE 0 END) AS falta_fecha,
+    SUM(CASE WHEN contenido_valor IS NULL THEN 1 ELSE 0 END) AS falta_contenido
+FROM observaciones
+WHERE comparable = 1 
+  AND en_categoria = 1 
+  AND id_corrida = {REF}
+GROUP BY comercio;
+"""
+pd.read_sql_query(q7, conn)
+```
+
+**Resultado.** En las observaciones comparables de la corrida REF no falta ningún dato clave: todas tienen precio válido, URL, fecha y hora de consulta y contenido. Por lo tanto, la comparación no se ve afectada por datos incompletos.
+
+---
+
+### Pregunta 8: Tamaño de la oferta y datos disponibles por comercio
+
+*¿Cuántos productos de la categoría se obtuvieron por comercio y ejecución? ¿Cómo se compara el tamaño de la oferta entre comercios y qué proporción de productos tiene descripción, marca y contenido identificables?*
+
+```{python}
+q8 = f"""
+SELECT 
+    o.id_corrida,
+    o.id_ejecucion,
+    o.comercio,
+    COUNT(*) AS total_productos_extraidos,
+    SUM(CASE WHEN o.en_categoria = 1 THEN 1 ELSE 0 END) AS total_en_categoria,
+    ROUND(SUM(CASE WHEN o.descripcion_original IS NOT NULL AND length(trim(o.descripcion_original)) > 0 THEN 1.0 ELSE 0.0 END) / COUNT(*) * 100.0, 2) AS pct_con_descripcion,
+    ROUND(SUM(CASE WHEN o.marca_original IS NOT NULL AND length(trim(o.marca_original)) > 0 THEN 1.0 ELSE 0.0 END) / COUNT(*) * 100.0, 2) AS pct_con_marca,
+    ROUND(SUM(CASE WHEN o.contenido_valor IS NOT NULL THEN 1.0 ELSE 0.0 END) / COUNT(*) * 100.0, 2) AS pct_con_contenido
+FROM observaciones o
+WHERE o.id_corrida = {REF}
+GROUP BY o.id_corrida, o.id_ejecucion, o.comercio
+ORDER BY total_productos_extraidos DESC;
+"""
+df_q8 = pd.read_sql_query(q8, conn)
+q8_map = df_q8.set_index("comercio")
+q8_cat_bp = int(q8_map.loc["Bella Piel", "total_en_categoria"])
+q8_cat_lr = int(q8_map.loc["La Rebaja", "total_en_categoria"])
+q8_cat_loc = int(q8_map.loc["Locatel", "total_en_categoria"])
+q8_cont_bp = f"{q8_map.loc['Bella Piel', 'pct_con_contenido']:.1f}%"
+q8_cont_lr = f"{q8_map.loc['La Rebaja', 'pct_con_contenido']:.1f}%"
+q8_cont_loc = f"{q8_map.loc['Locatel', 'pct_con_contenido']:.1f}%"
+df_q8
+```
+
+**Resultado.** Locatel tiene la oferta más amplia (`{python} q8_cat_loc` productos de la categoría), seguida de Bella Piel (`{python} q8_cat_bp`) y La Rebaja (`{python} q8_cat_lr`). En los tres comercios todos los productos tienen marca y prácticamente todos tienen descripción. La diferencia está en el contenido: se pudo identificar en el `{python} q8_cont_loc` de los productos de Locatel y en el `{python} q8_cont_bp` de los de Bella Piel, pero solo en el `{python} q8_cont_lr` de los de La Rebaja, porque ese sitio casi nunca incluye el tamaño en el nombre del producto. Esto no afecta a los comparables, cuyo contenido se tomó del catálogo común.
+
+---
+
+# 6. Gráficos
+
+### 6.1 Precio de cada presentación en los tres comercios (corrida REF)
+
+```{python}
+df_comp = pd.read_sql_query(f"""
+SELECT 
+    p.nombre_estandar,
+    o.comercio,
+    o.precio_actual
+FROM observaciones o
+JOIN productos_comparables p ON o.id_producto_comun = p.id_producto_comun
+WHERE o.comparable = 1 
+  AND o.en_categoria = 1 
+  AND o.precio_actual IS NOT NULL
+  AND o.id_corrida = {REF}
+ORDER BY p.nombre_estandar;
+""", conn)
+
+colores_3 = ["#2b5c8f", "#d95f02", "#1b9e77"]
+
+plt.figure(figsize=(12, 7))
+sns.barplot(
+    data=df_comp,
+    x="precio_actual",
+    y="nombre_estandar",
+    hue="comercio",
+    palette=colores_3
+)
+plt.title("Precios Observados por Producto Comparable en los 3 Comercios", fontsize=13, fontweight="bold")
+plt.xlabel("Precio Actual en COP ($)", fontsize=11)
+plt.ylabel("Producto / Presentación", fontsize=11)
+plt.legend(title="Comercio")
+plt.tight_layout()
+plt.show()
+```
+
+---
+
+### 6.2 Precio por mL y por g
+
+Este gráfico es solo descriptivo. Como se explicó en la pregunta 5, no sirve para comparar productos distintos entre sí, sino para ver la diferencia entre comercios en un mismo producto.
+
+```{python}
+fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+
+df_ml = df_q5[df_q5["contenido_unidad"] == "mL"]
+sns.barplot(
+    data=df_ml,
+    x="precio_por_unidad",
+    y="nombre_estandar",
+    hue="comercio",
+    ax=axes[0],
+    palette=colores_3
+)
+axes[0].set_title("Precio por Mililitro ($ COP / mL)", fontweight="bold")
+axes[0].set_xlabel("COP / mL")
+axes[0].set_ylabel("")
+
+df_g = df_q5[df_q5["contenido_unidad"] == "g"]
+sns.barplot(
+    data=df_g,
+    x="precio_por_unidad",
+    y="nombre_estandar",
+    hue="comercio",
+    ax=axes[1],
+    palette=colores_3
+)
+axes[1].set_title("Precio por Gramo ($ COP / g)", fontweight="bold")
+axes[1].set_xlabel("COP / g")
+axes[1].set_ylabel("")
+
+plt.tight_layout()
+plt.show()
+```
+
+---
+
+### 6.3 Ahorro porcentual por presentación
+
+```{python}
+plt.figure(figsize=(10, 5))
+sns.barplot(
+    data=df_q6,
+    x="ahorro_porcentual",
+    y="nombre_estandar",
+    color="#2ca25f"
+)
+plt.title("Porcentaje de Ahorro Potencial al Elegir la Oferta Más Económica", fontsize=13, fontweight="bold")
+plt.xlabel("Ahorro (%)", fontsize=11)
+plt.ylabel("")
+plt.tight_layout()
+plt.show()
+```
+
+---
+
+# 7. Conclusiones
+
+## 7.1 Canasta de protectores (corrida REF = `{python} REF`)
+
+Para resumir los resultados se arma una canasta con una unidad de cada una de las `{python} n_comparables` presentaciones comparables. Primero se calcula cuánto cuesta comprarla completa en cada comercio y luego cuánto costaría comprando cada producto donde está más barato (canasta óptima).
+
+```{python}
+# 1. Costo de la canasta (1 unidad de cada una de las 11 presentaciones) en cada comercio
+q_canasta_comercios = f"""
+SELECT 
+    o.comercio AS "Comercio",
+    COUNT(DISTINCT o.id_producto_comun) AS "Productos en Canasta",
+    SUM(o.precio_actual) AS "Desembolso Total (COP)"
+FROM observaciones o
+WHERE o.comparable = 1 
+  AND o.en_categoria = 1 
+  AND o.precio_actual IS NOT NULL 
+  AND o.id_corrida = {REF}
+GROUP BY o.comercio
+ORDER BY "Desembolso Total (COP)" ASC;
+"""
+df_canasta_comercios = pd.read_sql_query(q_canasta_comercios, conn)
+df_canasta_comercios
+```
+
+```{python}
+# 2. Canasta óptima: comprando cada producto donde es más barato
+q_canasta_optima = f"""
+WITH min_precios AS (
+    SELECT 
+        o.id_producto_comun,
+        MIN(o.precio_actual) AS precio_minimo
+    FROM observaciones o
+    WHERE o.comparable = 1 
+      AND o.en_categoria = 1 
+      AND o.precio_actual IS NOT NULL 
+      AND o.id_corrida = {REF}
+    GROUP BY o.id_producto_comun
+)
+SELECT 
+    'Canasta Óptima (Mejor Precio por Producto)' AS "Estrategia",
+    COUNT(*) AS "Productos en Canasta",
+    SUM(precio_minimo) AS "Desembolso Total (COP)"
+FROM min_precios;
+"""
+df_canasta_optima = pd.read_sql_query(q_canasta_optima, conn)
+df_canasta_optima
+```
+
+```{python}
+# 3. Consolidación comparativa y potencial de ahorro frente a la canasta óptima
+costo_optimo = df_canasta_optima["Desembolso Total (COP)"].iloc[0]
+
+df_comparativa_canasta = df_canasta_comercios.copy()
+df_comparativa_canasta["Ahorro vs Canasta Óptima (COP)"] = df_comparativa_canasta["Desembolso Total (COP)"] - costo_optimo
+df_comparativa_canasta["Ahorro Potencial (%)"] = (
+    (df_comparativa_canasta["Ahorro vs Canasta Óptima (COP)"] / df_comparativa_canasta["Desembolso Total (COP)"]) * 100.0
+).round(2)
+df_comparativa_canasta
+```
+
+## 7.2 Precio del empaque frente a precio por unidad
+
+En este análisis conviene separar dos formas de mirar el precio.
+
+**El precio del empaque** es lo que la persona paga en la caja. Es lo que define si puede o no comprar el producto en ese momento: si alguien tiene $100,000, no puede llevar un protector de $135,000, aunque por mililitro le salga más barato. En la canasta de `{python} n_comparables` productos, comprar todo en La Rebaja cuesta **`{python} txt_canasta_lr` COP**, en Bella Piel **`{python} txt_canasta_bp` COP** y en Locatel **`{python} txt_canasta_loc` COP**. Si se compra cada producto donde está más barato, el total baja a **`{python} txt_canasta_optima` COP**. Eso es **`{python} txt_ahorro_canasta_loc` COP menos (`{python} txt_pct_canasta_loc`)** que comprar todo en Locatel y **`{python} txt_ahorro_canasta_lr` COP menos (`{python} txt_pct_canasta_lr`)** que comprar todo en La Rebaja.
+
+**El precio por unidad** (COP por mL o por g) sirve para saber si un envase grande de un mismo producto sale más barato que uno pequeño. Solo se puede usar entre tamaños del mismo producto, de la misma marca, línea y FPS, porque productos distintos tienen fórmulas, texturas y precios que no son comparables. Como en la muestra no hay dos tamaños de un mismo producto, este análisis no aplica aquí.
+
+En resumen, para quien compra con frecuencia y puede pagar envases grandes, el precio por unidad ayuda a ahorrar a largo plazo; pero para la mayoría de consumidores lo que pesa es el precio del empaque. Con los datos de esta corrida, La Rebaja es la opción más barata si se quiere hacer toda la compra en un solo lugar, y repartir la compra entre tiendas permite ahorrar un poco más.
+
+## 7.3 Limitaciones
+
+- Los precios son los que mostraba cada tienda en su página en el momento de la consulta. No incluyen el costo del envío ni descuentos por medio de pago, convenios o programas de fidelización.
+- Los resultados corresponden a una sola corrida. Los precios cambian con frecuencia (por ejemplo, por promociones), así que otra fecha podría dar un orden distinto entre comercios.
+- En Bella Piel, como el sitio no publica el código de barras, los productos se identificaron por el nombre y se verificaron manualmente.
+
+```{python}
+conn.close()
+```

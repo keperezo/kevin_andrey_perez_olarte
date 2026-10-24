@@ -1,0 +1,205 @@
+library(tidyverse)
+
+adult <- read_csv("adult.csv", show_col_types = FALSE)
+
+# a) Mecanismo de faltantes y prop.test() en 'occupation'
+adult_na <- adult %>%
+  mutate(across(where(is.character), ~ na_if(str_trim(.x), "?")))
+
+cruce_occ <- adult_na %>%
+  mutate(occ_falta = is.na(occupation)) %>%
+  group_by(occ_falta) %>%
+  summarise(
+    total = n(),
+    ricos = sum(income == ">50K"),
+    prop_ricos = mean(income == ">50K")
+  )
+
+print(cruce_occ)
+
+# Prueba de hipótesis para diferencia de proporciones
+test_mcar <- prop.test(cruce_occ$ricos, cruce_occ$total)
+print(test_mcar)
+
+# Justificación:
+# El p-valor rechaza rotundamente que el dato falte completamente al azar (MCAR).
+# Las personas sin ocupación reportada tienen una tasa de ingresos altos (~10.4%) muy inferior
+# a quienes sí la declaran (~24.8%). Imputar con la moda ("Prof-specialty" o "Craft-repair")
+# sesgaría la muestra atribuyéndoles alta probabilidad de ingresos altos. Lo correcto es
+# conservar la categoría explícita "Desconocido" como un factor socioeconómico informativo.
+
+# b) Valor centinela en capital.gain
+n_99999 <- sum(adult$capital.gain == 99999)
+siguiente_max <- adult %>% 
+  filter(capital.gain < 99999) %>% 
+  summarise(max = max(capital.gain)) %>% 
+  pull(max)
+
+pct_ceros <- mean(adult$capital.gain == 0) * 100
+
+cat("Casos con valor centinela 99999:", n_99999, "\n")
+cat("Siguiente valor más alto:", siguiente_max, "\n")
+cat(sprintf("Porcentaje de ceros en capital.gain: %.2f%%\n\n", pct_ceros))
+
+# Justificación de tratamiento:
+# 99999 es un valor de censura superior. 
+# Se crea una bandera lógica 'gain_censurado = (capital.gain == 99999)' para conservar 
+# la señal de riqueza extrema y luego se aplica log1p() para comprimir la asimetría.
+
+# c, d, e) Pipeline funcional con parámetros de entrenamiento (Anti-Leakage)
+
+# 1. Estimación de parámetros ÚNICAMENTE sobre entrenamiento
+aprender_parametros <- function(df_train) {
+  df_limpio <- df_train %>%
+    mutate(across(where(is.character), ~ na_if(str_trim(.x), "?")))
+  
+  # Modas categóricas
+  modas <- df_limpio %>%
+    select(where(is.character), -income) %>%
+    map_chr(function(col) {
+      tbl <- sort(table(col[!is.na(col)]), decreasing = TRUE)
+      names(tbl)[1]
+    })
+  
+  # Medianas numéricas
+  medianas <- df_limpio %>%
+    select(where(is.numeric)) %>%
+    map_dbl(~ median(.x, na.rm = TRUE))
+  
+  # Columnas y categorías fijas para One-Hot Encoding
+  cats_workclass <- sort(unique(na.omit(df_limpio$workclass)))
+  cats_marital   <- sort(unique(na.omit(df_limpio$marital.status)))
+  cats_sex       <- sort(unique(na.omit(df_limpio$sex)))
+  
+  # Medias y desviaciones tras aplicar logaritmo (para estandarización)
+  df_trans <- df_limpio %>%
+    mutate(
+      capital.gain = log1p(coalesce(capital.gain, medianas["capital.gain"])),
+      capital.loss = log1p(coalesce(capital.loss, medianas["capital.loss"])),
+      age = coalesce(age, medianas["age"]),
+      hours.per.week = coalesce(hours.per.week, medianas["hours.per.week"])
+    )
+  
+  cols_num <- c("age", "hours.per.week", "capital.gain", "capital.loss")
+  medias   <- map_dbl(df_trans[cols_num], mean)
+  desvs    <- map_dbl(df_trans[cols_num], sd)
+  
+  list(
+    modas = modas,
+    medianas = medianas,
+    medias = medias,
+    desvs = desvs,
+    cats = list(workclass = cats_workclass, marital = cats_marital, sex = cats_sex)
+  )
+}
+
+# 2. Funciones modulares del pipeline
+limpiar_signos <- function(df) {
+  df %>% mutate(across(where(is.character), ~ na_if(str_trim(.x), "?")))
+}
+
+tratar_centinela <- function(df) {
+  df %>% mutate(gain_censurado = as.numeric(capital.gain == 99999))
+}
+
+agrupar_paises <- function(df) {
+  df %>% mutate(
+    pais_origen = if_else(native.country == "United-States", "Estados_Unidos", "Otro", missing = "Otro")
+  )
+}
+
+imputar_datos <- function(df, params) {
+  df %>%
+    mutate(
+      workclass      = coalesce(workclass, "Desconocido"),
+      occupation     = coalesce(occupation, "Desconocido"),
+      marital.status = coalesce(marital.status, params$modas["marital.status"]),
+      sex            = coalesce(sex, params$modas["sex"]),
+      age            = coalesce(age, params$medianas["age"]),
+      hours.per.week = coalesce(hours.per.week, params$medianas["hours.per.week"]),
+      capital.gain   = coalesce(capital.gain, params$medianas["capital.gain"]),
+      capital.loss   = coalesce(capital.loss, params$medianas["capital.loss"])
+    )
+}
+
+transformar_log <- function(df) {
+  df %>% mutate(
+    capital.gain = log1p(capital.gain),
+    capital.loss = log1p(capital.loss)
+  )
+}
+
+codificar_variables <- function(df, params) {
+  # Variable objetivo binaria
+  df <- df %>%
+    mutate(target_income = as.numeric(income == ">50K"))
+  
+  # Dummies manuales consistentes con el entrenamiento
+  crear_dummies <- function(data, columna, prefijo, categorias) {
+    for (cat in categorias) {
+      nombre_col <- paste0(prefijo, "_", str_replace_all(cat, "[^A-Za-z0-9]", "_"))
+      data[[nombre_col]] <- as.numeric(data[[columna]] == cat)
+      data[[nombre_col]] <- coalesce(data[[nombre_col]], 0)
+    }
+    data
+  }
+  
+  df <- crear_dummies(df, "workclass", "work", params$cats$workclass)
+  df <- crear_dummies(df, "marital.status", "marit", params$cats$marital)
+  df <- crear_dummies(df, "sex", "sex", params$cats$sex)
+  df <- df %>% mutate(pais_EEUU = as.numeric(pais_origen == "Estados_Unidos"))
+  
+  # Seleccionar únicamente columnas analíticas
+  df %>% select(
+    target_income, age, hours.per.week, capital.gain, capital.loss,
+    gain_censurado, pais_EEUU, starts_with("work_"), starts_with("marit_"), starts_with("sex_")
+  )
+}
+
+estandarizar_datos <- function(df, params) {
+  cols_num <- names(params$medias)
+  for (cn in cols_num) {
+    df[[cn]] <- (df[[cn]] - params$medias[cn]) / params$desvs[cn]
+  }
+  df
+}
+
+# 3. Compositor general con purrr::reduce y verificaciones
+preprocesar_adult <- function(df, params) {
+  n_original <- nrow(df)
+  
+  pasos <- list(
+    limpiar_signos,
+    tratar_centinela,
+    agrupar_paises,
+    function(d) imputar_datos(d, params),
+    transformar_log,
+    function(d) codificar_variables(d, params),
+    function(d) estandarizar_datos(d, params)
+  )
+  
+  df_final <- reduce(pasos, function(d, fn) fn(d), .init = df)
+  
+  # Verificaciones obligatorias con stopifnot
+  stopifnot("Existen valores NA en el dataframe final" = sum(is.na(df_final)) == 0)
+  stopifnot("No todas las columnas son numéricas" = all(map_lgl(df_final, is.numeric)))
+  stopifnot("El número de filas fue alterado" = nrow(df_final) == n_original)
+  
+  return(df_final)
+}
+
+# 4. Prueba en partición 70/30
+set.seed(2024)
+idx_train <- sample(seq_len(nrow(adult)), size = floor(0.70 * nrow(adult)))
+
+train_raw <- adult[idx_train, ]
+test_raw  <- adult[-idx_train, ]
+
+parametros_entrenamiento <- aprender_parametros(train_raw)
+
+train_procesado <- preprocesar_adult(train_raw, parametros_entrenamiento)
+test_procesado  <- preprocesar_adult(test_raw, parametros_entrenamiento)
+
+cat("Pipeline ejecutado exitosamente:\n")
+cat(" - Dimensiones train procesado:", nrow(train_procesado), "x", ncol(train_procesado), "\n")
+cat(" - Dimensiones test procesado :", nrow(test_procesado), "x", ncol(test_procesado), "\n")

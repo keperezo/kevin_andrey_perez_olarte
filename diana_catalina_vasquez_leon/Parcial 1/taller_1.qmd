@@ -1,0 +1,510 @@
+---
+title: "Comparador de precios de dermocosmética facial en Colombia"
+subtitle: "Taller 1 · Minería de Datos · Universidad Nacional de Colombia"
+author: "Diana Catalina Vásquez León"
+date: "2026-10-08"
+lang: es
+format:
+  html:
+    theme: [flatly, custom.scss]
+    embed-resources: true
+    toc: true
+    toc-title: "Contenido"
+    toc-location: left
+    toc-depth: 2
+    number-sections: true
+    smooth-scroll: true
+    code-fold: true
+    code-summary: "Ver código"
+    code-tools: true
+    fig-align: center
+jupyter: python3
+execute:
+  warning: false
+  message: false
+---
+
+```{python}
+#| label: setup
+#| code-summary: "Configuración, funciones auxiliares y ejecución del módulo de extracción"
+import os, sqlite3, sys
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import plotly.io as pio
+from IPython.display import Markdown, HTML, display
+
+sys.path.append(os.path.abspath("."))
+import scraper, preparacion
+
+DB = "comparador_precios.sqlite"
+
+# TALLER_MODO: "en_linea" (consulta los sitios), "offline" (reprocesa raw/) o "existente" (solo lee la BD)
+MODO = os.environ.get("TALLER_MODO", "offline" if os.path.isdir("raw") else "existente")
+if MODO == "en_linea":
+    os.environ.setdefault("SCRAPER_CONTACTO", "divasquezl@unal.edu.co")
+    scraper.recolectar_todo(verbose=False)
+elif MODO == "offline":
+    scraper.recolectar_todo(offline=True, verbose=False)
+preparacion.preparar(DB)
+
+con = sqlite3.connect(DB)
+EJEC = pd.read_sql_query(
+    "SELECT MAX(id_ejecucion) e FROM observaciones WHERE comparable = 1", con)["e"][0]
+
+# Identidad visual: un color fijo por comercio en TODOS los gráficos
+COLOR = {"Dermatodo": "#4F46E5", "Farmatodo": "#F97316", "La Rebaja": "#10B981"}
+ORDEN = ["Dermatodo", "Farmatodo", "La Rebaja"]
+pio.templates.default = "plotly_white"
+LAYOUT = dict(font=dict(family="Inter, Segoe UI, sans-serif", size=13),
+              margin=dict(l=20, r=20, t=60, b=40), legend_title_text="Comercio",
+              title_font=dict(size=18))
+
+cop = lambda v: "—" if pd.isna(v) else "$" + f"{v:,.0f}".replace(",", ".")
+
+def sql(q, mostrar=True):
+    """Muestra la consulta y devuelve el resultado como DataFrame."""
+    q = q.strip()
+    if mostrar:
+        fence = "`" * 3          # (no se escribe literal para no cerrar el bloque de código de Quarto)
+        display(Markdown(f"{fence}sql\n{q}\n{fence}"))
+    return pd.read_sql_query(q, con)
+
+def tabla(df, cop_cols=(), pct_cols=(), grad=None):
+    """Tabla con estilo (miles con punto, % con 1 decimal, degradado opcional)."""
+    fmt = {c: cop for c in cop_cols} | {c: "{:.1f}%" for c in pct_cols}
+    st = df.style.hide(axis="index").format(fmt, na_rep="—", thousands=".", precision=0)
+    if grad:
+        st = st.background_gradient(subset=grad, cmap="Purples")
+    return st
+
+def interp(txt):
+    display(Markdown(f'<div class="interp"><strong>Interpretación.</strong> {txt}</div>'))
+
+def kpis(items):
+    html = "".join(f'<div class="kpi"><div class="v">{v}</div><div class="l">{l}</div></div>' for v, l in items)
+    display(HTML(f'<div class="kpis">{html}</div>'))
+```
+
+```{python}
+#| echo: false
+k = sql("""
+SELECT (SELECT COUNT(*) FROM comercios) AS comercios,
+       (SELECT COUNT(*) FROM productos) AS productos,
+       COUNT(*) AS obs, SUM(en_alcance) AS alc, SUM(comparable) AS comp
+FROM observaciones""", mostrar=False).iloc[0]
+kpis([(int(k.comercios), "comercios"), (f"{int(k.obs):,}".replace(",", "."), "productos recolectados"),
+      (f"{int(k.alc):,}".replace(",", "."), "dentro del alcance"),
+      (int(k.productos), "productos comparables"), (int(k.comp), "observaciones comparables")])
+```
+
+## Introducción
+
+Este informe construye un **comparador de precios de dermocosmética facial** (limpiadores, sueros, hidratantes, contornos de ojos, etc.) con datos obtenidos por *web scraping* de tres comercios colombianos con venta en línea: **Dermatodo**, **Farmatodo** y **La Rebaja**.
+
+El objetivo es responder, con datos y consultas SQL reproducibles:
+
+- ¿En cuál comercio resulta más económico comprar cada producto?
+- ¿Cuánto se ahorra al elegir la oferta más barata?
+- ¿Qué presentación ofrece el menor precio por mL cuando hay tamaños distintos del mismo producto?
+
+::: {.callout-note title="Categoría y delimitación"}
+**Dermocosmética:**Limpiadores faciales, sérums, tónicos, cremas faciales, contornos de ojos y tratamientos cosméticos para manchas o acné.
+**Excluye:** maquillaje y protectores solares Cada exclusión queda registrada con su motivo en `observaciones.motivo_exclusion`.
+:::
+
+**Lenguaje:** Python. Todo el proceso (extracción, limpieza, SQLite, consultas y gráficos) se ejecuta desde este documento.
+
+## Fuentes y scraping
+
+```{python}
+#| label: tbl-fuentes
+src = sql("""
+SELECT e.comercio, c.sitio_web, e.id_ejecucion, e.fecha_inicio, e.modo, e.estado,
+       e.registros_obtenidos AS obtenidos, e.registros_declarados_sitio AS declarados_sitio
+FROM ejecuciones e JOIN comercios c USING (comercio)
+ORDER BY e.fecha_inicio""")
+tabla(src)
+```
+
+| Comercio | Tecnología | Estrategia de extracción |
+|---|---|---|
+| **La Rebaja** | VTEX | API pública de catálogo (`/api/catalog_system/pub/products/search`) filtrada por la categoría *Dermocosmética > Rostro*; paginación `_from/_to` de 50 en 50. |
+| **Dermatodo** | Shopify | Feed JSON `collections/facial/products.json`, 250 productos por página. Las subcolecciones asignan la subcategoría y detectan exclusiones. |
+| **Farmatodo** | Angular + Algolia | Buscador interno que usa la propia web. Devuelve máximo 80 resultados por consulta, por lo que se parte la categoría por rangos de precio hasta cubrirla completa. La clave pública se lee en memoria y **no** se guarda. |
+
+Todas las peticiones son HTTP directas (sin navegador), con pausa de 1 s entre llamadas y un `User-Agent` que identifica el taller y un correo de contacto. Cada respuesta se guarda comprimida en `raw/<comercio>/<fecha>/<ejecución>/`, y `scraper.recolectar_todo(offline=True)` las reprocesa sin consultar los sitios.
+
+::: {.callout-warning title="Revisión de condiciones de uso"}
+*Los `robots.txt` de cada sitio se revisaron el 02-10-2026, antes de ejecutar la extracción (05-10-2026)..*
+:::
+
+### ¿La recolección está completa?
+
+```{python}
+#| label: fig-completitud
+c = sql("""
+SELECT e.comercio, e.estado, e.registros_obtenidos AS obtenidos,
+       e.registros_declarados_sitio AS declarados,
+       ROUND(100.0 * e.registros_obtenidos / e.registros_declarados_sitio, 1) AS pct
+FROM ejecuciones e""", mostrar=False)
+tabla(c, pct_cols=["pct"])
+```
+
+::: {.interp}
+**Interpretación.** *La Rebaja* se obtuvo completa (el total declarado por sitio coincide con lo recibido). En *Dermatodo* el feed público entregó menos productos que los declarados en `collections.json`; la ejecución queda marcada como **parcial** y la diferencia no se pudo explicar con los datos del sitio. En *Farmatodo* el sitio muestra solo 80 productos para la categoría, pero el buscador interno permite recorrerla completa por rangos de precio (la cifra obtenida supera la del listado visible porque este oculta agotados y productos de fórmula).
+:::
+
+## Preparación y correspondencia de productos
+
+Reglas aplicadas (módulo `preparacion.py`):
+
+1. Los textos originales (`titulo_original`, `marca_original`, `texto_original`) **no se modifican**; la versión estandarizada vive en campos propios (`marca_estandar`).
+2. Los precios son numéricos en COP; un precio ausente queda `NULL`, nunca `0`.
+3. **Correspondencia entre comercios**: un producto es comparable cuando coinciden marca, variante, contenido y número de unidades. El EAN se usa como llave, y cada uno de los 10 EAN comparables se verificó manualmente con los títulos de los tres comercios.
+4. Cada producto comparable recibe un `id_producto_comun` (P01…P10) y la observación queda marcada con `comparable = 1`.
+
+```{python}
+#| label: tbl-productos
+sql("""
+SELECT p.id_producto_comun AS id, p.marca_estandar AS marca, p.nombre_estandar AS producto,
+       p.contenido_num || ' ' || p.unidad AS presentacion, p.codigo_barras AS ean
+FROM productos p ORDER BY id""", mostrar=False).pipe(tabla)
+```
+
+## Base de datos SQLite
+
+```{python}
+#| label: tbl-esquema
+sql("""
+SELECT type AS tipo, name AS nombre
+FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND type IN ('table','view','index')
+ORDER BY type, name""", mostrar=False).pipe(tabla)
+```
+
+- `comercios`, `productos` (identificador común) y `familias_tamano` (mismo producto en distintos tamaños).
+- `ejecuciones`: una fila por corrida y comercio (inicio, fin, registros, estado `completa/parcial/fallida`).
+- `observaciones`: precio, URL, texto original, fecha-hora ISO 8601 (`-05:00`), `comparable` e `id_producto_comun`. La restricción `UNIQUE (comercio, sku_comercio, fecha_consulta)` evita insertar dos veces la misma observación.
+
+## Consultas SQL
+
+### P1 · ¿Cuánto contiene la base?
+
+```{python}
+#| label: q1
+tabla(sql("""
+SELECT (SELECT COUNT(*) FROM comercios)                 AS comercios,
+       (SELECT COUNT(*) FROM productos)                 AS productos_comparables,
+       (SELECT COUNT(DISTINCT id_ejecucion) FROM ejecuciones) AS ejecuciones,
+       COUNT(*)                                         AS observaciones,
+       SUM(comparable)                                  AS obs_comparables
+FROM observaciones"""))
+```
+
+```{python}
+#| label: q1b
+q1 = sql("""
+SELECT comercio, COUNT(DISTINCT sku_comercio) AS productos_obtenidos,
+       SUM(en_alcance) AS en_alcance, SUM(1 - en_alcance) AS excluidos,
+       SUM(comparable) AS comparables
+FROM observaciones GROUP BY comercio ORDER BY productos_obtenidos DESC""")
+tabla(q1)
+```
+
+```{python}
+#| echo: false
+top = q1.iloc[0]
+interp(f"La base reúne {int(q1.productos_obtenidos.sum())} productos de 3 comercios. **{top.comercio}** aporta la oferta más grande "
+       f"({int(top.productos_obtenidos)} productos) y *La Rebaja* la más pequeña; esto explica por qué los productos comunes a los tres son pocos.")
+```
+
+### P2 · ¿Hay al menos 24 observaciones comparables en una misma ejecución?
+
+```{python}
+#| label: q2
+q2 = sql("""
+SELECT id_ejecucion, COUNT(*) AS obs_comparables, COUNT(DISTINCT comercio) AS comercios,
+       COUNT(DISTINCT id_producto_comun) AS productos,
+       CASE WHEN COUNT(*) >= 24 AND COUNT(DISTINCT comercio) = 3 THEN 'Sí' ELSE 'No' END AS cumple_24
+FROM observaciones WHERE comparable = 1 GROUP BY id_ejecucion""")
+tabla(q2)
+```
+
+```{python}
+#| label: q2b
+dup = sql("""
+SELECT id_ejecucion, comercio, id_producto_comun, COUNT(*) AS veces
+FROM observaciones WHERE comparable = 1
+GROUP BY id_ejecucion, comercio, id_producto_comun HAVING COUNT(*) > 1""")
+tabla(dup) if len(dup) else display(Markdown("✅ **No hay registros repetidos** del mismo producto y comercio en la ejecución."))
+```
+
+```{python}
+#| echo: false
+r = q2.iloc[0]
+interp(f"La ejecución `{r.id_ejecucion}` tiene **{int(r.obs_comparables)} observaciones comparables** ({int(r.productos)} productos × {int(r.comercios)} comercios), por encima del mínimo de 24.")
+```
+
+### P3 · Precio mínimo, máximo y promedio por presentación
+
+```{python}
+#| label: q3
+q3 = sql(f"""
+WITH base AS (
+    SELECT id_producto_comun, comercio, precio_vigente
+    FROM observaciones WHERE comparable = 1 AND id_ejecucion = '{EJEC}'),
+st AS (
+    SELECT id_producto_comun, MIN(precio_vigente) AS p_min, MAX(precio_vigente) AS p_max,
+           ROUND(AVG(precio_vigente)) AS p_prom
+    FROM base GROUP BY id_producto_comun)
+SELECT p.id_producto_comun AS id, p.marca_estandar AS marca, p.nombre_estandar AS producto,
+       p.contenido_num || ' ' || p.unidad AS presentacion,
+       st.p_min, st.p_prom, st.p_max,
+       (SELECT GROUP_CONCAT(b.comercio, ' = ') FROM base b
+         WHERE b.id_producto_comun = st.id_producto_comun AND b.precio_vigente = st.p_min) AS mas_barato
+FROM st JOIN productos p USING (id_producto_comun) ORDER BY id""")
+tabla(q3, cop_cols=["p_min", "p_prom", "p_max"])
+```
+
+```{python}
+#| echo: false
+gan = q3.mas_barato.str.split(" = ").explode().value_counts()
+txt = ", ".join(f"**{k}** en {v}" for k, v in gan.items())
+interp(f"Comercio con el menor precio por producto (los empates se cuentan para todos los empatados): {txt}. "
+       "Los precios son los vigentes al momento de la captura e incluyen promociones.")
+```
+
+### P4 · Ahorro al elegir la oferta más económica
+
+Ahorro (COP) = P~max~ − P~min~; Ahorro (%) = 100 · (P~max~ − P~min~) / P~max~.
+
+```{python}
+#| label: q4
+q4 = sql(f"""
+WITH st AS (
+    SELECT id_producto_comun, MIN(precio_vigente) AS p_min, MAX(precio_vigente) AS p_max
+    FROM observaciones WHERE comparable = 1 AND id_ejecucion = '{EJEC}'
+    GROUP BY id_producto_comun)
+SELECT p.id_producto_comun AS id, p.marca_estandar || ' ' || p.nombre_estandar AS producto,
+       st.p_min, st.p_max, st.p_max - st.p_min AS ahorro_cop,
+       ROUND(100.0 * (st.p_max - st.p_min) / st.p_max, 1) AS ahorro_pct
+FROM st JOIN productos p USING (id_producto_comun) ORDER BY ahorro_pct DESC""")
+tabla(q4, cop_cols=["p_min", "p_max", "ahorro_cop"], pct_cols=["ahorro_pct"], grad=["ahorro_pct"])
+```
+
+### P5 · Menor precio por mL entre tamaños del mismo producto
+
+Mismo producto y formulación (*Cetaphil Limpiador Piel Grasa*) en dos tamaños. Solo se comparan mL con mL.
+
+```{python}
+#| label: q5
+q5 = sql("""
+SELECT o.comercio, o.contenido_num AS contenido_ml, o.precio_vigente AS precio,
+       ROUND(1.0 * o.precio_vigente / o.contenido_num, 1) AS cop_por_ml, o.promocion
+FROM observaciones o JOIN familias_tamano f USING (codigo_barras)
+WHERE o.en_alcance = 1 AND o.unidad = 'mL' AND o.precio_vigente IS NOT NULL
+  AND o.id_ejecucion = (SELECT MAX(id_ejecucion) FROM observaciones WHERE comparable = 1)
+ORDER BY cop_por_ml""")
+tabla(q5, cop_cols=["precio"], grad=["cop_por_ml"])
+```
+
+```{python}
+#| echo: false
+b, g = q5.iloc[0], q5.sort_values("precio").iloc[0]
+interp(f"La opción más barata por mL es **{b.comercio}** con {int(b.contenido_ml)} mL a **{cop(b.cop_por_ml)}/mL**. "
+       f"El menor *desembolso* es otra cosa: **{g.comercio}** ({int(g.contenido_ml)} mL, {cop(g.precio)}). "
+       "El envase grande exige pagar más de una vez, pero cada mL sale más barato.")
+```
+
+### P6 · Mayores diferencias entre comercios
+
+```{python}
+#| label: q6
+q6 = sql(f"""
+SELECT p.marca_estandar || ' ' || p.nombre_estandar AS producto,
+       MIN(o.precio_vigente) AS p_min, MAX(o.precio_vigente) AS p_max,
+       ROUND(100.0 * (MAX(o.precio_vigente) - MIN(o.precio_vigente)) / MAX(o.precio_vigente), 1) AS ahorro_pct
+FROM observaciones o JOIN productos p USING (id_producto_comun)
+WHERE o.comparable = 1 AND o.id_ejecucion = '{EJEC}'
+GROUP BY p.id_producto_comun ORDER BY ahorro_pct DESC LIMIT 5""")
+tabla(q6, cop_cols=["p_min", "p_max"], pct_cols=["ahorro_pct"])
+```
+
+```{python}
+#| label: q6b
+promo = sql(f"""
+SELECT p.nombre_estandar AS producto, o.comercio, o.precio_lista, o.precio_vigente,
+       ROUND(100.0 * (o.precio_lista - o.precio_vigente) / o.precio_lista, 1) AS descuento_pct
+FROM observaciones o JOIN productos p USING (id_producto_comun)
+WHERE o.comparable = 1 AND o.promocion = 1 AND o.id_ejecucion = '{EJEC}'""")
+tabla(promo, cop_cols=["precio_lista", "precio_vigente"], pct_cols=["descuento_pct"])
+```
+
+::: {.interp}
+**Interpretación.** Parte de la diferencia más grande se debe a **promociones** (tabla anterior): el precio más bajo no siempre es el precio habitual. Por eso el ahorro debe leerse como «ahorro hoy», no como una diferencia estructural entre cadenas.
+:::
+
+### P7 · Datos faltantes o inconsistentes
+
+```{python}
+#| label: q7
+q7 = sql("""
+SELECT comercio, COUNT(*) AS total,
+       SUM(codigo_barras IS NULL OR TRIM(codigo_barras) = '')  AS sin_ean,
+       SUM(marca_original IS NULL OR TRIM(marca_original) = '') AS sin_marca,
+       SUM(contenido_num IS NULL)                               AS sin_contenido,
+       SUM(precio_vigente IS NULL)                              AS sin_precio,
+       SUM(nota_calidad IS NOT NULL)                            AS con_nota_calidad
+FROM observaciones GROUP BY comercio""")
+tabla(q7)
+```
+
+```{python}
+#| label: q7b
+tabla(sql("""
+SELECT comercio, COUNT(*) AS eans_con_varios_sku
+FROM (SELECT comercio, codigo_barras FROM observaciones
+      WHERE en_alcance = 1 AND codigo_barras <> ''
+      GROUP BY comercio, codigo_barras HAVING COUNT(DISTINCT sku_comercio) > 1)
+GROUP BY comercio"""))
+```
+
+::: {.interp}
+**Interpretación.** Los faltantes se dejaron en `NULL` (nunca en 0). Los más relevantes son el contenido no identificable (impide calcular precio por mL) y los EAN que corresponden a varios SKU dentro de un mismo comercio (posibles duplicados del catálogo). Ninguno afecta a los 10 productos comparables, que tienen EAN, precio y contenido verificados.
+:::
+
+### P8 · Tamaño y calidad de la oferta por comercio y ejecución
+
+```{python}
+#| label: q8
+q8 = sql("""
+SELECT o.id_ejecucion, o.comercio, COUNT(*) AS obtenidos, SUM(o.en_alcance) AS en_alcance,
+       e.registros_declarados_sitio AS declarados_sitio,
+       ROUND(100.0 * SUM(o.titulo_original IS NOT NULL AND TRIM(o.titulo_original) <> '') / COUNT(*), 1) AS pct_descripcion,
+       ROUND(100.0 * SUM(o.marca_original  IS NOT NULL AND TRIM(o.marca_original)  <> '') / COUNT(*), 1) AS pct_marca,
+       ROUND(100.0 * SUM(o.contenido_num   IS NOT NULL) / COUNT(*), 1) AS pct_contenido
+FROM observaciones o JOIN ejecuciones e USING (id_ejecucion, comercio)
+GROUP BY o.id_ejecucion, o.comercio""")
+tabla(q8, pct_cols=["pct_descripcion", "pct_marca", "pct_contenido"])
+```
+
+## Visualizaciones
+
+### Precio de las mismas presentaciones en cada comercio
+
+```{python}
+#| label: fig-precios
+d = sql(f"""
+SELECT p.id_producto_comun AS id, p.marca_estandar || ' ' || p.nombre_estandar || ' (' || p.contenido_num || ' ' || p.unidad || ')' AS producto,
+       o.comercio, o.precio_vigente AS precio, o.promocion
+FROM observaciones o JOIN productos p USING (id_producto_comun)
+WHERE o.comparable = 1 AND o.id_ejecucion = '{EJEC}' ORDER BY p.id_producto_comun""", mostrar=False)
+d["promo"] = d.promocion.map({1: "Promoción", 0: "Precio regular"})
+fig = px.bar(d, y="producto", x="precio", color="comercio", barmode="group", orientation="h",
+             color_discrete_map=COLOR, category_orders={"comercio": ORDEN},
+             hover_data={"promo": True, "precio": ":,.0f"},
+             title="<b>Precio vigente por producto y comercio</b><br><sup>COP · captura " + EJEC[5:13] + "</sup>",
+             labels={"precio": "Precio (COP)", "producto": ""})
+fig.update_layout(**LAYOUT, height=720, yaxis=dict(autorange="reversed"))
+fig.update_xaxes(tickformat=",.0f")
+fig.show()
+```
+
+::: {.interp}
+**Interpretación.** Las barras comparan **exactamente la misma presentación** (mismo EAN, marca, variante y contenido). Pasa el cursor para ver si el precio es promocional. *Limitación:* son precios de un único momento; no incluyen envío ni programas de fidelización.
+:::
+
+### Oportunidad de ahorro
+
+```{python}
+#| label: fig-ahorro
+a = q4.sort_values("ahorro_pct")
+fig = go.Figure(go.Bar(
+    x=a.ahorro_pct, y=a.producto, orientation="h", marker_color="#4F46E5",
+    text=[f"{p:.1f}%  ·  {cop(c)}" for p, c in zip(a.ahorro_pct, a.ahorro_cop)], textposition="outside"))
+fig.update_layout(**LAYOUT, height=520, title="<b>Ahorro al comprar en el comercio más barato</b><br><sup>% sobre el precio máximo · COP entre paréntesis</sup>",
+                  xaxis_title="Ahorro (%)", xaxis_range=[0, a.ahorro_pct.max() * 1.35], showlegend=False)
+fig.show()
+```
+
+::: {.interp}
+**Interpretación.** El porcentaje se calcula sobre el precio más alto observado. Un ahorro grande en pesos no implica un ahorro grande en porcentaje (productos caros), por eso se muestran ambos.
+:::
+
+### Precio por mL y desembolso total
+
+```{python}
+#| label: fig-pum
+fig = px.bar(q5.assign(tam=q5.contenido_ml.astype(int).astype(str) + " mL"), x="tam", y="cop_por_ml", color="comercio",
+             barmode="group", color_discrete_map=COLOR, text="cop_por_ml",
+             title="<b>Cetaphil Limpiador Piel Grasa · precio por mL según tamaño</b><br><sup>COP/mL — solo se comparan mL con mL</sup>",
+             labels={"cop_por_ml": "COP por mL", "tam": "Tamaño del envase"})
+fig.update_traces(texttemplate="%{text:.0f}", textposition="outside")
+fig.update_layout(**LAYOUT, height=480)
+fig.show()
+```
+
+::: {.interp}
+**Interpretación.** En todos los comercios el envase de 473 mL tiene menor precio por mL que el de 237 mL, aunque requiere un desembolso mayor. La conveniencia depende de si el consumidor usará todo el producto antes de su vencimiento.
+:::
+
+### Canasta completa de los 10 productos
+
+```{python}
+#| label: fig-canasta
+canasta = sql(f"""
+SELECT comercio, SUM(precio_vigente) AS total, COUNT(*) AS productos
+FROM observaciones WHERE comparable = 1 AND id_ejecucion = '{EJEC}'
+GROUP BY comercio HAVING COUNT(*) = (SELECT COUNT(*) FROM productos)""")
+fig = px.bar(canasta, x="comercio", y="total", color="comercio", color_discrete_map=COLOR,
+             category_orders={"comercio": ORDEN}, text=canasta.total.map(cop),
+             title="<b>Costo de la misma canasta de 10 productos</b><br><sup>COP · mismas presentaciones y cantidades, misma ejecución</sup>",
+             labels={"total": "Total (COP)", "comercio": ""})
+fig.update_traces(textposition="outside")
+fig.update_layout(**LAYOUT, height=460, showlegend=False)
+fig.show()
+```
+
+### Tamaño de la oferta recolectada
+
+```{python}
+#| label: fig-oferta
+o = sql("""SELECT comercio, SUM(en_alcance) AS "En alcance", SUM(1 - en_alcance) AS "Excluidos"
+           FROM observaciones GROUP BY comercio""", mostrar=False).melt("comercio", var_name="estado", value_name="n")
+fig = px.bar(o, x="comercio", y="n", color="estado", barmode="stack",
+             color_discrete_map={"En alcance": "#4F46E5", "Excluidos": "#CBD5E1"},
+             category_orders={"comercio": ORDEN}, text="n",
+             title="<b>Productos recolectados por comercio</b>", labels={"n": "Productos", "comercio": "", "estado": ""})
+fig.update_layout(**LAYOUT, height=440)
+fig.show()
+```
+
+## Limitaciones y conclusiones
+
+```{python}
+#| echo: false
+mejor = canasta.sort_values("total").iloc[0]; peor = canasta.sort_values("total").iloc[-1]
+dif = peor.total - mejor.total
+lista = sql(f"""SELECT comercio, SUM(precio_lista) AS total FROM observaciones
+                WHERE comparable = 1 AND id_ejecucion = '{EJEC}' GROUP BY comercio ORDER BY total""", mostrar=False)
+sin_promo = f"{lista.comercio[0]} ({cop(lista.total[0])})"
+nunca = [c for c in ORDEN if c not in gan.index]
+md = f"""
+### Conclusión para el consumidor
+
+- **Canasta de 10 productos idénticos** (misma ejecución, mismas presentaciones): la más barata fue **{mejor.comercio}** ({cop(mejor.total)}) y la más cara **{peor.comercio}** ({cop(peor.total)}); diferencia de **{cop(dif)}** ({100*dif/peor.total:.1f}%).
+- **Producto por producto**, el ganador cambia: {txt}. {('**' + ', '.join(nunca) + '** no fue el más barato en ningún producto. ') if nunca else ''}Por eso conviene comparar cada producto y no asumir que un comercio es siempre el más barato.
+- **Sin promociones** (precio de lista) la canasta más barata sería la de {sin_promo}: parte de la ventaja observada depende de descuentos temporales.
+- **Tamaño:** el envase grande de Cetaphil Limpiador Piel Grasa (473 mL) tiene menor precio por mL en los tres comercios, pero exige mayor desembolso inicial. Conviene si se va a usar completo.
+"""
+display(Markdown(md))
+```
+
+### Limitaciones
+
+- **Precios puntuales:** corresponden al momento y condiciones de la captura (zona por defecto del sitio); pueden cambiar en horas.
+- **Una sola ejecución:** no se pueden observar variaciones de precio en el tiempo. 
+- **Cobertura parcial en Dermatodo:** el feed entregó 637 de 840 productos declarados.
+- **Solo 10 productos comunes a los tres comercios**, con predominio de marcas como Sesderma, Cetaphil y La Roche-Posay: los resultados no generalizan a toda la categoría.
+- **No incluye** costos de envío, programas de fidelización ni disponibilidad por tienda física.
+- **Medicamentos/dermocosméticos:** un menor precio no implica equivalencia terapéutica ni recomendación de sustitución.

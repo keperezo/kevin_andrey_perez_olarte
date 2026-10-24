@@ -1,0 +1,25 @@
+# Archivos temporales de exploración (no se entregan)
+scratchpad/
+exploracion/
+
+# Entorno de Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Quarto: salidas intermedias
+.quarto/
+*_files/
+
+# Sistema / RStudio
+.DS_Store
+.Rproj.user/
+.Rhistory
+
+# Enunciado del curso (material de consulta, no forma parte de la entrega)
+docs/enunciado_taller_1.*
+
+# Archivos temporales y salida del render de Quarto
+*.quarto_ipynb*
+taller_1.html

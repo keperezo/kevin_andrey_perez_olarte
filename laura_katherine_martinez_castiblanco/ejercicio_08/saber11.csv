@@ -1,0 +1,1501 @@
+"departamento","zona","estrato","naturaleza","horas_estudio","puntaje"
+"Antioquia","Rural",1,"Oficial",0.1,204
+"Antioquia","Urbana",2,"Oficial",5.6,286
+"Chocó","Urbana",3,"Oficial",6.8,255
+"Bogotá","Urbana",2,"Oficial",1,186
+"Valle del Cauca","Urbana",2,"Oficial",8.9,345
+"Chocó","Urbana",6,"Privado",5.7,251
+"Boyacá","Rural",1,"Oficial",8.4,203
+"Bogotá","Urbana",3,"Oficial",5.8,242
+"Antioquia","Rural",2,"Oficial",6.2,169
+"Bogotá","Urbana",3,"Oficial",2,242
+"Bogotá","Urbana",3,"Oficial",10.8,307
+"Valle del Cauca","Rural",2,"Oficial",1.2,200
+"Boyacá","Rural",1,"Oficial",6.2,215
+"Valle del Cauca","Rural",2,"Oficial",8.2,218
+"Boyacá","Rural",3,"Oficial",3,319
+"Bogotá","Urbana",1,"Oficial",5.7,273
+"Chocó","Urbana",1,"Oficial",2.4,211
+"Valle del Cauca","Urbana",2,"Oficial",5.4,210
+"Chocó","Urbana",2,"Oficial",2.8,212
+"Boyacá","Urbana",4,"Oficial",6.8,253
+"Bogotá","Urbana",3,"Oficial",5.5,307
+"Antioquia","Urbana",1,"Oficial",6.1,253
+"Boyacá","Rural",1,"Oficial",5.5,248
+"Chocó","Rural",1,"Oficial",3.8,168
+"Bogotá","Urbana",1,"Oficial",10.5,232
+"Antioquia","Urbana",4,"Oficial",4.9,281
+"Bogotá","Urbana",3,"Oficial",4.5,293
+"Antioquia","Urbana",4,"Oficial",6.3,230
+"Valle del Cauca","Urbana",3,"Oficial",4.9,262
+"Bogotá","Urbana",4,"Oficial",6.2,282
+"Boyacá","Rural",1,"Oficial",7.5,240
+"Chocó","Urbana",1,"Oficial",8.2,216
+"Antioquia","Urbana",2,"Oficial",5.3,216
+"Antioquia","Urbana",3,"Privado",5.4,292
+"Bogotá","Urbana",2,"Privado",4.8,241
+"Bogotá","Urbana",1,"Oficial",4.7,202
+"Antioquia","Urbana",3,"Oficial",7.4,237
+"Bogotá","Urbana",5,"Privado",6.5,291
+"Antioquia","Urbana",2,"Oficial",6.3,286
+"Bogotá","Urbana",3,"Privado",7.6,285
+"Chocó","Urbana",1,"Oficial",4.8,248
+"Valle del Cauca","Urbana",1,"Oficial",9.8,235
+"Boyacá","Urbana",4,"Oficial",3.9,259
+"Antioquia","Urbana",2,"Oficial",NA,264
+"Bogotá","Rural",1,"Oficial",2.8,240
+"Chocó","Urbana",4,"Oficial",6.2,242
+"Bogotá","Urbana",2,"Oficial",NA,255
+"Boyacá","Urbana",3,"Oficial",4.8,283
+"Chocó","Urbana",4,"Oficial",7,282
+"Valle del Cauca","Urbana",3,"Oficial",10.3,257
+"Antioquia","Urbana",4,"Oficial",4.6,279
+"Boyacá","Rural",2,"Oficial",10.7,219
+"Valle del Cauca","Rural",2,"Oficial",5.9,240
+"Valle del Cauca","Urbana",2,"Oficial",6.1,219
+"Chocó","Urbana",2,"Oficial",7.6,237
+"Valle del Cauca","Urbana",3,"Oficial",4.1,235
+"Chocó","Rural",1,"Oficial",5.9,134
+"Antioquia","Urbana",3,"Oficial",6.3,275
+"Boyacá","Rural",1,"Oficial",6.1,198
+"Antioquia","Rural",1,"Oficial",2.5,178
+"Chocó","Urbana",5,"Privado",8.8,287
+"Antioquia","Urbana",3,"Privado",6.2,269
+"Chocó","Rural",1,"Oficial",9.5,162
+"Boyacá","Urbana",3,"Oficial",11.5,289
+"Bogotá","Urbana",2,"Oficial",5,197
+"Antioquia","Urbana",3,"Oficial",6.9,285
+"Antioquia","Rural",1,"Oficial",2.8,206
+"Bogotá","Urbana",4,"Oficial",2.9,364
+"Antioquia","Rural",1,"Oficial",7.2,228
+"Boyacá","Urbana",2,"Oficial",10.6,264
+"Valle del Cauca","Rural",3,"Oficial",2.9,208
+"Valle del Cauca","Rural",3,"Privado",8.9,292
+"Valle del Cauca","Rural",2,"Privado",7.3,231
+"Boyacá","Urbana",4,"Oficial",4.7,337
+"Bogotá","Urbana",1,"Oficial",NA,196
+"Bogotá","Urbana",2,"Oficial",4.5,230
+"Boyacá","Rural",3,"Privado",1.4,243
+"Antioquia","Rural",2,"Oficial",11.5,225
+"Valle del Cauca","Urbana",4,"Privado",4.7,320
+"Boyacá","Rural",1,"Oficial",4.5,182
+"Bogotá","Urbana",4,"Oficial",8.1,300
+"Valle del Cauca","Rural",1,"Oficial",0.8,210
+"Valle del Cauca","Urbana",4,"Privado",8.2,343
+"Bogotá","Urbana",2,"Oficial",4.8,258
+"Chocó","Rural",2,"Oficial",6.3,238
+"Valle del Cauca","Urbana",5,"Privado",5.4,357
+"Bogotá","Urbana",4,"Privado",8.1,328
+"Antioquia","Urbana",1,"Oficial",6.1,206
+"Bogotá","Rural",2,"Oficial",8.6,233
+"Valle del Cauca","Rural",1,"Oficial",1.6,266
+"Bogotá","Urbana",2,"Oficial",6.1,258
+"Bogotá","Urbana",1,"Oficial",4.7,196
+"Bogotá","Urbana",3,"Oficial",5.7,266
+"Antioquia","Urbana",5,"Privado",3.6,250
+"Bogotá","Urbana",3,"Oficial",NA,289
+"Bogotá","Urbana",2,"Privado",0.9,209
+"Valle del Cauca","Urbana",1,"Oficial",4.1,288
+"Boyacá","Rural",1,"Oficial",6.4,230
+"Valle del Cauca","Urbana",6,"Privado",6.9,307
+"Boyacá","Urbana",4,"Privado",8.8,327
+"Bogotá","Urbana",2,"Oficial",9.5,230
+"Valle del Cauca","Urbana",1,"Oficial",9.8,273
+"Bogotá","Urbana",2,"Oficial",9.6,282
+"Bogotá","Urbana",3,"Privado",8.4,313
+"Antioquia","Urbana",3,"Oficial",6.1,248
+"Bogotá","Urbana",3,"Privado",5.1,209
+"Bogotá","Rural",1,"Oficial",4.2,220
+"Chocó","Rural",3,"Oficial",9.3,241
+"Valle del Cauca","Urbana",6,"Privado",6.3,307
+"Antioquia","Urbana",2,"Oficial",3,241
+"Antioquia","Urbana",1,"Oficial",5.3,251
+"Antioquia","Urbana",6,"Privado",4.9,287
+"Bogotá","Urbana",5,"Oficial",5,278
+"Antioquia","Urbana",1,"Oficial",0.6,227
+"Antioquia","Urbana",5,"Privado",8.9,307
+"Antioquia","Urbana",2,"Oficial",1,264
+"Chocó","Urbana",5,"Oficial",9.3,297
+"Chocó","Rural",2,"Privado",NA,235
+"Bogotá","Urbana",2,"Oficial",6.3,222
+"Chocó","Rural",2,"Oficial",11.3,214
+"Antioquia","Urbana",3,"Oficial",6.9,296
+"Antioquia","Urbana",3,"Privado",6.7,250
+"Chocó","Rural",2,"Oficial",NA,181
+"Antioquia","Urbana",2,"Oficial",4.5,244
+"Bogotá","Urbana",3,"Privado",7.2,219
+"Antioquia","Urbana",3,"Oficial",11,276
+"Valle del Cauca","Rural",1,"Oficial",7.9,267
+"Valle del Cauca","Urbana",3,"Oficial",11.8,312
+"Antioquia","Urbana",1,"Oficial",8.3,236
+"Antioquia","Urbana",1,"Oficial",5.9,153
+"Chocó","Urbana",1,"Privado",1.2,198
+"Chocó","Urbana",6,"Privado",8.3,311
+"Chocó","Rural",1,"Oficial",9,163
+"Valle del Cauca","Urbana",3,"Oficial",5.9,279
+"Antioquia","Urbana",3,"Oficial",4.9,232
+"Boyacá","Rural",1,"Oficial",6.5,248
+"Bogotá","Urbana",2,"Oficial",4,211
+"Bogotá","Urbana",1,"Privado",NA,231
+"Valle del Cauca","Urbana",2,"Oficial",3.6,242
+"Antioquia","Rural",3,"Oficial",3,195
+"Valle del Cauca","Urbana",6,"Privado",7.6,309
+"Bogotá","Urbana",6,"Privado",6.7,335
+"Chocó","Urbana",1,"Oficial",6.8,231
+"Valle del Cauca","Urbana",5,"Oficial",0.6,290
+"Antioquia","Rural",1,"Privado",4.2,226
+"Bogotá","Urbana",3,"Oficial",6.4,272
+"Valle del Cauca","Rural",1,"Oficial",3.7,270
+"Antioquia","Urbana",3,"Oficial",7.9,261
+"Valle del Cauca","Urbana",3,"Oficial",NA,278
+"Bogotá","Rural",1,"Oficial",0,184
+"Antioquia","Urbana",3,"Privado",4.4,258
+"Chocó","Rural",3,"Privado",NA,249
+"Valle del Cauca","Urbana",2,"Oficial",8.4,251
+"Boyacá","Rural",1,"Oficial",8.8,231
+"Boyacá","Rural",3,"Oficial",3.2,219
+"Bogotá","Urbana",6,"Privado",NA,349
+"Valle del Cauca","Urbana",5,"Oficial",8.2,341
+"Bogotá","Urbana",3,"Oficial",9.8,301
+"Antioquia","Rural",1,"Oficial",5.3,241
+"Bogotá","Urbana",3,"Oficial",9.3,243
+"Antioquia","Urbana",2,"Privado",5.8,300
+"Bogotá","Urbana",5,"Privado",9.8,330
+"Antioquia","Urbana",1,"Oficial",1.8,255
+"Antioquia","Rural",2,"Oficial",9.5,237
+"Boyacá","Urbana",5,"Oficial",5.3,314
+"Antioquia","Rural",2,"Privado",2.7,219
+"Antioquia","Urbana",3,"Privado",7.3,255
+"Bogotá","Urbana",3,"Oficial",2.5,245
+"Valle del Cauca","Urbana",2,"Privado",NA,248
+"Bogotá","Urbana",2,"Oficial",10.2,279
+"Bogotá","Rural",3,"Oficial",NA,227
+"Bogotá","Urbana",5,"Privado",8.7,316
+"Bogotá","Urbana",5,"Oficial",9.2,244
+"Bogotá","Urbana",1,"Oficial",5.5,176
+"Valle del Cauca","Urbana",2,"Oficial",7.4,241
+"Antioquia","Urbana",2,"Privado",9.1,236
+"Antioquia","Urbana",5,"Oficial",6.8,300
+"Bogotá","Urbana",5,"Oficial",10.7,330
+"Antioquia","Urbana",4,"Oficial",6,305
+"Bogotá","Urbana",2,"Privado",7.4,298
+"Antioquia","Urbana",1,"Oficial",2,228
+"Antioquia","Urbana",3,"Privado",7.3,315
+"Chocó","Rural",2,"Oficial",5.8,255
+"Bogotá","Urbana",2,"Privado",2,282
+"Boyacá","Rural",2,"Oficial",9.8,272
+"Valle del Cauca","Urbana",1,"Privado",0,234
+"Chocó","Urbana",1,"Oficial",5.9,174
+"Valle del Cauca","Rural",3,"Privado",9.4,250
+"Chocó","Rural",1,"Oficial",NA,181
+"Valle del Cauca","Urbana",4,"Oficial",8.4,309
+"Boyacá","Urbana",2,"Privado",3.7,262
+"Antioquia","Rural",2,"Privado",8,236
+"Chocó","Urbana",2,"Oficial",5.3,239
+"Bogotá","Urbana",2,"Oficial",10.4,212
+"Valle del Cauca","Urbana",3,"Oficial",10.1,301
+"Bogotá","Urbana",3,"Oficial",2.9,256
+"Bogotá","Urbana",1,"Oficial",6,249
+"Boyacá","Urbana",2,"Oficial",4.2,278
+"Chocó","Rural",1,"Oficial",6.2,209
+"Valle del Cauca","Urbana",4,"Oficial",7.3,298
+"Boyacá","Urbana",3,"Oficial",15.5,305
+"Antioquia","Urbana",3,"Oficial",7.7,316
+"Bogotá","Urbana",4,"Oficial",4.1,213
+"Antioquia","Urbana",5,"Oficial",5,289
+"Valle del Cauca","Urbana",4,"Privado",5.7,254
+"Bogotá","Urbana",6,"Oficial",9.2,342
+"Antioquia","Rural",2,"Oficial",5.7,209
+"Boyacá","Urbana",3,"Oficial",7.7,225
+"Antioquia","Urbana",1,"Oficial",0.6,301
+"Valle del Cauca","Urbana",3,"Oficial",7,317
+"Boyacá","Rural",1,"Oficial",7,253
+"Bogotá","Urbana",3,"Oficial",1.8,177
+"Antioquia","Urbana",5,"Privado",9.7,360
+"Antioquia","Rural",2,"Oficial",2.2,274
+"Chocó","Rural",2,"Oficial",5.6,195
+"Antioquia","Urbana",5,"Privado",NA,302
+"Chocó","Rural",1,"Oficial",2.9,267
+"Valle del Cauca","Urbana",2,"Oficial",1.6,212
+"Bogotá","Urbana",1,"Privado",9.9,309
+"Bogotá","Urbana",5,"Oficial",8.8,304
+"Boyacá","Rural",2,"Oficial",3.3,246
+"Bogotá","Rural",2,"Oficial",6.1,203
+"Chocó","Urbana",3,"Oficial",NA,265
+"Bogotá","Urbana",3,"Privado",2.9,270
+"Bogotá","Urbana",3,"Privado",5.9,309
+"Antioquia","Rural",3,"Privado",NA,282
+"Chocó","Rural",1,"Privado",6,136
+"Bogotá","Urbana",2,"Oficial",3.1,274
+"Boyacá","Rural",1,"Oficial",9.3,252
+"Antioquia","Rural",1,"Privado",7.3,284
+"Boyacá","Urbana",2,"Oficial",6,237
+"Chocó","Urbana",2,"Oficial",4.6,212
+"Chocó","Rural",1,"Oficial",6.1,196
+"Bogotá","Urbana",6,"Privado",6.8,356
+"Bogotá","Urbana",4,"Privado",2.5,308
+"Chocó","Urbana",4,"Privado",8.3,322
+"Antioquia","Urbana",4,"Oficial",6,276
+"Valle del Cauca","Urbana",1,"Oficial",8.8,246
+"Antioquia","Urbana",6,"Oficial",10.6,332
+"Antioquia","Urbana",3,"Oficial",6.5,250
+"Bogotá","Urbana",1,"Privado",4.7,266
+"Antioquia","Urbana",5,"Privado",3.1,292
+"Boyacá","Urbana",2,"Privado",2.5,245
+"Valle del Cauca","Urbana",2,"Oficial",5.9,233
+"Chocó","Rural",1,"Oficial",5.2,232
+"Valle del Cauca","Rural",2,"Oficial",0.9,272
+"Chocó","Urbana",2,"Oficial",7.8,229
+"Antioquia","Urbana",4,"Oficial",2.5,261
+"Boyacá","Rural",1,"Privado",4.8,193
+"Chocó","Urbana",5,"Privado",6.7,277
+"Antioquia","Urbana",3,"Oficial",8.6,291
+"Antioquia","Urbana",4,"Oficial",4.8,292
+"Boyacá","Urbana",5,"Privado",7.6,362
+"Bogotá","Urbana",3,"Oficial",4.5,280
+"Bogotá","Urbana",4,"Oficial",5.5,221
+"Antioquia","Urbana",6,"Privado",8.6,349
+"Bogotá","Urbana",2,"Oficial",10.4,301
+"Bogotá","Urbana",2,"Oficial",NA,268
+"Boyacá","Urbana",3,"Oficial",9.1,320
+"Valle del Cauca","Urbana",3,"Oficial",6.3,267
+"Antioquia","Urbana",4,"Privado",7.7,261
+"Antioquia","Urbana",2,"Privado",8.6,287
+"Valle del Cauca","Rural",2,"Privado",4.9,242
+"Bogotá","Urbana",5,"Privado",9,250
+"Boyacá","Urbana",2,"Oficial",11.2,279
+"Bogotá","Urbana",5,"Privado",12.9,315
+"Antioquia","Rural",2,"Oficial",NA,242
+"Chocó","Urbana",3,"Oficial",7.9,242
+"Chocó","Rural",1,"Privado",9.1,183
+"Valle del Cauca","Urbana",4,"Privado",3.6,280
+"Bogotá","Urbana",4,"Privado",9.5,266
+"Valle del Cauca","Rural",1,"Oficial",4.6,170
+"Boyacá","Urbana",2,"Oficial",2.2,284
+"Antioquia","Urbana",2,"Oficial",8.3,288
+"Bogotá","Urbana",2,"Oficial",2.9,261
+"Antioquia","Urbana",5,"Privado",2,309
+"Bogotá","Urbana",2,"Privado",7.7,292
+"Antioquia","Urbana",4,"Oficial",5.5,341
+"Chocó","Urbana",2,"Oficial",7.2,228
+"Bogotá","Urbana",5,"Privado",6.1,247
+"Antioquia","Urbana",3,"Oficial",10,237
+"Valle del Cauca","Urbana",5,"Oficial",9,345
+"Valle del Cauca","Urbana",1,"Oficial",3.5,250
+"Valle del Cauca","Rural",1,"Privado",4,241
+"Boyacá","Rural",1,"Privado",5.5,227
+"Valle del Cauca","Urbana",2,"Oficial",4,292
+"Antioquia","Urbana",2,"Privado",9.8,356
+"Bogotá","Urbana",6,"Privado",12.4,329
+"Valle del Cauca","Rural",1,"Oficial",NA,275
+"Bogotá","Urbana",3,"Oficial",4,239
+"Bogotá","Urbana",2,"Oficial",7.9,288
+"Antioquia","Urbana",4,"Oficial",7,272
+"Bogotá","Urbana",5,"Privado",6.4,264
+"Valle del Cauca","Rural",2,"Oficial",2.6,232
+"Bogotá","Urbana",5,"Privado",7.4,309
+"Antioquia","Urbana",5,"Oficial",5.6,282
+"Antioquia","Urbana",2,"Oficial",7.8,223
+"Boyacá","Rural",2,"Oficial",7,221
+"Bogotá","Urbana",3,"Oficial",6.1,319
+"Bogotá","Urbana",5,"Privado",8,308
+"Antioquia","Urbana",4,"Privado",9.2,330
+"Valle del Cauca","Urbana",2,"Oficial",5.4,233
+"Chocó","Rural",2,"Oficial",9.8,196
+"Bogotá","Urbana",2,"Oficial",7.5,259
+"Valle del Cauca","Urbana",3,"Oficial",5.1,233
+"Chocó","Urbana",4,"Oficial",7.4,251
+"Antioquia","Urbana",3,"Privado",6.3,198
+"Antioquia","Urbana",4,"Privado",8.2,248
+"Valle del Cauca","Urbana",2,"Oficial",1.3,252
+"Antioquia","Rural",2,"Oficial",12.1,259
+"Bogotá","Urbana",5,"Oficial",4.8,337
+"Chocó","Urbana",4,"Privado",8.7,275
+"Bogotá","Urbana",4,"Privado",7.7,285
+"Bogotá","Urbana",4,"Privado",6.1,293
+"Boyacá","Urbana",2,"Oficial",6,232
+"Bogotá","Urbana",1,"Oficial",7.3,260
+"Chocó","Urbana",2,"Oficial",5.4,212
+"Valle del Cauca","Urbana",4,"Privado",3.1,336
+"Chocó","Rural",1,"Oficial",4.6,207
+"Boyacá","Urbana",4,"Oficial",6.5,292
+"Chocó","Urbana",3,"Privado",3.1,268
+"Bogotá","Rural",2,"Oficial",5.2,171
+"Boyacá","Rural",1,"Oficial",6.8,192
+"Bogotá","Urbana",3,"Privado",NA,292
+"Bogotá","Urbana",2,"Privado",3.6,269
+"Bogotá","Urbana",3,"Oficial",3.5,274
+"Bogotá","Urbana",2,"Oficial",6.9,237
+"Antioquia","Urbana",1,"Oficial",6.7,231
+"Boyacá","Rural",1,"Oficial",6.8,224
+"Antioquia","Urbana",3,"Oficial",9.8,236
+"Valle del Cauca","Urbana",3,"Oficial",6.5,282
+"Bogotá","Urbana",2,"Oficial",8.1,251
+"Antioquia","Urbana",4,"Oficial",3,271
+"Boyacá","Urbana",5,"Oficial",8.6,283
+"Antioquia","Urbana",3,"Oficial",6.7,285
+"Antioquia","Urbana",2,"Oficial",7.1,283
+"Boyacá","Urbana",4,"Privado",7.1,256
+"Bogotá","Urbana",2,"Privado",6.4,294
+"Antioquia","Urbana",1,"Oficial",5.4,151
+"Bogotá","Urbana",3,"Oficial",7.7,285
+"Boyacá","Rural",1,"Oficial",7.3,191
+"Bogotá","Urbana",1,"Oficial",6,226
+"Boyacá","Rural",3,"Oficial",3.7,245
+"Antioquia","Rural",2,"Oficial",4.6,250
+"Boyacá","Urbana",3,"Privado",1.7,226
+"Valle del Cauca","Urbana",2,"Oficial",8.7,310
+"Antioquia","Urbana",3,"Privado",6,282
+"Chocó","Rural",1,"Oficial",2.3,213
+"Bogotá","Urbana",2,"Privado",5.7,237
+"Bogotá","Urbana",3,"Privado",7,283
+"Bogotá","Urbana",4,"Privado",2.7,304
+"Antioquia","Urbana",3,"Oficial",5.4,258
+"Antioquia","Urbana",2,"Oficial",3.6,251
+"Bogotá","Urbana",6,"Oficial",11.4,346
+"Valle del Cauca","Urbana",1,"Oficial",8,222
+"Boyacá","Urbana",2,"Oficial",7.4,243
+"Valle del Cauca","Urbana",5,"Oficial",NA,289
+"Chocó","Urbana",3,"Privado",7.7,239
+"Chocó","Rural",2,"Oficial",4.6,200
+"Antioquia","Urbana",2,"Oficial",5.9,273
+"Valle del Cauca","Urbana",3,"Privado",4.8,300
+"Bogotá","Urbana",4,"Oficial",7.8,253
+"Bogotá","Urbana",5,"Oficial",8.8,343
+"Boyacá","Urbana",2,"Privado",9.6,279
+"Antioquia","Urbana",1,"Oficial",3.5,186
+"Chocó","Urbana",4,"Privado",9.4,310
+"Bogotá","Urbana",3,"Oficial",7.6,265
+"Valle del Cauca","Rural",1,"Oficial",4.8,224
+"Bogotá","Urbana",2,"Oficial",9.4,284
+"Boyacá","Urbana",2,"Oficial",7.3,270
+"Chocó","Rural",1,"Oficial",NA,172
+"Chocó","Rural",2,"Oficial",3.2,214
+"Boyacá","Rural",1,"Oficial",6.1,178
+"Boyacá","Urbana",2,"Oficial",7.3,214
+"Antioquia","Urbana",3,"Oficial",NA,185
+"Antioquia","Urbana",3,"Oficial",6.7,290
+"Antioquia","Urbana",3,"Oficial",6.2,286
+"Bogotá","Urbana",2,"Oficial",4.8,273
+"Antioquia","Urbana",2,"Oficial",8.5,217
+"Valle del Cauca","Rural",1,"Oficial",6.3,227
+"Chocó","Rural",2,"Privado",3.6,228
+"Valle del Cauca","Urbana",2,"Oficial",8.1,252
+"Antioquia","Urbana",3,"Oficial",6.6,238
+"Bogotá","Urbana",3,"Privado",1.6,263
+"Valle del Cauca","Urbana",3,"Oficial",6.5,345
+"Boyacá","Urbana",3,"Oficial",9.3,269
+"Bogotá","Urbana",3,"Oficial",6.9,266
+"Chocó","Rural",1,"Oficial",NA,196
+"Boyacá","Rural",1,"Oficial",8.5,267
+"Bogotá","Urbana",1,"Oficial",4.6,188
+"Bogotá","Urbana",1,"Oficial",7.8,277
+"Bogotá","Urbana",5,"Privado",5.7,269
+"Boyacá","Urbana",3,"Oficial",1.5,276
+"Bogotá","Urbana",1,"Oficial",NA,207
+"Bogotá","Urbana",5,"Oficial",7.2,290
+"Antioquia","Urbana",1,"Oficial",9.3,220
+"Boyacá","Rural",1,"Oficial",2.9,173
+"Bogotá","Urbana",2,"Oficial",7.1,271
+"Bogotá","Urbana",2,"Oficial",6.6,270
+"Bogotá","Urbana",2,"Oficial",6.5,193
+"Antioquia","Urbana",3,"Oficial",7.6,300
+"Chocó","Urbana",2,"Privado",2.8,275
+"Antioquia","Urbana",6,"Privado",6.5,316
+"Bogotá","Urbana",2,"Oficial",8.4,303
+"Valle del Cauca","Urbana",2,"Oficial",4.8,257
+"Chocó","Rural",1,"Oficial",2.6,215
+"Bogotá","Urbana",4,"Oficial",9.3,319
+"Bogotá","Urbana",2,"Oficial",7.3,317
+"Bogotá","Urbana",5,"Oficial",6,304
+"Boyacá","Urbana",1,"Oficial",3.6,254
+"Valle del Cauca","Urbana",3,"Privado",3.9,257
+"Chocó","Rural",1,"Oficial",13,218
+"Valle del Cauca","Urbana",3,"Oficial",4.3,248
+"Bogotá","Urbana",1,"Oficial",0,204
+"Antioquia","Urbana",1,"Oficial",5.2,168
+"Bogotá","Urbana",1,"Oficial",5.2,282
+"Chocó","Urbana",4,"Oficial",6.3,312
+"Bogotá","Rural",3,"Oficial",7.1,277
+"Bogotá","Urbana",4,"Oficial",7.4,311
+"Boyacá","Urbana",1,"Oficial",5.9,234
+"Chocó","Urbana",4,"Privado",11.8,289
+"Antioquia","Urbana",2,"Oficial",3.6,261
+"Valle del Cauca","Urbana",2,"Oficial",3.7,244
+"Antioquia","Urbana",3,"Oficial",6.6,271
+"Bogotá","Urbana",2,"Oficial",6.8,239
+"Antioquia","Urbana",1,"Oficial",6.3,277
+"Valle del Cauca","Urbana",2,"Oficial",4.4,196
+"Chocó","Urbana",3,"Oficial",6.7,292
+"Antioquia","Urbana",5,"Oficial",8.2,324
+"Antioquia","Rural",1,"Oficial",10.2,237
+"Antioquia","Urbana",5,"Privado",4.9,262
+"Bogotá","Urbana",4,"Privado",7,219
+"Valle del Cauca","Urbana",3,"Privado",4.2,267
+"Valle del Cauca","Rural",2,"Oficial",4.2,251
+"Bogotá","Urbana",2,"Oficial",8.8,284
+"Antioquia","Rural",3,"Privado",6,246
+"Antioquia","Urbana",3,"Oficial",6.1,255
+"Antioquia","Urbana",4,"Oficial",8.9,296
+"Antioquia","Rural",2,"Oficial",10.7,308
+"Valle del Cauca","Urbana",2,"Oficial",10,331
+"Antioquia","Rural",2,"Oficial",9.7,278
+"Antioquia","Urbana",2,"Oficial",5.6,269
+"Antioquia","Urbana",6,"Privado",7.2,319
+"Antioquia","Urbana",1,"Oficial",4.4,218
+"Antioquia","Urbana",1,"Oficial",6.3,253
+"Bogotá","Urbana",1,"Oficial",6.1,268
+"Boyacá","Rural",2,"Oficial",4.1,195
+"Bogotá","Urbana",5,"Privado",5,285
+"Chocó","Rural",2,"Privado",8.2,266
+"Valle del Cauca","Urbana",4,"Oficial",6.6,336
+"Antioquia","Rural",1,"Oficial",8.3,256
+"Antioquia","Urbana",2,"Oficial",7,246
+"Boyacá","Rural",2,"Oficial",9.6,223
+"Antioquia","Urbana",1,"Oficial",5.1,278
+"Antioquia","Urbana",3,"Oficial",7.1,270
+"Antioquia","Urbana",2,"Oficial",6.5,208
+"Antioquia","Urbana",2,"Oficial",8,301
+"Antioquia","Urbana",1,"Oficial",0.1,217
+"Valle del Cauca","Urbana",1,"Oficial",4.1,280
+"Boyacá","Urbana",3,"Oficial",7.2,274
+"Valle del Cauca","Rural",1,"Oficial",4.9,240
+"Bogotá","Rural",1,"Oficial",2.9,225
+"Bogotá","Urbana",2,"Oficial",3.2,197
+"Bogotá","Urbana",3,"Oficial",9.3,258
+"Bogotá","Urbana",1,"Oficial",6.1,271
+"Valle del Cauca","Urbana",1,"Oficial",4.4,281
+"Bogotá","Urbana",3,"Oficial",4.7,256
+"Valle del Cauca","Rural",1,"Oficial",10.2,216
+"Valle del Cauca","Rural",3,"Oficial",3.7,236
+"Bogotá","Rural",1,"Oficial",3.5,271
+"Boyacá","Urbana",3,"Oficial",4.6,317
+"Boyacá","Rural",1,"Oficial",6.2,241
+"Antioquia","Urbana",5,"Privado",6.2,284
+"Boyacá","Urbana",3,"Oficial",7,243
+"Boyacá","Urbana",4,"Privado",4.4,285
+"Valle del Cauca","Urbana",3,"Oficial",5.9,311
+"Antioquia","Urbana",1,"Oficial",4.5,184
+"Boyacá","Urbana",3,"Privado",6.4,266
+"Boyacá","Rural",1,"Oficial",11.1,206
+"Boyacá","Urbana",6,"Privado",6.3,397
+"Bogotá","Urbana",5,"Privado",8.1,302
+"Bogotá","Urbana",3,"Oficial",2.7,270
+"Bogotá","Urbana",6,"Privado",7.4,339
+"Antioquia","Urbana",2,"Oficial",1.7,261
+"Antioquia","Urbana",3,"Oficial",9.2,381
+"Boyacá","Urbana",2,"Oficial",7.4,258
+"Bogotá","Urbana",4,"Oficial",6.4,242
+"Valle del Cauca","Urbana",3,"Privado",3.9,299
+"Bogotá","Urbana",5,"Oficial",11.2,332
+"Valle del Cauca","Rural",3,"Oficial",9.2,242
+"Bogotá","Urbana",4,"Privado",4.8,325
+"Bogotá","Urbana",4,"Oficial",4,253
+"Antioquia","Urbana",4,"Oficial",NA,316
+"Boyacá","Rural",1,"Oficial",2.4,193
+"Antioquia","Urbana",5,"Privado",4.2,309
+"Antioquia","Urbana",3,"Oficial",10.1,303
+"Antioquia","Urbana",4,"Privado",3.4,330
+"Chocó","Rural",1,"Privado",3.3,194
+"Bogotá","Urbana",5,"Oficial",7.7,297
+"Boyacá","Urbana",2,"Oficial",2.1,242
+"Bogotá","Urbana",3,"Oficial",5.2,315
+"Antioquia","Rural",2,"Oficial",2.1,185
+"Boyacá","Urbana",2,"Oficial",6.8,231
+"Antioquia","Urbana",1,"Oficial",7.2,241
+"Antioquia","Urbana",2,"Oficial",2,280
+"Boyacá","Urbana",3,"Privado",6.6,228
+"Bogotá","Urbana",2,"Oficial",6.4,219
+"Antioquia","Urbana",3,"Oficial",12.4,296
+"Antioquia","Rural",1,"Oficial",9.7,283
+"Chocó","Rural",2,"Oficial",2.7,226
+"Valle del Cauca","Urbana",4,"Oficial",10.4,300
+"Bogotá","Urbana",4,"Oficial",7.8,322
+"Bogotá","Urbana",3,"Privado",3.5,330
+"Boyacá","Urbana",1,"Oficial",5.1,257
+"Bogotá","Urbana",3,"Privado",9.5,339
+"Antioquia","Urbana",5,"Privado",8.1,329
+"Valle del Cauca","Urbana",2,"Oficial",4.7,334
+"Boyacá","Rural",1,"Oficial",3.5,233
+"Antioquia","Urbana",2,"Oficial",5.7,246
+"Chocó","Rural",1,"Oficial",3.7,240
+"Chocó","Rural",1,"Oficial",2.3,142
+"Valle del Cauca","Urbana",3,"Oficial",6.6,313
+"Boyacá","Rural",1,"Oficial",3,222
+"Valle del Cauca","Urbana",2,"Oficial",6.5,225
+"Chocó","Rural",1,"Oficial",3.8,173
+"Boyacá","Urbana",3,"Oficial",7.4,269
+"Antioquia","Urbana",5,"Oficial",7.4,338
+"Boyacá","Urbana",2,"Privado",5,263
+"Valle del Cauca","Urbana",5,"Privado",10.6,330
+"Chocó","Rural",1,"Oficial",6.9,199
+"Boyacá","Urbana",3,"Oficial",9,276
+"Bogotá","Urbana",4,"Privado",10.6,347
+"Antioquia","Urbana",2,"Oficial",5,256
+"Boyacá","Urbana",3,"Oficial",8.5,235
+"Chocó","Urbana",3,"Oficial",5.8,256
+"Antioquia","Urbana",4,"Oficial",7.1,308
+"Bogotá","Rural",1,"Oficial",4.2,232
+"Valle del Cauca","Urbana",3,"Oficial",6.8,268
+"Valle del Cauca","Urbana",2,"Privado",5,206
+"Antioquia","Urbana",3,"Privado",4.9,287
+"Bogotá","Urbana",3,"Oficial",4,276
+"Bogotá","Urbana",3,"Oficial",4.8,297
+"Valle del Cauca","Urbana",6,"Privado",12.6,288
+"Boyacá","Rural",1,"Oficial",3.3,186
+"Bogotá","Urbana",2,"Oficial",8.2,211
+"Antioquia","Urbana",1,"Oficial",11.3,247
+"Antioquia","Urbana",4,"Privado",4.6,345
+"Boyacá","Urbana",1,"Oficial",8.7,272
+"Valle del Cauca","Urbana",2,"Oficial",10,261
+"Bogotá","Urbana",2,"Oficial",0,195
+"Boyacá","Urbana",2,"Oficial",5.8,259
+"Boyacá","Rural",3,"Oficial",1.9,212
+"Boyacá","Rural",2,"Privado",3.7,213
+"Antioquia","Urbana",3,"Oficial",4.2,255
+"Antioquia","Rural",2,"Oficial",5.6,210
+"Boyacá","Urbana",3,"Oficial",4.6,293
+"Boyacá","Urbana",4,"Privado",5.7,340
+"Boyacá","Urbana",6,"Oficial",10,323
+"Antioquia","Urbana",2,"Oficial",4.4,289
+"Valle del Cauca","Rural",1,"Oficial",5.6,187
+"Bogotá","Urbana",5,"Privado",6.5,305
+"Boyacá","Rural",3,"Oficial",5.7,249
+"Bogotá","Urbana",3,"Privado",7.7,235
+"Antioquia","Urbana",2,"Oficial",4.8,238
+"Boyacá","Rural",1,"Oficial",8.8,234
+"Bogotá","Urbana",2,"Oficial",6.5,245
+"Valle del Cauca","Urbana",2,"Privado",6.8,239
+"Boyacá","Urbana",4,"Oficial",8.8,291
+"Boyacá","Urbana",6,"Privado",7.7,349
+"Antioquia","Urbana",5,"Privado",6.7,309
+"Bogotá","Urbana",2,"Oficial",5.7,251
+"Chocó","Urbana",2,"Oficial",3.6,145
+"Boyacá","Urbana",3,"Oficial",9,348
+"Valle del Cauca","Urbana",3,"Oficial",3.6,260
+"Boyacá","Urbana",2,"Privado",7.2,255
+"Chocó","Rural",2,"Oficial",8.2,203
+"Chocó","Rural",2,"Privado",4.9,236
+"Valle del Cauca","Rural",1,"Oficial",9.2,254
+"Boyacá","Rural",1,"Oficial",5.9,206
+"Valle del Cauca","Urbana",3,"Oficial",2.8,280
+"Bogotá","Urbana",2,"Oficial",4.7,245
+"Valle del Cauca","Urbana",3,"Oficial",2.5,259
+"Bogotá","Urbana",1,"Oficial",6.4,255
+"Bogotá","Urbana",3,"Privado",2.7,280
+"Boyacá","Rural",1,"Oficial",4.3,219
+"Bogotá","Urbana",4,"Oficial",9.8,287
+"Bogotá","Urbana",3,"Oficial",8.2,261
+"Bogotá","Urbana",3,"Oficial",2.9,254
+"Antioquia","Urbana",3,"Oficial",6.3,282
+"Antioquia","Urbana",4,"Oficial",6.3,313
+"Valle del Cauca","Urbana",2,"Privado",6.1,239
+"Chocó","Urbana",3,"Oficial",4.8,253
+"Bogotá","Urbana",2,"Privado",6.8,271
+"Bogotá","Urbana",1,"Oficial",5.8,244
+"Antioquia","Urbana",4,"Privado",6.9,264
+"Antioquia","Urbana",5,"Privado",7.5,338
+"Antioquia","Urbana",2,"Oficial",6.5,283
+"Bogotá","Urbana",3,"Oficial",5.7,313
+"Valle del Cauca","Urbana",1,"Oficial",4.8,278
+"Chocó","Rural",1,"Oficial",3.3,209
+"Bogotá","Urbana",3,"Privado",6,272
+"Chocó","Rural",2,"Privado",6.5,269
+"Bogotá","Urbana",4,"Oficial",9.7,304
+"Boyacá","Urbana",4,"Privado",5,296
+"Bogotá","Urbana",2,"Oficial",6.3,276
+"Antioquia","Rural",1,"Oficial",4,257
+"Chocó","Urbana",6,"Privado",6.3,225
+"Valle del Cauca","Urbana",5,"Privado",8.1,326
+"Antioquia","Rural",1,"Oficial",4.9,175
+"Bogotá","Urbana",2,"Oficial",11.8,327
+"Bogotá","Rural",1,"Oficial",3.8,193
+"Chocó","Rural",1,"Oficial",5.9,174
+"Valle del Cauca","Urbana",5,"Oficial",9.5,297
+"Bogotá","Urbana",2,"Oficial",4.6,252
+"Boyacá","Rural",2,"Oficial",3.1,220
+"Valle del Cauca","Urbana",2,"Oficial",3.4,267
+"Antioquia","Urbana",2,"Oficial",3.3,210
+"Antioquia","Urbana",2,"Oficial",9.1,255
+"Valle del Cauca","Urbana",2,"Oficial",9.6,260
+"Chocó","Rural",3,"Oficial",5.2,189
+"Antioquia","Urbana",2,"Oficial",7.7,266
+"Boyacá","Urbana",3,"Oficial",NA,322
+"Bogotá","Rural",1,"Oficial",6.8,242
+"Boyacá","Urbana",4,"Privado",7.6,336
+"Valle del Cauca","Urbana",1,"Oficial",3.5,259
+"Bogotá","Urbana",2,"Oficial",6.9,250
+"Antioquia","Urbana",3,"Oficial",8.8,267
+"Bogotá","Urbana",2,"Privado",3.6,302
+"Bogotá","Urbana",1,"Oficial",9.8,222
+"Boyacá","Urbana",5,"Privado",9.3,271
+"Antioquia","Urbana",2,"Oficial",10.1,257
+"Antioquia","Urbana",3,"Privado",9,290
+"Bogotá","Urbana",4,"Oficial",1.8,283
+"Boyacá","Rural",3,"Oficial",9.3,246
+"Antioquia","Urbana",2,"Oficial",1.9,222
+"Antioquia","Urbana",1,"Oficial",3.9,194
+"Valle del Cauca","Urbana",2,"Oficial",9.6,251
+"Antioquia","Urbana",3,"Oficial",7.9,283
+"Antioquia","Urbana",2,"Oficial",2.5,272
+"Boyacá","Rural",3,"Privado",6.6,250
+"Boyacá","Rural",3,"Oficial",6.7,250
+"Bogotá","Urbana",2,"Privado",5.2,233
+"Antioquia","Urbana",3,"Privado",5.5,283
+"Bogotá","Urbana",3,"Oficial",10.1,291
+"Antioquia","Urbana",2,"Oficial",8.6,295
+"Boyacá","Urbana",1,"Oficial",10.1,223
+"Bogotá","Urbana",4,"Privado",4.4,261
+"Chocó","Urbana",5,"Privado",3.8,276
+"Valle del Cauca","Rural",3,"Privado",7.5,280
+"Valle del Cauca","Rural",1,"Oficial",7.6,208
+"Antioquia","Urbana",2,"Oficial",4.5,222
+"Valle del Cauca","Urbana",4,"Oficial",8.3,277
+"Bogotá","Urbana",1,"Oficial",3.8,195
+"Valle del Cauca","Urbana",3,"Oficial",6.2,235
+"Bogotá","Urbana",3,"Oficial",8.9,297
+"Bogotá","Urbana",2,"Oficial",3.7,221
+"Antioquia","Urbana",3,"Oficial",7.6,291
+"Chocó","Rural",2,"Oficial",6.5,254
+"Antioquia","Rural",1,"Oficial",NA,188
+"Valle del Cauca","Rural",1,"Oficial",0,217
+"Bogotá","Urbana",1,"Oficial",2.4,231
+"Boyacá","Rural",1,"Oficial",0.5,198
+"Boyacá","Urbana",4,"Privado",8.7,289
+"Chocó","Urbana",4,"Oficial",3.6,304
+"Bogotá","Urbana",3,"Oficial",1.2,241
+"Valle del Cauca","Rural",1,"Oficial",4.1,229
+"Boyacá","Urbana",3,"Oficial",3.2,261
+"Boyacá","Urbana",2,"Oficial",NA,260
+"Valle del Cauca","Rural",1,"Oficial",8.3,243
+"Chocó","Urbana",3,"Oficial",3.3,243
+"Bogotá","Urbana",2,"Privado",7.2,298
+"Bogotá","Urbana",3,"Oficial",5.4,234
+"Valle del Cauca","Rural",2,"Oficial",9.7,310
+"Bogotá","Urbana",4,"Privado",6.8,287
+"Bogotá","Urbana",2,"Privado",10.3,272
+"Valle del Cauca","Urbana",2,"Oficial",5.5,247
+"Antioquia","Urbana",3,"Oficial",6.4,273
+"Antioquia","Urbana",3,"Privado",6.1,296
+"Valle del Cauca","Urbana",2,"Oficial",3.8,242
+"Bogotá","Urbana",2,"Oficial",10.7,254
+"Antioquia","Rural",1,"Oficial",4.6,203
+"Chocó","Rural",2,"Privado",5.3,164
+"Antioquia","Urbana",3,"Oficial",8,244
+"Antioquia","Urbana",4,"Oficial",12.2,280
+"Bogotá","Urbana",2,"Oficial",3.4,273
+"Boyacá","Urbana",5,"Oficial",12.4,272
+"Antioquia","Urbana",1,"Oficial",6.4,190
+"Bogotá","Urbana",5,"Privado",NA,287
+"Valle del Cauca","Urbana",2,"Oficial",7.6,294
+"Antioquia","Rural",2,"Oficial",7.3,260
+"Antioquia","Urbana",1,"Oficial",4.4,259
+"Bogotá","Urbana",5,"Privado",0,261
+"Boyacá","Urbana",3,"Oficial",8,277
+"Bogotá","Urbana",6,"Privado",NA,332
+"Boyacá","Rural",2,"Oficial",7.2,211
+"Valle del Cauca","Urbana",3,"Oficial",12.6,329
+"Valle del Cauca","Urbana",2,"Oficial",8.1,222
+"Bogotá","Urbana",3,"Oficial",4.5,281
+"Antioquia","Urbana",2,"Oficial",8.5,278
+"Chocó","Urbana",2,"Oficial",5.5,208
+"Bogotá","Urbana",1,"Oficial",3.7,264
+"Bogotá","Urbana",2,"Oficial",7.7,245
+"Antioquia","Urbana",3,"Oficial",3.5,270
+"Chocó","Urbana",3,"Oficial",9,202
+"Bogotá","Urbana",2,"Oficial",5.5,241
+"Valle del Cauca","Urbana",2,"Oficial",8.7,231
+"Antioquia","Urbana",3,"Oficial",6.6,264
+"Chocó","Urbana",2,"Oficial",9.6,261
+"Antioquia","Rural",3,"Oficial",4.7,278
+"Valle del Cauca","Urbana",4,"Oficial",8.9,300
+"Chocó","Urbana",2,"Oficial",4,212
+"Boyacá","Rural",2,"Oficial",4.9,181
+"Valle del Cauca","Urbana",3,"Privado",2.5,252
+"Boyacá","Rural",1,"Oficial",7.1,237
+"Boyacá","Rural",1,"Oficial",1.8,214
+"Chocó","Urbana",5,"Oficial",5.6,244
+"Bogotá","Urbana",3,"Oficial",5.3,308
+"Valle del Cauca","Urbana",3,"Oficial",1.2,270
+"Valle del Cauca","Urbana",3,"Oficial",8,240
+"Antioquia","Urbana",4,"Privado",5.4,319
+"Bogotá","Urbana",1,"Oficial",5.3,220
+"Bogotá","Urbana",2,"Oficial",3.9,269
+"Boyacá","Rural",1,"Oficial",5.2,247
+"Chocó","Urbana",2,"Privado",NA,195
+"Bogotá","Urbana",5,"Oficial",3.6,291
+"Bogotá","Urbana",2,"Oficial",0,249
+"Chocó","Rural",1,"Oficial",NA,250
+"Boyacá","Rural",2,"Oficial",8.1,232
+"Valle del Cauca","Rural",1,"Oficial",4.4,285
+"Antioquia","Rural",2,"Oficial",1.8,223
+"Antioquia","Urbana",4,"Oficial",0,315
+"Boyacá","Urbana",3,"Oficial",4.7,284
+"Bogotá","Urbana",4,"Privado",NA,297
+"Bogotá","Urbana",1,"Oficial",10.3,287
+"Bogotá","Urbana",1,"Oficial",5.8,290
+"Boyacá","Rural",2,"Oficial",4.7,239
+"Antioquia","Urbana",3,"Oficial",3.1,295
+"Antioquia","Rural",1,"Oficial",NA,196
+"Boyacá","Urbana",2,"Oficial",3.4,252
+"Antioquia","Urbana",2,"Oficial",11.8,290
+"Bogotá","Urbana",1,"Oficial",1.6,287
+"Antioquia","Urbana",2,"Privado",NA,243
+"Boyacá","Rural",1,"Privado",7.9,277
+"Bogotá","Urbana",3,"Privado",6.8,284
+"Valle del Cauca","Urbana",2,"Oficial",5.2,245
+"Bogotá","Urbana",5,"Privado",9.2,314
+"Bogotá","Urbana",3,"Oficial",4.5,248
+"Valle del Cauca","Rural",2,"Oficial",7,224
+"Bogotá","Urbana",4,"Privado",6.2,294
+"Valle del Cauca","Rural",1,"Oficial",4.9,240
+"Boyacá","Rural",1,"Oficial",6.6,232
+"Chocó","Urbana",1,"Oficial",9,212
+"Valle del Cauca","Urbana",4,"Privado",8,351
+"Antioquia","Urbana",2,"Oficial",NA,279
+"Bogotá","Urbana",3,"Oficial",5.6,289
+"Valle del Cauca","Urbana",2,"Oficial",6.8,285
+"Boyacá","Rural",1,"Oficial",7.8,265
+"Antioquia","Urbana",2,"Oficial",5.7,260
+"Bogotá","Urbana",3,"Oficial",NA,258
+"Valle del Cauca","Urbana",3,"Privado",8.9,265
+"Boyacá","Rural",1,"Oficial",5.5,301
+"Bogotá","Urbana",3,"Privado",7.1,277
+"Bogotá","Urbana",2,"Oficial",3.8,266
+"Valle del Cauca","Urbana",3,"Oficial",9.9,272
+"Valle del Cauca","Urbana",6,"Privado",11.3,414
+"Valle del Cauca","Urbana",2,"Oficial",5.7,276
+"Antioquia","Urbana",4,"Privado",4.7,288
+"Bogotá","Rural",1,"Oficial",5.6,276
+"Valle del Cauca","Urbana",2,"Oficial",5.6,233
+"Bogotá","Urbana",2,"Privado",6.4,238
+"Bogotá","Urbana",3,"Privado",7.3,329
+"Bogotá","Urbana",1,"Oficial",9.5,230
+"Valle del Cauca","Urbana",4,"Oficial",NA,312
+"Boyacá","Urbana",2,"Oficial",9.4,310
+"Valle del Cauca","Urbana",2,"Oficial",2.4,232
+"Boyacá","Rural",2,"Oficial",5,283
+"Boyacá","Urbana",4,"Privado",6,284
+"Chocó","Rural",1,"Oficial",2.5,142
+"Boyacá","Urbana",3,"Oficial",4.7,321
+"Antioquia","Urbana",2,"Oficial",6.2,224
+"Chocó","Rural",1,"Oficial",4,210
+"Chocó","Urbana",2,"Oficial",7.8,277
+"Valle del Cauca","Urbana",2,"Privado",8.9,241
+"Boyacá","Urbana",4,"Oficial",4.7,293
+"Valle del Cauca","Urbana",2,"Oficial",8.2,241
+"Antioquia","Urbana",2,"Oficial",6.4,299
+"Bogotá","Rural",2,"Privado",10.5,356
+"Antioquia","Urbana",1,"Oficial",5.8,198
+"Valle del Cauca","Rural",1,"Oficial",8.1,207
+"Bogotá","Urbana",2,"Oficial",5.1,275
+"Antioquia","Urbana",4,"Oficial",6,232
+"Bogotá","Urbana",2,"Privado",6.6,279
+"Bogotá","Urbana",3,"Oficial",6.5,249
+"Valle del Cauca","Urbana",4,"Privado",1.9,310
+"Chocó","Urbana",3,"Oficial",4.3,267
+"Valle del Cauca","Rural",1,"Oficial",4.3,254
+"Antioquia","Urbana",5,"Privado",9.6,330
+"Antioquia","Urbana",3,"Oficial",NA,279
+"Boyacá","Urbana",2,"Oficial",6.3,200
+"Valle del Cauca","Urbana",2,"Oficial",5.8,229
+"Antioquia","Urbana",2,"Oficial",7,233
+"Boyacá","Urbana",2,"Oficial",4.6,235
+"Bogotá","Urbana",3,"Oficial",4.7,283
+"Valle del Cauca","Urbana",6,"Privado",5.5,311
+"Bogotá","Urbana",1,"Oficial",7.6,238
+"Antioquia","Urbana",1,"Oficial",4.4,238
+"Antioquia","Rural",2,"Oficial",5.7,211
+"Antioquia","Rural",1,"Oficial",8.3,267
+"Antioquia","Urbana",3,"Oficial",4.2,227
+"Bogotá","Urbana",4,"Privado",2.9,279
+"Chocó","Urbana",4,"Privado",10.3,331
+"Valle del Cauca","Rural",2,"Oficial",9.5,221
+"Boyacá","Rural",1,"Oficial",9.6,222
+"Boyacá","Urbana",3,"Oficial",7.9,251
+"Antioquia","Rural",1,"Oficial",8.4,266
+"Chocó","Rural",1,"Oficial",10.4,233
+"Antioquia","Rural",1,"Oficial",3.7,184
+"Bogotá","Urbana",3,"Oficial",9.4,272
+"Valle del Cauca","Urbana",4,"Oficial",9,283
+"Valle del Cauca","Rural",2,"Oficial",1.1,242
+"Bogotá","Urbana",4,"Privado",10.1,260
+"Boyacá","Urbana",3,"Oficial",3,262
+"Bogotá","Urbana",3,"Oficial",1.8,258
+"Bogotá","Urbana",2,"Privado",4.6,282
+"Antioquia","Urbana",3,"Oficial",5.4,245
+"Chocó","Rural",1,"Privado",2.4,244
+"Bogotá","Urbana",2,"Oficial",4.7,251
+"Boyacá","Rural",1,"Oficial",8.9,300
+"Antioquia","Urbana",3,"Oficial",3.5,242
+"Antioquia","Rural",1,"Oficial",1.2,195
+"Antioquia","Urbana",2,"Oficial",2.3,235
+"Antioquia","Urbana",5,"Privado",9,297
+"Bogotá","Urbana",2,"Oficial",8.7,267
+"Boyacá","Urbana",1,"Oficial",7,261
+"Antioquia","Urbana",2,"Privado",4.3,273
+"Bogotá","Urbana",4,"Oficial",6.6,261
+"Valle del Cauca","Urbana",1,"Oficial",2.9,253
+"Valle del Cauca","Rural",1,"Oficial",3.8,213
+"Antioquia","Rural",2,"Oficial",7,277
+"Bogotá","Urbana",4,"Privado",10.9,308
+"Valle del Cauca","Urbana",2,"Oficial",7.5,244
+"Bogotá","Urbana",1,"Oficial",7.3,228
+"Bogotá","Urbana",1,"Oficial",12.6,278
+"Antioquia","Urbana",4,"Oficial",7.9,317
+"Boyacá","Rural",1,"Oficial",5.9,273
+"Bogotá","Rural",1,"Oficial",2.6,181
+"Valle del Cauca","Urbana",2,"Oficial",7.4,246
+"Valle del Cauca","Urbana",3,"Privado",9.2,288
+"Boyacá","Rural",1,"Oficial",6.2,238
+"Boyacá","Rural",2,"Oficial",6.9,303
+"Valle del Cauca","Urbana",4,"Oficial",4.8,295
+"Boyacá","Urbana",2,"Oficial",5,246
+"Antioquia","Urbana",1,"Oficial",3.2,243
+"Chocó","Rural",2,"Oficial",3.6,281
+"Bogotá","Urbana",4,"Oficial",8.7,268
+"Chocó","Urbana",3,"Oficial",6.8,256
+"Antioquia","Urbana",5,"Privado",1.7,285
+"Antioquia","Urbana",5,"Oficial",9.1,305
+"Antioquia","Rural",1,"Privado",6.1,222
+"Antioquia","Urbana",3,"Privado",6.3,245
+"Valle del Cauca","Urbana",4,"Oficial",5.1,316
+"Valle del Cauca","Urbana",4,"Privado",NA,344
+"Boyacá","Rural",1,"Oficial",7.2,206
+"Bogotá","Urbana",2,"Oficial",6,267
+"Bogotá","Urbana",2,"Oficial",3.7,275
+"Bogotá","Urbana",2,"Oficial",6.1,217
+"Bogotá","Urbana",1,"Oficial",3.5,201
+"Bogotá","Urbana",2,"Oficial",4.9,226
+"Bogotá","Urbana",3,"Privado",5.1,264
+"Valle del Cauca","Urbana",2,"Oficial",8.4,267
+"Bogotá","Rural",2,"Oficial",10.3,251
+"Boyacá","Urbana",5,"Oficial",6.5,299
+"Chocó","Urbana",3,"Privado",4.9,249
+"Antioquia","Rural",1,"Oficial",9.1,257
+"Valle del Cauca","Urbana",6,"Privado",7.6,353
+"Boyacá","Urbana",2,"Privado",7.5,308
+"Bogotá","Urbana",3,"Oficial",7.5,249
+"Antioquia","Rural",1,"Oficial",6.5,178
+"Boyacá","Urbana",3,"Oficial",4.6,263
+"Bogotá","Urbana",3,"Privado",2.8,217
+"Boyacá","Urbana",3,"Oficial",9.7,276
+"Boyacá","Urbana",4,"Oficial",6,289
+"Antioquia","Rural",1,"Oficial",6.7,215
+"Boyacá","Urbana",6,"Oficial",11,330
+"Valle del Cauca","Rural",2,"Oficial",3.5,228
+"Chocó","Rural",1,"Oficial",6.5,229
+"Boyacá","Urbana",5,"Oficial",5.7,289
+"Boyacá","Urbana",4,"Privado",8.7,267
+"Antioquia","Urbana",2,"Oficial",7.9,275
+"Bogotá","Urbana",2,"Privado",5.7,235
+"Valle del Cauca","Urbana",5,"Oficial",11.7,298
+"Bogotá","Urbana",2,"Oficial",8.1,284
+"Bogotá","Urbana",1,"Oficial",5.8,260
+"Bogotá","Urbana",5,"Privado",5,280
+"Valle del Cauca","Urbana",3,"Oficial",1.5,228
+"Antioquia","Urbana",4,"Oficial",7.8,270
+"Boyacá","Rural",3,"Oficial",6.7,242
+"Bogotá","Urbana",4,"Oficial",3.5,184
+"Antioquia","Urbana",3,"Privado",7.3,285
+"Bogotá","Urbana",5,"Oficial",5.9,294
+"Valle del Cauca","Urbana",3,"Oficial",NA,237
+"Valle del Cauca","Urbana",1,"Oficial",4.9,180
+"Bogotá","Urbana",2,"Oficial",4.4,167
+"Valle del Cauca","Urbana",4,"Oficial",4.2,280
+"Bogotá","Urbana",2,"Oficial",6,208
+"Boyacá","Rural",1,"Oficial",9.7,255
+"Bogotá","Urbana",3,"Oficial",0.2,231
+"Boyacá","Urbana",2,"Oficial",1,272
+"Boyacá","Urbana",2,"Oficial",6.7,273
+"Valle del Cauca","Urbana",3,"Oficial",2.5,272
+"Antioquia","Rural",3,"Oficial",1.8,266
+"Boyacá","Urbana",1,"Oficial",4,191
+"Chocó","Urbana",1,"Oficial",4.9,188
+"Boyacá","Urbana",2,"Oficial",5.6,251
+"Boyacá","Urbana",3,"Oficial",6.2,254
+"Boyacá","Rural",2,"Oficial",1.2,237
+"Bogotá","Urbana",3,"Privado",8.5,233
+"Bogotá","Urbana",2,"Oficial",8.6,253
+"Bogotá","Urbana",3,"Oficial",5.2,218
+"Bogotá","Urbana",2,"Oficial",2.3,209
+"Antioquia","Rural",1,"Oficial",7.5,256
+"Bogotá","Urbana",2,"Oficial",4,215
+"Antioquia","Urbana",2,"Privado",3,306
+"Bogotá","Urbana",2,"Oficial",3.9,235
+"Antioquia","Urbana",2,"Privado",8.1,289
+"Chocó","Urbana",2,"Oficial",0.6,198
+"Bogotá","Urbana",2,"Oficial",4,273
+"Bogotá","Urbana",3,"Oficial",9.4,260
+"Antioquia","Rural",1,"Oficial",2.9,273
+"Bogotá","Urbana",4,"Oficial",5.4,359
+"Antioquia","Urbana",2,"Oficial",5.2,235
+"Valle del Cauca","Rural",1,"Oficial",2.8,176
+"Valle del Cauca","Urbana",3,"Privado",5.6,263
+"Valle del Cauca","Rural",3,"Privado",8.2,255
+"Boyacá","Urbana",1,"Oficial",8.4,307
+"Valle del Cauca","Urbana",3,"Privado",5.9,243
+"Bogotá","Urbana",2,"Oficial",2.4,260
+"Boyacá","Urbana",4,"Privado",5.6,227
+"Boyacá","Urbana",2,"Privado",NA,237
+"Chocó","Rural",2,"Oficial",3.7,217
+"Chocó","Rural",1,"Oficial",3.1,173
+"Boyacá","Urbana",2,"Privado",6.4,267
+"Bogotá","Urbana",2,"Oficial",6.2,277
+"Bogotá","Urbana",5,"Privado",13.7,356
+"Valle del Cauca","Rural",1,"Oficial",6.2,168
+"Chocó","Urbana",2,"Oficial",5.7,226
+"Bogotá","Rural",2,"Oficial",8.4,229
+"Antioquia","Rural",1,"Oficial",3,164
+"Chocó","Rural",1,"Oficial",3.4,201
+"Bogotá","Urbana",3,"Oficial",5,235
+"Bogotá","Urbana",5,"Privado",12.5,349
+"Valle del Cauca","Urbana",1,"Oficial",3.5,250
+"Bogotá","Urbana",4,"Oficial",8.5,257
+"Bogotá","Urbana",1,"Privado",NA,284
+"Chocó","Rural",2,"Oficial",6.8,245
+"Antioquia","Urbana",4,"Privado",3.3,259
+"Bogotá","Urbana",1,"Oficial",6.1,235
+"Antioquia","Urbana",3,"Oficial",6.5,264
+"Valle del Cauca","Urbana",3,"Oficial",11.2,304
+"Bogotá","Urbana",3,"Privado",NA,254
+"Bogotá","Urbana",2,"Privado",3.1,243
+"Chocó","Rural",1,"Oficial",11,229
+"Valle del Cauca","Urbana",5,"Privado",7.4,345
+"Boyacá","Rural",1,"Oficial",4.2,200
+"Valle del Cauca","Rural",3,"Oficial",5.6,229
+"Bogotá","Urbana",4,"Oficial",11.4,251
+"Bogotá","Urbana",2,"Oficial",7.6,232
+"Valle del Cauca","Urbana",2,"Oficial",7.7,259
+"Boyacá","Urbana",2,"Oficial",6,265
+"Bogotá","Urbana",1,"Oficial",5.9,230
+"Antioquia","Urbana",5,"Privado",10,377
+"Valle del Cauca","Rural",1,"Oficial",5,197
+"Antioquia","Urbana",3,"Privado",4.4,297
+"Boyacá","Urbana",6,"Privado",5.6,374
+"Chocó","Urbana",3,"Oficial",2,256
+"Valle del Cauca","Urbana",5,"Oficial",11.1,319
+"Bogotá","Urbana",4,"Privado",4.8,295
+"Bogotá","Urbana",3,"Privado",4.9,272
+"Valle del Cauca","Urbana",6,"Privado",5,309
+"Boyacá","Urbana",3,"Oficial",5.9,303
+"Antioquia","Urbana",6,"Oficial",8.2,340
+"Antioquia","Rural",1,"Oficial",7.8,206
+"Chocó","Urbana",3,"Privado",6.8,285
+"Bogotá","Rural",1,"Oficial",0,175
+"Antioquia","Rural",3,"Oficial",10.5,255
+"Boyacá","Rural",1,"Oficial",7.2,235
+"Chocó","Rural",1,"Oficial",8.2,236
+"Valle del Cauca","Urbana",4,"Privado",8.1,298
+"Bogotá","Urbana",3,"Privado",4.5,276
+"Boyacá","Urbana",5,"Oficial",6.5,318
+"Chocó","Rural",1,"Oficial",7.1,241
+"Chocó","Rural",2,"Privado",2.8,208
+"Antioquia","Rural",1,"Oficial",5.6,185
+"Valle del Cauca","Rural",2,"Oficial",5.6,226
+"Boyacá","Urbana",6,"Oficial",8.2,311
+"Bogotá","Urbana",5,"Privado",6.8,376
+"Antioquia","Rural",1,"Oficial",7.7,241
+"Bogotá","Urbana",2,"Privado",8.8,238
+"Valle del Cauca","Rural",3,"Oficial",5.3,212
+"Antioquia","Urbana",6,"Privado",5.4,311
+"Antioquia","Urbana",3,"Oficial",9.3,273
+"Bogotá","Urbana",2,"Privado",2.8,244
+"Antioquia","Urbana",3,"Privado",6.9,228
+"Bogotá","Urbana",6,"Oficial",8.7,349
+"Valle del Cauca","Urbana",3,"Privado",5,231
+"Valle del Cauca","Rural",1,"Privado",2.9,272
+"Boyacá","Urbana",2,"Oficial",4.2,208
+"Bogotá","Urbana",2,"Oficial",5,248
+"Boyacá","Urbana",2,"Oficial",4.9,259
+"Valle del Cauca","Urbana",4,"Oficial",4.9,291
+"Antioquia","Urbana",3,"Oficial",9.4,294
+"Boyacá","Urbana",2,"Oficial",4.2,287
+"Valle del Cauca","Urbana",2,"Oficial",3,272
+"Chocó","Urbana",4,"Privado",7.1,295
+"Bogotá","Urbana",3,"Privado",NA,245
+"Chocó","Urbana",3,"Oficial",9.8,235
+"Antioquia","Urbana",3,"Oficial",6.4,257
+"Valle del Cauca","Urbana",3,"Oficial",5.5,229
+"Bogotá","Urbana",5,"Privado",11.4,328
+"Bogotá","Urbana",4,"Oficial",9.9,309
+"Chocó","Urbana",3,"Oficial",10.4,270
+"Bogotá","Rural",1,"Oficial",3.6,204
+"Chocó","Rural",1,"Oficial",7,208
+"Bogotá","Urbana",4,"Privado",6.4,308
+"Bogotá","Urbana",2,"Oficial",3.3,205
+"Bogotá","Rural",1,"Oficial",6.4,192
+"Antioquia","Urbana",3,"Privado",4.9,310
+"Chocó","Urbana",3,"Oficial",8.9,261
+"Bogotá","Urbana",3,"Oficial",8.4,286
+"Bogotá","Urbana",2,"Oficial",3.2,254
+"Antioquia","Urbana",6,"Privado",12,407
+"Boyacá","Rural",1,"Oficial",3.1,197
+"Antioquia","Urbana",1,"Oficial",5.4,247
+"Bogotá","Urbana",2,"Oficial",8.1,299
+"Valle del Cauca","Urbana",3,"Privado",7.3,268
+"Valle del Cauca","Rural",1,"Oficial",4.3,259
+"Bogotá","Urbana",5,"Oficial",7.8,295
+"Boyacá","Urbana",5,"Oficial",5.3,317
+"Bogotá","Urbana",2,"Oficial",5,240
+"Valle del Cauca","Urbana",6,"Oficial",10.2,308
+"Antioquia","Urbana",2,"Oficial",8.4,289
+"Chocó","Urbana",3,"Privado",4.9,261
+"Bogotá","Urbana",1,"Oficial",3.7,209
+"Valle del Cauca","Urbana",1,"Oficial",5.4,210
+"Bogotá","Urbana",4,"Oficial",5,289
+"Bogotá","Urbana",2,"Oficial",5.9,237
+"Chocó","Rural",1,"Oficial",0,203
+"Boyacá","Urbana",2,"Oficial",6.3,208
+"Antioquia","Urbana",3,"Privado",8.2,274
+"Boyacá","Urbana",2,"Oficial",6.4,264
+"Valle del Cauca","Rural",1,"Oficial",8.8,253
+"Bogotá","Urbana",4,"Oficial",5.5,250
+"Chocó","Rural",2,"Oficial",1.9,222
+"Bogotá","Urbana",3,"Oficial",4.3,260
+"Antioquia","Urbana",3,"Oficial",8.9,287
+"Bogotá","Urbana",3,"Privado",7.3,216
+"Chocó","Urbana",3,"Oficial",8.9,229
+"Bogotá","Urbana",4,"Oficial",3.8,266
+"Boyacá","Rural",1,"Oficial",4.4,233
+"Boyacá","Urbana",3,"Oficial",7,260
+"Boyacá","Urbana",4,"Oficial",9.1,292
+"Chocó","Urbana",2,"Oficial",7,268
+"Antioquia","Urbana",2,"Oficial",8,317
+"Antioquia","Urbana",2,"Oficial",1.6,217
+"Valle del Cauca","Rural",1,"Oficial",1.7,215
+"Chocó","Urbana",4,"Oficial",3,224
+"Antioquia","Urbana",2,"Oficial",8,241
+"Valle del Cauca","Urbana",3,"Oficial",5.5,281
+"Valle del Cauca","Urbana",2,"Oficial",9.9,245
+"Valle del Cauca","Rural",1,"Oficial",6.3,203
+"Chocó","Rural",1,"Oficial",2.6,178
+"Valle del Cauca","Urbana",2,"Oficial",6.8,264
+"Bogotá","Urbana",2,"Oficial",10.5,291
+"Boyacá","Urbana",6,"Privado",14.1,349
+"Antioquia","Rural",2,"Oficial",10.7,268
+"Bogotá","Urbana",3,"Privado",8.3,264
+"Bogotá","Urbana",2,"Oficial",8.6,283
+"Bogotá","Urbana",1,"Oficial",5.1,208
+"Valle del Cauca","Urbana",5,"Oficial",8.6,307
+"Boyacá","Urbana",3,"Oficial",8.4,297
+"Bogotá","Urbana",3,"Oficial",4.7,281
+"Bogotá","Rural",1,"Oficial",5.5,245
+"Antioquia","Urbana",3,"Oficial",5.9,222
+"Boyacá","Rural",3,"Oficial",7.6,294
+"Chocó","Rural",1,"Oficial",2.3,167
+"Valle del Cauca","Urbana",4,"Privado",5.5,338
+"Chocó","Urbana",3,"Oficial",10.9,276
+"Boyacá","Urbana",5,"Oficial",12,317
+"Bogotá","Urbana",2,"Oficial",13.1,284
+"Bogotá","Urbana",2,"Oficial",7,250
+"Bogotá","Urbana",5,"Privado",6.6,305
+"Bogotá","Urbana",3,"Oficial",6.6,262
+"Valle del Cauca","Urbana",4,"Oficial",4.5,308
+"Valle del Cauca","Rural",2,"Oficial",11,215
+"Antioquia","Urbana",2,"Oficial",10,221
+"Antioquia","Urbana",4,"Privado",7.3,309
+"Antioquia","Urbana",2,"Oficial",5.8,251
+"Bogotá","Urbana",5,"Privado",5.6,351
+"Antioquia","Rural",1,"Oficial",5.7,239
+"Bogotá","Urbana",5,"Privado",9.4,315
+"Chocó","Urbana",2,"Oficial",6.8,224
+"Antioquia","Urbana",2,"Oficial",9.2,260
+"Antioquia","Urbana",3,"Oficial",5.8,276
+"Boyacá","Rural",2,"Oficial",7,248
+"Valle del Cauca","Urbana",2,"Privado",6.4,251
+"Chocó","Urbana",5,"Oficial",8.9,267
+"Bogotá","Urbana",2,"Oficial",4.5,214
+"Chocó","Rural",1,"Oficial",6.9,182
+"Bogotá","Urbana",3,"Oficial",5.8,270
+"Bogotá","Urbana",2,"Oficial",7.3,291
+"Bogotá","Urbana",1,"Oficial",8.5,269
+"Valle del Cauca","Urbana",1,"Oficial",8.8,192
+"Antioquia","Rural",3,"Oficial",4.5,257
+"Bogotá","Urbana",1,"Oficial",8.2,295
+"Valle del Cauca","Urbana",1,"Oficial",7.5,268
+"Bogotá","Urbana",2,"Privado",3.8,166
+"Bogotá","Urbana",4,"Oficial",2.7,302
+"Bogotá","Urbana",4,"Oficial",6.7,310
+"Antioquia","Urbana",2,"Oficial",8.4,261
+"Boyacá","Urbana",1,"Oficial",9,287
+"Bogotá","Urbana",5,"Privado",10.2,346
+"Antioquia","Urbana",1,"Oficial",3.7,273
+"Bogotá","Urbana",2,"Oficial",8.3,264
+"Valle del Cauca","Urbana",1,"Oficial",7.6,206
+"Bogotá","Urbana",1,"Oficial",7.4,222
+"Valle del Cauca","Rural",3,"Privado",5.8,267
+"Bogotá","Urbana",1,"Oficial",8.4,254
+"Boyacá","Rural",1,"Oficial",7.7,247
+"Antioquia","Urbana",4,"Oficial",7.4,230
+"Bogotá","Urbana",1,"Oficial",2.5,247
+"Antioquia","Rural",1,"Oficial",7.6,187
+"Boyacá","Rural",2,"Oficial",8,237
+"Antioquia","Urbana",2,"Oficial",5.2,255
+"Chocó","Urbana",2,"Oficial",10.1,251
+"Antioquia","Urbana",3,"Privado",9.6,300
+"Antioquia","Rural",1,"Oficial",7.3,207
+"Bogotá","Urbana",1,"Oficial",6,249
+"Bogotá","Urbana",2,"Oficial",2.1,298
+"Valle del Cauca","Urbana",2,"Oficial",4.1,290
+"Bogotá","Urbana",3,"Oficial",6.1,224
+"Valle del Cauca","Urbana",3,"Oficial",5.4,235
+"Antioquia","Urbana",3,"Privado",5.3,309
+"Valle del Cauca","Urbana",3,"Oficial",8.2,248
+"Antioquia","Urbana",6,"Privado",6.2,298
+"Bogotá","Urbana",1,"Oficial",7.8,250
+"Bogotá","Urbana",3,"Oficial",5.6,243
+"Valle del Cauca","Rural",1,"Oficial",7.4,237
+"Bogotá","Urbana",2,"Oficial",3.1,243
+"Valle del Cauca","Urbana",1,"Oficial",6.7,181
+"Bogotá","Urbana",5,"Privado",7.8,373
+"Bogotá","Urbana",6,"Privado",7.2,350
+"Bogotá","Urbana",4,"Privado",7.2,315
+"Antioquia","Urbana",3,"Oficial",NA,316
+"Antioquia","Urbana",3,"Oficial",5.2,265
+"Valle del Cauca","Rural",2,"Oficial",4.8,263
+"Bogotá","Urbana",4,"Privado",7,282
+"Bogotá","Urbana",4,"Oficial",9.8,317
+"Bogotá","Urbana",3,"Privado",11.9,323
+"Antioquia","Rural",1,"Oficial",6,249
+"Antioquia","Urbana",1,"Oficial",1.6,227
+"Antioquia","Urbana",2,"Oficial",9.4,257
+"Bogotá","Urbana",4,"Privado",7.1,266
+"Valle del Cauca","Urbana",1,"Oficial",4.7,251
+"Bogotá","Urbana",4,"Privado",11.9,269
+"Bogotá","Urbana",6,"Privado",6,290
+"Chocó","Rural",2,"Oficial",9.2,208
+"Bogotá","Urbana",3,"Oficial",7.3,265
+"Valle del Cauca","Urbana",3,"Oficial",3.8,265
+"Bogotá","Urbana",5,"Oficial",8.1,328
+"Bogotá","Urbana",4,"Oficial",6.1,226
+"Bogotá","Urbana",2,"Oficial",3.8,284
+"Chocó","Urbana",2,"Oficial",4,211
+"Valle del Cauca","Urbana",4,"Privado",11.4,317
+"Boyacá","Rural",3,"Privado",6,272
+"Antioquia","Urbana",2,"Oficial",4,255
+"Bogotá","Urbana",3,"Oficial",4,257
+"Antioquia","Urbana",3,"Oficial",9.4,249
+"Chocó","Urbana",3,"Oficial",5.6,279
+"Bogotá","Urbana",2,"Oficial",6.7,251
+"Boyacá","Urbana",6,"Privado",6.1,351
+"Antioquia","Urbana",5,"Privado",9.2,337
+"Chocó","Urbana",5,"Oficial",4.1,222
+"Bogotá","Urbana",3,"Oficial",6.5,274
+"Bogotá","Urbana",2,"Oficial",4.3,261
+"Bogotá","Urbana",2,"Oficial",6.1,275
+"Bogotá","Urbana",2,"Oficial",6.9,262
+"Boyacá","Urbana",3,"Oficial",9.5,248
+"Valle del Cauca","Urbana",3,"Oficial",1.5,249
+"Valle del Cauca","Rural",2,"Oficial",4.4,255
+"Bogotá","Urbana",2,"Oficial",10.1,296
+"Bogotá","Urbana",3,"Oficial",6.4,237
+"Bogotá","Urbana",3,"Oficial",7.9,289
+"Boyacá","Urbana",3,"Privado",9,291
+"Bogotá","Urbana",1,"Oficial",4.2,242
+"Bogotá","Urbana",1,"Oficial",4.3,249
+"Antioquia","Rural",1,"Privado",11.3,240
+"Antioquia","Urbana",1,"Privado",4.6,231
+"Valle del Cauca","Urbana",2,"Oficial",4.6,241
+"Bogotá","Rural",1,"Oficial",7.1,226
+"Antioquia","Urbana",2,"Oficial",7.6,232
+"Bogotá","Urbana",1,"Oficial",4.2,176
+"Valle del Cauca","Urbana",2,"Oficial",7.3,318
+"Valle del Cauca","Urbana",1,"Oficial",7.1,293
+"Bogotá","Urbana",2,"Oficial",1,222
+"Boyacá","Urbana",2,"Oficial",7.4,255
+"Bogotá","Urbana",1,"Oficial",8.4,281
+"Bogotá","Urbana",3,"Oficial",5.4,247
+"Valle del Cauca","Urbana",3,"Privado",4.9,243
+"Bogotá","Urbana",4,"Privado",3.2,279
+"Valle del Cauca","Urbana",3,"Privado",5.6,295
+"Antioquia","Urbana",3,"Oficial",9.9,325
+"Bogotá","Urbana",2,"Oficial",10.6,279
+"Bogotá","Urbana",3,"Oficial",4.5,247
+"Valle del Cauca","Rural",3,"Privado",6.8,303
+"Antioquia","Rural",2,"Oficial",6.6,229
+"Valle del Cauca","Rural",1,"Oficial",6.7,199
+"Antioquia","Urbana",5,"Oficial",9.1,302
+"Antioquia","Urbana",3,"Oficial",7.9,260
+"Antioquia","Urbana",3,"Privado",4.4,254
+"Antioquia","Urbana",3,"Privado",6.3,273
+"Valle del Cauca","Urbana",4,"Oficial",5.8,294
+"Antioquia","Rural",2,"Privado",4.8,246
+"Chocó","Urbana",2,"Oficial",8.8,285
+"Chocó","Urbana",3,"Oficial",8.8,210
+"Valle del Cauca","Urbana",1,"Privado",4.3,216
+"Boyacá","Urbana",5,"Privado",8.5,244
+"Bogotá","Urbana",4,"Privado",7,300
+"Bogotá","Urbana",2,"Oficial",6.7,273
+"Chocó","Rural",1,"Oficial",5.9,194
+"Bogotá","Urbana",4,"Oficial",11.5,277
+"Bogotá","Urbana",3,"Oficial",6.5,282
+"Valle del Cauca","Urbana",6,"Oficial",NA,258
+"Bogotá","Urbana",1,"Oficial",7.2,267
+"Chocó","Rural",1,"Oficial",3,181
+"Antioquia","Urbana",3,"Oficial",4.4,240
+"Valle del Cauca","Urbana",4,"Oficial",6.4,276
+"Boyacá","Rural",1,"Oficial",8.7,212
+"Antioquia","Rural",1,"Oficial",9.7,225
+"Boyacá","Urbana",3,"Privado",4.5,214
+"Antioquia","Urbana",3,"Oficial",NA,321
+"Boyacá","Urbana",4,"Oficial",7.1,271
+"Chocó","Urbana",3,"Privado",3.7,243
+"Bogotá","Urbana",5,"Oficial",10.9,291
+"Valle del Cauca","Urbana",3,"Oficial",6.5,276
+"Bogotá","Urbana",2,"Oficial",8.8,359
+"Bogotá","Urbana",2,"Oficial",3.9,215
+"Valle del Cauca","Urbana",2,"Oficial",6.8,260
+"Valle del Cauca","Urbana",1,"Oficial",7.2,200
+"Bogotá","Urbana",2,"Privado",NA,243
+"Boyacá","Rural",2,"Oficial",NA,244
+"Bogotá","Urbana",5,"Privado",4.8,329
+"Boyacá","Urbana",2,"Oficial",7.6,250
+"Valle del Cauca","Urbana",2,"Oficial",9.9,262
+"Valle del Cauca","Rural",1,"Oficial",6.1,254
+"Valle del Cauca","Urbana",4,"Privado",8.4,270
+"Bogotá","Urbana",2,"Oficial",7.8,255
+"Antioquia","Urbana",3,"Oficial",10.3,260
+"Bogotá","Urbana",5,"Oficial",9.4,346
+"Boyacá","Rural",1,"Oficial",2.3,186
+"Bogotá","Urbana",5,"Privado",8.1,345
+"Antioquia","Urbana",1,"Oficial",7.9,206
+"Antioquia","Urbana",2,"Privado",4.8,239
+"Antioquia","Rural",1,"Oficial",3.7,174
+"Bogotá","Urbana",4,"Oficial",4.5,278
+"Valle del Cauca","Urbana",3,"Privado",3.5,260
+"Antioquia","Urbana",4,"Oficial",5.9,274
+"Antioquia","Rural",1,"Oficial",3.3,154
+"Valle del Cauca","Urbana",3,"Oficial",4.4,331
+"Bogotá","Urbana",3,"Privado",6.6,280
+"Antioquia","Rural",1,"Oficial",6.5,241
+"Antioquia","Urbana",2,"Oficial",6.6,265
+"Chocó","Urbana",4,"Oficial",8.8,269
+"Antioquia","Urbana",4,"Privado",5,324
+"Chocó","Rural",3,"Oficial",7.1,264
+"Antioquia","Urbana",2,"Oficial",NA,234
+"Bogotá","Rural",1,"Oficial",4.7,230
+"Bogotá","Urbana",3,"Privado",2.8,297
+"Antioquia","Urbana",3,"Oficial",2.9,207
+"Antioquia","Urbana",1,"Oficial",5.6,210
+"Boyacá","Urbana",3,"Oficial",6,236
+"Valle del Cauca","Urbana",4,"Oficial",6.8,335
+"Antioquia","Urbana",2,"Oficial",9.5,263
+"Chocó","Urbana",4,"Oficial",4.7,260
+"Bogotá","Urbana",5,"Privado",10,342
+"Bogotá","Urbana",2,"Oficial",5.4,255
+"Antioquia","Urbana",1,"Oficial",4,193
+"Boyacá","Urbana",4,"Oficial",7.3,287
+"Antioquia","Urbana",4,"Oficial",6.3,301
+"Bogotá","Urbana",4,"Oficial",8.8,316
+"Bogotá","Urbana",2,"Privado",11,241
+"Bogotá","Urbana",4,"Oficial",7.2,299
+"Valle del Cauca","Urbana",4,"Oficial",7,290
+"Boyacá","Rural",2,"Oficial",1.7,215
+"Boyacá","Urbana",3,"Oficial",7.8,259
+"Bogotá","Urbana",1,"Oficial",2.8,216
+"Valle del Cauca","Urbana",3,"Privado",10.1,302
+"Antioquia","Rural",1,"Oficial",NA,227
+"Antioquia","Rural",3,"Oficial",3.9,277
+"Antioquia","Rural",1,"Oficial",6,262
+"Valle del Cauca","Rural",1,"Oficial",10.2,273
+"Valle del Cauca","Urbana",3,"Privado",2.7,255
+"Valle del Cauca","Urbana",4,"Privado",9.2,344
+"Valle del Cauca","Rural",1,"Oficial",6.3,213
+"Bogotá","Urbana",3,"Oficial",5.1,277
+"Chocó","Rural",1,"Oficial",3.8,186
+"Antioquia","Urbana",3,"Privado",10.7,274
+"Valle del Cauca","Urbana",1,"Oficial",6.7,235
+"Chocó","Urbana",5,"Oficial",4.7,262
+"Bogotá","Urbana",2,"Privado",5.3,217
+"Bogotá","Urbana",3,"Privado",6.7,282
+"Bogotá","Rural",2,"Oficial",4.2,213
+"Boyacá","Rural",1,"Oficial",3.9,262
+"Bogotá","Urbana",2,"Oficial",6.3,329
+"Chocó","Rural",2,"Oficial",0,129
+"Antioquia","Rural",2,"Oficial",3.9,202
+"Antioquia","Urbana",3,"Oficial",8.5,281
+"Bogotá","Urbana",6,"Privado",9,370
+"Antioquia","Urbana",2,"Oficial",NA,249
+"Bogotá","Urbana",4,"Privado",14.1,357
+"Chocó","Rural",2,"Oficial",6.5,206
+"Boyacá","Rural",1,"Oficial",6,166
+"Bogotá","Urbana",3,"Oficial",4.5,276
+"Valle del Cauca","Urbana",2,"Oficial",NA,242
+"Valle del Cauca","Urbana",4,"Oficial",9.3,225
+"Antioquia","Urbana",2,"Oficial",NA,239
+"Valle del Cauca","Urbana",2,"Oficial",9.6,251
+"Boyacá","Urbana",1,"Oficial",1.5,194
+"Chocó","Urbana",4,"Privado",11.4,256
+"Valle del Cauca","Rural",2,"Oficial",3.7,225
+"Boyacá","Urbana",3,"Privado",6.2,210
+"Chocó","Urbana",4,"Privado",4.4,226
+"Valle del Cauca","Urbana",5,"Privado",11.2,326
+"Antioquia","Urbana",2,"Oficial",8.3,262
+"Bogotá","Urbana",4,"Oficial",8.5,282
+"Boyacá","Rural",2,"Oficial",3.2,187
+"Bogotá","Urbana",3,"Oficial",11.1,273
+"Valle del Cauca","Urbana",3,"Oficial",2.4,217
+"Boyacá","Urbana",3,"Privado",5.4,300
+"Bogotá","Urbana",3,"Privado",5.3,253
+"Valle del Cauca","Urbana",4,"Privado",5,314
+"Bogotá","Urbana",3,"Oficial",7.8,208
+"Antioquia","Rural",2,"Oficial",6.6,236
+"Antioquia","Urbana",3,"Privado",8.6,274
+"Bogotá","Urbana",6,"Privado",7.2,317
+"Bogotá","Urbana",4,"Oficial",10.7,259
+"Antioquia","Urbana",4,"Privado",6,330
+"Bogotá","Urbana",3,"Privado",5.5,305
+"Chocó","Urbana",5,"Privado",8.3,334
+"Chocó","Rural",1,"Oficial",4.8,171
+"Bogotá","Urbana",6,"Oficial",12.8,281
+"Valle del Cauca","Urbana",3,"Oficial",8.2,311
+"Bogotá","Urbana",2,"Oficial",10.8,261
+"Chocó","Urbana",3,"Privado",3.7,237
+"Antioquia","Urbana",3,"Oficial",4.5,201
+"Boyacá","Urbana",1,"Oficial",5.3,189
+"Antioquia","Urbana",4,"Privado",3.9,263
+"Boyacá","Urbana",1,"Oficial",7.7,286
+"Bogotá","Urbana",2,"Oficial",7.3,202
+"Boyacá","Rural",1,"Oficial",3.5,205
+"Boyacá","Rural",1,"Oficial",7.8,218
+"Bogotá","Urbana",1,"Oficial",7.5,248
+"Valle del Cauca","Rural",3,"Privado",5.8,244
+"Boyacá","Urbana",3,"Oficial",8,213
+"Valle del Cauca","Urbana",4,"Privado",10.8,318
+"Valle del Cauca","Rural",2,"Oficial",6.4,240
+"Bogotá","Urbana",2,"Privado",5.4,217
+"Chocó","Rural",1,"Oficial",8.2,198
+"Bogotá","Urbana",1,"Oficial",0.6,225
+"Valle del Cauca","Rural",3,"Oficial",6,270
+"Boyacá","Urbana",4,"Privado",6.8,324
+"Antioquia","Urbana",6,"Privado",8.4,390
+"Valle del Cauca","Rural",2,"Oficial",7,268
+"Bogotá","Urbana",4,"Oficial",10.6,310
+"Antioquia","Urbana",6,"Privado",12.6,329
+"Bogotá","Urbana",2,"Oficial",4.8,232
+"Antioquia","Rural",3,"Oficial",6.7,226
+"Valle del Cauca","Urbana",3,"Oficial",6,298
+"Bogotá","Urbana",4,"Privado",7.7,249
+"Bogotá","Urbana",3,"Oficial",7.3,304
+"Valle del Cauca","Urbana",3,"Privado",8.7,318
+"Bogotá","Urbana",4,"Privado",3,279
+"Bogotá","Urbana",3,"Privado",7.8,266
+"Bogotá","Urbana",1,"Oficial",4.3,242
+"Bogotá","Urbana",1,"Oficial",3.9,224
+"Boyacá","Rural",1,"Oficial",5.6,253
+"Valle del Cauca","Urbana",2,"Oficial",7.9,270
+"Antioquia","Rural",1,"Oficial",3.6,205
+"Chocó","Rural",3,"Privado",5.9,278
+"Boyacá","Urbana",3,"Privado",9.6,286
+"Boyacá","Urbana",1,"Oficial",6.2,268
+"Antioquia","Rural",1,"Oficial",3,242
+"Antioquia","Urbana",3,"Oficial",7.3,258
+"Valle del Cauca","Urbana",6,"Privado",12.4,351
+"Antioquia","Urbana",2,"Oficial",4.7,275
+"Bogotá","Urbana",2,"Oficial",3.7,190
+"Antioquia","Rural",1,"Oficial",5.1,273
+"Bogotá","Urbana",1,"Oficial",8.9,291
+"Antioquia","Urbana",3,"Oficial",4.1,229
+"Antioquia","Rural",2,"Oficial",9.1,268
+"Antioquia","Urbana",3,"Privado",8.7,260
+"Antioquia","Urbana",2,"Oficial",3.2,190
+"Antioquia","Urbana",4,"Oficial",10.2,309
+"Bogotá","Urbana",3,"Privado",6.6,294
+"Antioquia","Urbana",3,"Oficial",10.9,301
+"Valle del Cauca","Urbana",1,"Oficial",3.3,261
+"Boyacá","Rural",1,"Oficial",7.2,254
+"Bogotá","Urbana",3,"Privado",8.1,294
+"Antioquia","Urbana",3,"Oficial",4.5,258
+"Boyacá","Rural",1,"Oficial",3.4,235
+"Boyacá","Rural",1,"Oficial",1.8,232
+"Antioquia","Urbana",1,"Oficial",5.9,251
+"Chocó","Urbana",2,"Oficial",8.2,220
+"Boyacá","Rural",1,"Oficial",0.7,177
+"Boyacá","Rural",1,"Privado",6.1,232
+"Boyacá","Rural",1,"Oficial",3.4,196
+"Antioquia","Urbana",2,"Oficial",NA,221
+"Bogotá","Urbana",2,"Oficial",2.6,251
+"Chocó","Rural",1,"Oficial",2.4,170
+"Valle del Cauca","Urbana",3,"Oficial",7,295
+"Valle del Cauca","Urbana",3,"Oficial",9.2,275
+"Bogotá","Urbana",6,"Privado",10,257
+"Valle del Cauca","Rural",1,"Oficial",7.3,232
+"Bogotá","Urbana",1,"Oficial",6.9,211
+"Antioquia","Urbana",2,"Oficial",9.3,284
+"Antioquia","Urbana",2,"Oficial",8.5,262
+"Antioquia","Urbana",3,"Oficial",12.6,254
+"Antioquia","Rural",1,"Oficial",3.5,132
+"Valle del Cauca","Urbana",3,"Privado",5.7,245
+"Boyacá","Rural",1,"Oficial",5.6,234
+"Valle del Cauca","Urbana",3,"Oficial",6.9,206
+"Valle del Cauca","Urbana",1,"Oficial",6.5,235
+"Antioquia","Urbana",3,"Oficial",4.6,276
+"Boyacá","Rural",1,"Oficial",5.6,215
+"Boyacá","Rural",1,"Oficial",6,303
+"Bogotá","Urbana",6,"Oficial",9.9,333
+"Antioquia","Urbana",3,"Privado",6.7,287
+"Bogotá","Urbana",2,"Oficial",6.7,239
+"Valle del Cauca","Urbana",1,"Privado",3.5,245
+"Antioquia","Urbana",3,"Privado",6.1,267
+"Bogotá","Urbana",3,"Privado",7.9,325
+"Antioquia","Urbana",3,"Oficial",8.1,294
+"Bogotá","Urbana",4,"Privado",7.8,300
+"Valle del Cauca","Urbana",2,"Oficial",7,227
+"Bogotá","Urbana",2,"Oficial",6.8,283
+"Valle del Cauca","Urbana",5,"Oficial",7.7,263
+"Antioquia","Urbana",2,"Oficial",8.1,246
+"Valle del Cauca","Urbana",2,"Oficial",5.1,284
+"Bogotá","Urbana",3,"Oficial",1.8,245
+"Boyacá","Urbana",3,"Privado",5.1,283
+"Bogotá","Urbana",2,"Oficial",NA,328
+"Bogotá","Urbana",5,"Oficial",5.4,272
+"Bogotá","Urbana",4,"Oficial",5.6,294
+"Valle del Cauca","Urbana",4,"Oficial",7.5,278
+"Bogotá","Urbana",1,"Oficial",2.7,212
+"Boyacá","Rural",1,"Oficial",9.5,199
+"Chocó","Rural",1,"Oficial",10.3,226
+"Boyacá","Urbana",2,"Oficial",3.2,274
+"Chocó","Rural",2,"Oficial",3.2,258
+"Valle del Cauca","Rural",1,"Oficial",5,251
+"Antioquia","Urbana",2,"Oficial",5.7,262
+"Boyacá","Rural",1,"Oficial",7.1,198
+"Boyacá","Rural",1,"Oficial",2.8,198
+"Bogotá","Urbana",3,"Oficial",5.1,295
+"Antioquia","Rural",2,"Privado",6.1,258
+"Bogotá","Urbana",5,"Privado",10.3,312
+"Bogotá","Urbana",2,"Oficial",6.4,299
+"Bogotá","Urbana",4,"Privado",1.7,252
+"Boyacá","Rural",2,"Oficial",5.8,266
+"Valle del Cauca","Urbana",6,"Privado",9.3,359
+"Valle del Cauca","Urbana",2,"Oficial",3.3,197
+"Boyacá","Rural",1,"Oficial",5.9,240
+"Boyacá","Urbana",6,"Privado",7.5,335
+"Antioquia","Rural",3,"Privado",8.8,305
+"Antioquia","Urbana",3,"Oficial",10.3,213
+"Valle del Cauca","Rural",2,"Oficial",5.2,281
+"Bogotá","Urbana",2,"Oficial",3.9,243
+"Bogotá","Urbana",3,"Oficial",4.8,288
+"Antioquia","Rural",2,"Oficial",4.9,247
+"Valle del Cauca","Rural",2,"Oficial",1.4,201
+"Antioquia","Urbana",2,"Oficial",6,217
+"Valle del Cauca","Urbana",1,"Oficial",4.1,197
+"Bogotá","Urbana",5,"Oficial",9.2,244
+"Bogotá","Urbana",2,"Oficial",6,255
+"Valle del Cauca","Rural",2,"Privado",3.6,250
+"Boyacá","Urbana",5,"Oficial",5.9,320
+"Boyacá","Urbana",3,"Oficial",6.4,215
+"Boyacá","Urbana",4,"Oficial",9.4,318
+"Antioquia","Urbana",4,"Oficial",7.9,269
+"Boyacá","Urbana",5,"Oficial",7.1,316
+"Boyacá","Rural",2,"Oficial",8.2,275
+"Antioquia","Urbana",1,"Oficial",5.1,222
+"Valle del Cauca","Rural",1,"Oficial",6.3,231
+"Bogotá","Urbana",4,"Privado",NA,261
+"Valle del Cauca","Urbana",4,"Privado",4.5,270
+"Antioquia","Rural",1,"Oficial",4.8,208
+"Bogotá","Urbana",5,"Oficial",13.6,354
+"Boyacá","Rural",1,"Oficial",5,238
+"Bogotá","Urbana",2,"Privado",2.5,279
+"Bogotá","Urbana",3,"Oficial",9.7,286
+"Antioquia","Urbana",2,"Oficial",NA,260

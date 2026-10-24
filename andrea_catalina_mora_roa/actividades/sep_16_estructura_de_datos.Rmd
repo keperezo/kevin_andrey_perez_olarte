@@ -1,0 +1,1541 @@
+---
+title: "Ejercicios Estructura de Datos"
+author: "Andrea Catalina Mora Roa"
+date: ""
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: flatly
+    df_print: paged
+---
+
+```{r configuracion, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  comment = "#>"
+)
+library(ggplot2)
+```
+
+# Ejercicio 1
+
+## Microdatos GEIH del DANE en formato CSV
+
+**Clasificación:** estructurada.
+
+El formato CSV representa una tabla: cada fila corresponde normalmente a una 
+observación y cada columna a una variable. Que el archivo tenga 300.000 filas 
+afecta el costo computacional de la lectura, pero no cambia su clasificación.
+
+El preprocesamiento mínimo consiste en importar el archivo con el delimitador y 
+la codificación correctos, revisar los tipos de las variables y reconocer los 
+códigos usados para valores ausentes. Los identificadores y las variables 
+categóricas codificadas no deberían convertirse automáticamente en números 
+continuos.
+
+```{r ejemplo-csv, eval=FALSE}
+library(readr)
+library(janitor)
+library(dplyr)
+
+geih <- read_csv(
+  "microdatos_geih.csv",
+  na = c("", "NA", "N/A")
+) |>
+  clean_names() |>
+  as_tibble()
+
+glimpse(geih)
+```
+
+## Respuesta JSON de la API pública datos.gov.co
+
+**Clasificación:** semiestructurada.
+
+Una respuesta JSON contiene una organización interna basada en objetos, 
+arreglos y pares clave-valor. Sin embargo, algunos campos pueden contener otros 
+objetos o listas, por lo que la respuesta no siempre es rectangular. La 
+existencia de metadatos y registros en distintos niveles es otra razón para no 
+clasificarla directamente como estructurada.
+
+El mínimo requerido es leer la respuesta, ubicar el arreglo que contiene los 
+registros y aplanar los campos anidados. Además, conviene convertir fechas y 
+mediciones de calidad del aire a sus tipos adecuados.
+
+```{r ejemplo-json, eval=FALSE}
+library(jsonlite)
+library(tibble)
+library(dplyr)
+
+respuesta <- fromJSON(
+  "URL_DE_LA_API",
+  flatten = TRUE
+)
+
+# Si la API devuelve directamente un arreglo de registros:
+calidad_aire <- as_tibble(respuesta) |>
+  mutate(
+    fecha = as.POSIXct(fecha, tz = "America/Bogota"),
+    valor = as.numeric(valor)
+  )
+```
+
+## Grabaciones de audio de audiencias judiciales
+
+**Clasificación:** no estructurada.
+
+Una grabación almacena una señal sonora. Aunque el archivo tenga metadatos —por 
+ejemplo, duración o fecha—, el contenido de la audiencia no está organizado en 
+variables y registros. Por ello, no puede transformarse en un `tibble` solo 
+mediante una función de importación tabular.
+
+El preprocesamiento mínimo consiste en transcribir el audio y convertir la 
+transcripción en unidades observables. Para un análisis básico, cada fila puede 
+representar una intervención y contener el archivo o audiencia, el hablante, 
+el tiempo inicial, el tiempo final y el texto. Si se requiere distinguir a los 
+participantes, también debe realizarse diarización de hablantes.
+
+```{r ejemplo-audio, eval=FALSE}
+library(tibble)
+
+# Resultado ilustrativo después de la transcripción y la diarización
+audiencia <- tibble(
+  audiencia_id = c("A001", "A001"),
+  hablante = c("Juez", "Interviniente 1"),
+  inicio_seg = c(0.0, 12.4),
+  fin_seg = c(12.3, 27.8),
+  texto = c(
+    "Se abre la audiencia...",
+    "Gracias, señor juez..."
+  )
+)
+```
+
+La transcripción debe manejarse bajo las reglas aplicables de reserva, 
+confidencialidad y protección de datos personales. Esta condición no modifica 
+la clasificación, pero sí el procedimiento de tratamiento de la información.
+
+## Factura electrónica de la DIAN en formato XML
+
+**Clasificación:** semiestructurada.
+
+XML organiza la información mediante etiquetas, atributos y nodos anidados. La 
+factura posee una jerarquía reconocible —emisor, adquirente, impuestos, totales 
+e ítems—, pero esa jerarquía no es una tabla plana. Además, una factura puede 
+tener múltiples líneas de detalle, lo que implica una relación de uno a muchos.
+
+El preprocesamiento mínimo consiste en parsear el documento y extraer los nodos 
+y atributos necesarios. Para evitar duplicaciones, es recomendable producir al 
+menos dos `tibble`: uno para el encabezado de la factura y otro para sus líneas 
+de detalle, unidos mediante un identificador.
+
+```{r ejemplo-xml, eval=FALSE}
+library(xml2)
+library(purrr)
+library(tibble)
+
+doc <- read_xml("factura_electronica.xml")
+
+# local-name() permite seleccionar nodos aun cuando el XML use namespaces.
+lineas <- xml_find_all(doc, ".//*[local-name()='InvoiceLine']")
+
+detalle <- map_dfr(lineas, function(nodo) {
+  tibble(
+    id_linea = xml_text(
+      xml_find_first(nodo, ".//*[local-name()='ID']")
+    ),
+    cantidad = as.numeric(xml_text(
+      xml_find_first(nodo, ".//*[local-name()='InvoicedQuantity']")
+    )),
+    descripcion = xml_text(
+      xml_find_first(nodo, ".//*[local-name()='Description']")
+    )
+  )
+})
+```
+
+## Tabla HTML de Wikipedia extraída con `rvest`
+
+**Clasificación:** estructurada dentro de una fuente semiestructurada.
+
+El documento HTML completo es semiestructurado porque utiliza etiquetas y una 
+jerarquía de elementos. No obstante, una tabla HTML seleccionada ya tiene filas 
+y columnas, por lo que el objeto específico que se analizará puede considerarse 
+estructurado. Esta distinción evita confundir la clasificación del documento 
+contenedor con la de la tabla extraída.
+
+El preprocesamiento mínimo consiste en leer la página, seleccionar la tabla 
+correcta, convertirla a `tibble`, normalizar los nombres y ajustar los tipos de 
+las columnas. También puede ser necesario retirar notas al pie o símbolos 
+incluidos en las celdas.
+
+```{r ejemplo-html, eval=FALSE}
+library(rvest)
+library(janitor)
+library(dplyr)
+library(readr)
+
+pagina <- read_html("URL_DE_WIKIPEDIA")
+
+tabla_wikipedia <- pagina |>
+  html_element("table.wikitable") |>
+  html_table(fill = TRUE) |>
+  as_tibble() |>
+  clean_names() |>
+  mutate(across(where(is.character), ~ trimws(.x)))
+
+# Ejemplo si una columna numérica contiene símbolos o notas:
+# tabla_wikipedia <- tabla_wikipedia |>
+#   mutate(valor = parse_number(valor))
+```
+
+# Ejercicio 2
+
+```{r}
+library(jsonlite)
+library(dplyr)
+library(tibble)
+library(knitr)
+```
+
+```{r lectura-json}
+url <- "https://jsonplaceholder.typicode.com/users"
+raw <- fromJSON(url)
+
+dim(raw)
+class(raw)
+```
+
+## Exploración de la estructura
+
+ Resultado de `str(raw)`
+
+```{r estructura}
+str(raw)
+```
+
+Para reconocer con mayor claridad cada nivel se consultan los nombres de los 
+componentes principales y anidados.
+
+```{r nombres-componentes}
+names(raw)
+names(raw$address)
+names(raw$address$geo)
+names(raw$company)
+```
+
+<div class="respuesta">
+**Respuesta 1.** Las columnas anidadas del nivel principal son `address` y 
+`company`. Dentro de `address` se encuentra un segundo objeto anidado, `geo`, 
+que contiene `lat` y `lng`. `jsonlite` simplifica estas estructuras como 
+columnas que son a su vez objetos `data.frame`; dado que un `data.frame` también 
+es una lista, pueden describirse como columnas de estructura anidada.
+</div>
+
+
+## Aplanamiento a un `tibble`
+
+`jsonlite::flatten()` expande recursivamente los `data.frame` anidados. Los 
+nombres de las variables resultantes reflejan la ruta jerárquica mediante 
+puntos; por ejemplo, `address.geo.lat`.
+
+```{r aplanamiento}
+usuarios <- raw |>
+  jsonlite::flatten(recursive = TRUE) |>
+  as_tibble() |>
+  transmute(
+    name,
+    email,
+    address.city,
+    address.geo.lat = as.numeric(address.geo.lat),
+    address.geo.lng = as.numeric(address.geo.lng),
+    company.name
+  )
+
+usuarios
+```
+
+<div class="nota">
+**Decisión de preparación.** En la respuesta JSON, las coordenadas `lat` y 
+`lng` están entre comillas y se importan inicialmente como texto. Se convierten 
+a tipo numérico para permitir cálculos, filtros y visualizaciones.
+</div>
+
+### Estructura del resultado
+
+```{r estructura-resultado}
+glimpse(usuarios)
+```
+
+### Tabla final
+
+```{r tabla-final}
+kable(
+  usuarios,
+  digits = 4,
+  align = c("l", "l", "l", "r", "r", "l"),
+  caption = "Tibble final con una fila por usuario y las variables solicitadas"
+)
+```
+
+<div class="respuesta">
+**Respuesta 2.** El resultado contiene `r nrow(usuarios)` filas y 
+`r ncol(usuarios)` columnas. Cada fila representa un usuario y se conservaron 
+exactamente las variables solicitadas: `name`, `email`, `address.city`, 
+`address.geo.lat`, `address.geo.lng` y `company.name`.
+</div>
+
+## Tipo de fuente y explicación
+
+<div class="respuesta">
+**Respuesta 3.** La fuente es **semiestructurada**. JSON organiza la información 
+mediante objetos, arreglos y pares clave--valor, pero permite jerarquías y 
+campos anidados que no corresponden automáticamente a una tabla rectangular.
+</div>
+
+`fromJSON()` no produce directamente un `tibble` plano por dos razones:
+
+1. **Conserva la jerarquía.** Al simplificar el arreglo de usuarios, mantiene 
+   `address` y `company` como `data.frame` anidados, y conserva `geo` dentro de 
+   `address`.
+2. **Devuelve clases de base R.** Cuando puede simplificar un arreglo de objetos 
+   homogéneos, `jsonlite` devuelve un `data.frame`, no un `tibble`. La conversión 
+   a `tibble` debe hacerse mediante `as_tibble()`.
+
+Por tanto, se requieren dos operaciones diferentes: **aplanar** la jerarquía y 
+**convertir** la clase del objeto.
+
+
+# Ejercicio 3
+
+```{r}
+library(readr)
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(Matrix)
+library(knitr)
+```
+
+```{r localizar-archivo, include=FALSE}
+
+if (file.exists("titanic.csv")) {
+  ruta_titanic <- "titanic.csv"
+} else {
+  candidatos <- list.files(
+    path = ".",
+    pattern = "^titanic\\.csv$",
+    ignore.case = TRUE,
+    full.names = TRUE
+  )
+
+  if (length(candidatos) == 0) {
+    stop(
+      "No se encontró 'titanic.csv'. Ubique el archivo en la misma carpeta ",
+      "del documento Rmd y vuelva a compilar."
+    )
+  }
+
+  if (length(candidatos) > 1) {
+    stop(
+      "Se encontró más de un archivo con el nombre titanic.csv. ",
+      "Conserve únicamente el archivo que debe analizarse."
+    )
+  }
+
+  ruta_titanic <- candidatos
+}
+
+ruta_titanic
+```
+
+```{r importar-datos, include=FALSE}
+titanic <- read_csv(ruta_titanic, show_col_types = FALSE)
+
+normalizar_nombres <- function(x) {
+  x <- tolower(x)
+  x <- gsub("[^[:alnum:]]+", "_", x)
+  x <- gsub("^_+|_+$", "", x)
+  x
+}
+
+names(titanic) <- normalizar_nombres(names(titanic))
+
+variables <- c("age", "fare", "sibsp", "parch")
+variables_faltantes <- setdiff(variables, names(titanic))
+
+if (length(variables_faltantes) > 0) {
+  stop(
+    "El archivo no contiene las variables requeridas: ",
+    paste(variables_faltantes, collapse = ", ")
+  )
+}
+
+glimpse(titanic)
+```
+
+## Eliminación de valores ausentes
+
+Solo se eliminan las filas que tienen al menos un valor ausente en las cuatro 
+variables requeridas. Los valores faltantes de otras columnas no afectan la 
+matriz de diseño.
+
+```{r casos-completos}
+datos_modelo <- titanic |>
+  select(all_of(variables)) |>
+  mutate(across(everything(), as.numeric)) |>
+  drop_na()
+
+resumen_filas <- tibble(
+  concepto = c(
+    "Filas originales",
+    "Filas completas utilizadas",
+    "Filas eliminadas por NA"
+  ),
+  cantidad = c(
+    nrow(titanic),
+    nrow(datos_modelo),
+    nrow(titanic) - nrow(datos_modelo)
+  )
+)
+
+kable(resumen_filas, align = c("l", "r"))
+```
+
+Antes de escalar, se comprueba que todas las variables tengan variación. Una 
+variable constante tendría desviación estándar cero y no podría estandarizarse.
+
+```{r validar-variacion, include=FALSE}
+desviaciones <- vapply(datos_modelo, sd, numeric(1))
+desviaciones
+
+if (any(!is.finite(desviaciones) | desviaciones == 0)) {
+  stop(
+    "No se puede aplicar scale(): al menos una variable tiene desviación ",
+    "estándar igual a cero o no finita."
+  )
+}
+```
+
+## Matriz de diseño centrada y escalada
+
+La función `scale()` resta a cada observación la media de su variable y divide 
+el resultado por la desviación estándar muestral.
+
+```{r construir-x}
+X <- datos_modelo |>
+  as.matrix() |>
+  scale(center = TRUE, scale = TRUE)
+```
+
+### Dimensiones y memoria
+
+```{r dimensiones-memoria}
+memoria_X_bytes <- as.numeric(object.size(X))
+memoria_X_legible <- format(object.size(X), units = "auto")
+
+resumen_X <- tibble(
+  medida = c("Número de filas", "Número de columnas", "Memoria"),
+  resultado = c(
+    format(nrow(X), big.mark = ".", scientific = FALSE),
+    as.character(ncol(X)),
+    memoria_X_legible
+  )
+)
+
+kable(resumen_X, align = c("l", "r"))
+```
+
+<div class="respuesta">
+**Respuesta 1.** La matriz estandarizada tiene `r nrow(X)` filas y 
+`r ncol(X)` columnas. Ocupa `r memoria_X_legible` según `object.size()`. Cada 
+fila corresponde a un pasajero con información completa en las cuatro 
+variables y cada columna corresponde a `age`, `fare`, `sibsp` o `parch`.
+</div>
+
+
+## Cálculo de \(X^{\mathsf{T}}X\)
+
+`crossprod(X)` calcula eficientemente el producto cruzado 
+\(X^{\mathsf{T}}X\) sin transponer explícitamente la matriz.
+
+```{r producto-cruzado}
+XtX <- crossprod(X)
+
+round(XtX, 4)
+```
+
+### Interpretación de la diagonal
+
+```{r diagonal}
+diagonal_XtX <- diag(XtX)
+valor_teorico <- nrow(X) - 1
+
+tabla_diagonal <- tibble(
+  variable = names(diagonal_XtX),
+  diagonal = as.numeric(diagonal_XtX),
+  valor_teorico = valor_teorico,
+  diferencia = as.numeric(diagonal_XtX) - valor_teorico
+)
+
+kable(tabla_diagonal, digits = 10, align = c("l", "r", "r", "r"))
+
+all.equal(
+  as.numeric(diagonal_XtX),
+  rep(valor_teorico, ncol(X)),
+  tolerance = 1e-10
+)
+```
+
+<div class="respuesta">
+**Respuesta 2.** Cada elemento diagonal de \(X^{\mathsf{T}}X\) es la suma de 
+cuadrados de una columna estandarizada:
+
+\[
+(X^{\mathsf{T}}X)_{jj}=\sum_{i=1}^{n}x_{ij}^{2}.
+\]
+
+Como `scale()` utiliza la desviación estándar muestral, calculada con 
+denominador \(n-1\), la diagonal es aproximadamente igual a \(n-1\). En este 
+caso, su valor teórico es `r valor_teorico`. Los elementos fuera de la diagonal 
+son \((n-1)\) veces las correlaciones muestrales entre las variables.
+</div>
+
+## Representación dispersa
+
+```{r matriz-dispersa}
+X_sparse <- Matrix(X, sparse = TRUE)
+
+memoria_sparse_bytes <- as.numeric(object.size(X_sparse))
+memoria_sparse_legible <- format(object.size(X_sparse), units = "auto")
+no_ceros <- Matrix::nnzero(X_sparse)
+total_celdas <- length(X)
+porcentaje_no_ceros <- 100 * no_ceros / total_celdas
+porcentaje_ceros <- 100 - porcentaje_no_ceros
+
+comparacion_memoria <- tibble(
+  representacion = c("Matriz densa X", "Matriz dispersa X_sparse"),
+  clase = c(class(X)[1], class(X_sparse)[1]),
+  memoria = c(memoria_X_legible, memoria_sparse_legible),
+  bytes = c(memoria_X_bytes, memoria_sparse_bytes)
+)
+
+kable(
+  comparacion_memoria,
+  format.args = list(big.mark = "."),
+  align = c("l", "l", "r", "r")
+)
+```
+
+### Densidad de la matriz
+
+```{r densidad}
+resumen_densidad <- tibble(
+  medida = c(
+    "Celdas totales",
+    "Valores distintos de cero",
+    "Porcentaje distinto de cero",
+    "Porcentaje de ceros"
+  ),
+  resultado = c(
+    format(total_celdas, big.mark = "."),
+    format(no_ceros, big.mark = "."),
+    paste0(round(porcentaje_no_ceros, 2), "%"),
+    paste0(round(porcentaje_ceros, 2), "%")
+  )
+)
+
+kable(resumen_densidad, align = c("l", "r"))
+```
+
+```{r conclusion-dispersa, include=FALSE}
+if (memoria_sparse_bytes < memoria_X_bytes && porcentaje_ceros >= 80) {
+  conclusion_sparse <- paste(
+    "En estos datos, la representación dispersa reduce la memoria y la matriz",
+    "contiene una proporción alta de ceros; por tanto, su uso sí resulta razonable."
+  )
+} else if (memoria_sparse_bytes < memoria_X_bytes) {
+  conclusion_sparse <- paste(
+    "La representación dispersa ocupa menos memoria en esta ejecución, aunque",
+    "la proporción de ceros no es alta. La ventaja debe evaluarse junto con el",
+    "costo computacional y el tipo de operaciones posteriores."
+  )
+} else {
+  conclusion_sparse <- paste(
+    "La representación dispersa no reduce la memoria en esta ejecución.",
+    "Como la matriz tiene pocas columnas y la estandarización convierte la mayoría",
+    "de las celdas en valores distintos de cero, el formato denso es más apropiado."
+  )
+}
+```
+
+<div class="respuesta">
+**Respuesta 3.** La matriz densa ocupa `r memoria_X_legible` y la matriz 
+dispersa ocupa `r memoria_sparse_legible`. El porcentaje de ceros es 
+`r round(porcentaje_ceros, 2)`%. `r conclusion_sparse`
+</div>
+
+La representación dispersa es especialmente útil cuando una matriz grande 
+contiene una proporción muy alta de ceros. En este ejercicio, centrar las 
+variables suele destruir muchos ceros originales: un valor cero se transforma 
+en \((0-\bar{x})/s\), que generalmente es distinto de cero. Por ello no debe 
+suponerse que `sibsp` y `parch` continuarán siendo columnas dispersas después de 
+aplicar `scale()`.
+
+## Estructura para modelar relaciones familiares
+
+<div class="respuesta">
+**Respuesta 4.** Para representar relaciones familiares entre pasajeros se 
+utilizaría un **grafo** o red. Cada pasajero sería un nodo y cada vínculo 
+familiar sería una arista. La arista podría incluir un atributo que identifique 
+el tipo de relación, por ejemplo, cónyuge, hermano, padre, madre o hijo. Esta 
+estructura permite estudiar componentes familiares, tamaños de grupos, grados 
+de conexión y propagación de características dentro de una familia.
+</div>
+
+
+# Ejercicio 4
+
+## Parámetros
+
+```{r parametros}
+set.seed(42)
+
+p_valores <- c(1, 2, 5, 10, 50, 100, 500, 1000, 5000)
+n_puntos <- 500
+n_pares <- 200
+
+tibble(
+  parametro = c("Dimensiones evaluadas", "Puntos por dimensión", "Pares por dimensión"),
+  valor = c(
+    paste(p_valores, collapse = ", "),
+    n_puntos,
+    n_pares
+  )
+) |>
+  kable(align = c("l", "l"))
+```
+
+## Funciones de cálculo
+
+El coeficiente de variación se define como
+
+\[
+CV=\frac{s}{\bar d},
+\]
+
+donde \(s\) es la desviación estándar de las distancias y \(\bar d\) es su 
+media. Cuando la media es numéricamente igual a cero, el CV no está definido y 
+se reporta como `NA`.
+
+```{r funciones}
+cv_seguro <- function(x, tolerancia = sqrt(.Machine$double.eps)) {
+  media <- mean(x)
+
+  if (!is.finite(media) || abs(media) < tolerancia) {
+    return(NA_real_)
+  }
+
+  sd(x) / media
+}
+
+simular_dimension <- function(p, n = 500, m = 200) {
+  # 500 puntos uniformes en [0, 1]^p
+  puntos <- matrix(runif(n * p), nrow = n, ncol = p)
+
+  # Cada columna contiene dos índices distintos. Los pares pueden repetirse
+  # entre extracciones, pero un punto nunca se compara consigo mismo.
+  pares <- replicate(m, sample.int(n, size = 2, replace = FALSE))
+
+  A <- puntos[pares[1, ], , drop = FALSE]
+  B <- puntos[pares[2, ], , drop = FALSE]
+
+  # Distancia euclidiana
+  distancia_euclidiana <- sqrt(rowSums((A - B)^2))
+
+  # Distancia coseno = 1 - similitud coseno
+  norma_A <- sqrt(rowSums(A^2))
+  norma_B <- sqrt(rowSums(B^2))
+
+  if (any(norma_A == 0 | norma_B == 0)) {
+    stop("Se encontró un vector de norma cero; no puede calcularse el coseno.")
+  }
+
+  similitud_coseno <- rowSums(A * B) / (norma_A * norma_B)
+
+  # Se corrigen únicamente desviaciones de redondeo fuera de [-1, 1].
+  similitud_coseno <- pmin(1, pmax(-1, similitud_coseno))
+  distancia_coseno <- pmax(0, 1 - similitud_coseno)
+
+  tibble(
+    p = p,
+    par = seq_len(m),
+    distancia_euclidiana = distancia_euclidiana,
+    distancia_coseno = distancia_coseno
+  )
+}
+```
+
+<div class="nota">
+**Criterio de comparación.** Para cada valor de \(p\), ambas métricas se 
+calculan sobre los mismos puntos y exactamente los mismos pares. Así, las 
+diferencias observadas se deben a la métrica y no a muestras distintas.
+</div>
+
+## Ejecución del experimento
+
+```{r simulacion}
+distancias <- bind_rows(
+  lapply(
+    p_valores,
+    simular_dimension,
+    n = n_puntos,
+    m = n_pares
+  )
+)
+
+dim(distancias)
+head(distancias)
+```
+
+La simulación produce `r nrow(distancias)` registros: 200 pares para cada una de 
+las `r length(p_valores)` dimensiones evaluadas.
+
+## Distancia euclidiana
+
+### Distancia media y coeficiente de variación
+
+```{r resumen-metricas}
+resultados <- distancias |>
+  group_by(p) |>
+  summarise(
+    media_euclidiana = mean(distancia_euclidiana),
+    sd_euclidiana = sd(distancia_euclidiana),
+    cv_euclidiana = cv_seguro(distancia_euclidiana),
+    media_coseno = mean(distancia_coseno),
+    sd_coseno = sd(distancia_coseno),
+    cv_coseno = cv_seguro(distancia_coseno),
+    .groups = "drop"
+  )
+
+tabla_euclidiana <- resultados |>
+  transmute(
+    p,
+    `Distancia media` = media_euclidiana,
+    `Desviación estándar` = sd_euclidiana,
+    `CV` = cv_euclidiana,
+    `CV (%)` = 100 * cv_euclidiana
+  )
+
+kable(
+  tabla_euclidiana,
+  digits = c(0, 6, 6, 6, 2),
+  align = c("r", "r", "r", "r", "r"),
+  caption = "Resultados para la distancia euclidiana"
+)
+```
+
+<div class="respuesta">
+**Respuesta 1.** La distancia euclidiana media aumenta con la dimensión porque 
+cada nueva coordenada incorpora un término no negativo a la suma de cuadrados. 
+En contraste, el CV disminuye: las distancias siguen aumentando en valor 
+absoluto, pero se vuelven cada vez más similares en términos relativos.
+</div>
+
+### Gráficos frente a \(p\)
+
+```{r preparar-grafico-euclidiana}
+resultados_euclidiana_largo <- resultados |>
+  select(p, media_euclidiana, cv_euclidiana) |>
+  rename(
+    `Distancia media` = media_euclidiana,
+    `Coeficiente de variación` = cv_euclidiana
+  ) |>
+  pivot_longer(
+    cols = -p,
+    names_to = "medida",
+    values_to = "valor"
+  )
+
+linea_umbral <- tibble(
+  medida = "Coeficiente de variación",
+  umbral = 0.05
+)
+```
+
+```{r grafico-euclidiana}
+ggplot(
+  resultados_euclidiana_largo,
+  aes(x = p, y = valor)
+) +
+  geom_line(linewidth = 0.9, color = "#2457a6") +
+  geom_point(size = 2.6, color = "#16324f") +
+  geom_hline(
+    data = linea_umbral,
+    aes(yintercept = umbral),
+    inherit.aes = FALSE,
+    linetype = "dashed",
+    color = "#b03a2e",
+    linewidth = 0.8
+  ) +
+  facet_wrap(vars(medida), scales = "free_y", ncol = 1) +
+  scale_x_log10(
+    breaks = p_valores,
+    labels = format(p_valores, big.mark = ".", scientific = FALSE)
+  ) +
+  labs(
+    title = "Concentración de la distancia euclidiana",
+    subtitle = "La línea roja señala CV = 5 % en el panel correspondiente",
+    x = "Dimensión p (escala logarítmica)",
+    y = NULL
+  )
+```
+
+<div class="respuesta">
+**Respuesta 2.** La escala logarítmica en el eje \(x\) permite visualizar en una 
+misma figura dimensiones desde 1 hasta 5000. La distancia media crece, mientras 
+que el coeficiente de variación converge hacia cero.
+</div>
+
+## Umbral del 5 % e implicaciones para K-NN
+
+```{r umbral-euclidiana}
+p_umbral_euclidiana <- resultados |>
+  filter(is.finite(cv_euclidiana), cv_euclidiana < 0.05) |>
+  summarise(p = if (n() == 0) NA_real_ else min(p)) |>
+  pull(p)
+
+if (is.na(p_umbral_euclidiana)) {
+  texto_umbral_euclidiana <- paste(
+    "En la cuadrícula evaluada, el CV euclidiano no cae por debajo del 5 %."
+  )
+} else {
+  texto_umbral_euclidiana <- paste0(
+    "El primer valor evaluado para el cual el CV euclidiano cae por debajo ",
+    "del 5 % es p = ", p_umbral_euclidiana, "."
+  )
+}
+
+texto_umbral_euclidiana
+```
+
+<div class="respuesta">
+**Respuesta 3.** `r texto_umbral_euclidiana` Este resultado se refiere a los 
+valores de \(p\) incluidos en el ejercicio; el cruce exacto podría encontrarse 
+entre dos valores consecutivos de la cuadrícula.
+
+Para K-NN, la reducción del CV indica que las distancias se parecen cada vez 
+más entre sí. Por tanto, disminuye el contraste relativo entre vecinos 
+“cercanos” y “lejanos”, la selección de los vecinos puede volverse más sensible 
+al ruido y se requiere una muestra mucho mayor para cubrir adecuadamente el 
+espacio. Esta es una manifestación de la **maldición de la dimensionalidad**.
+</div>
+
+El fenómeno no implica que todas las distancias sean exactamente iguales. 
+Significa que su dispersión relativa respecto de la media se reduce. En una 
+aplicación real de K-NN conviene seleccionar variables relevantes, estandarizar 
+las escalas y considerar reducción de dimensionalidad o métricas adaptadas al 
+problema.
+
+## Distancia coseno
+
+### Resultados
+
+```{r tabla-coseno}
+tabla_coseno <- resultados |>
+  transmute(
+    p,
+    `Distancia media` = media_coseno,
+    `Desviación estándar` = sd_coseno,
+    `CV` = cv_coseno,
+    `CV (%)` = 100 * cv_coseno
+  )
+
+kable(
+  tabla_coseno,
+  digits = c(0, 6, 6, 6, 2),
+  align = c("r", "r", "r", "r", "r"),
+  caption = "Resultados para la distancia coseno"
+)
+```
+
+<div class="nota">
+**Caso \(p=1\).** Como los valores simulados son no negativos, dos vectores 
+unidimensionales de norma positiva tienen la misma dirección. Su similitud 
+coseno es 1 y su distancia coseno es 0. En consecuencia, tanto la media como la 
+desviación son cero y el CV queda indefinido (`NA`), porque requeriría dividir 
+entre cero.
+</div>
+
+### Comparación de la concentración
+
+```{r preparar-comparacion}
+comparacion_cv <- resultados |>
+  select(p, cv_euclidiana, cv_coseno) |>
+  rename(
+    Euclidiana = cv_euclidiana,
+    Coseno = cv_coseno
+  ) |>
+  pivot_longer(
+    cols = -p,
+    names_to = "metrica",
+    values_to = "cv"
+  )
+```
+
+```{r grafico-comparacion}
+ggplot(comparacion_cv, aes(x = p, y = cv, color = metrica)) +
+  geom_hline(
+    yintercept = 0.05,
+    linetype = "dashed",
+    color = "#555555",
+    linewidth = 0.8
+  ) +
+  geom_line(linewidth = 0.9, na.rm = TRUE) +
+  geom_point(size = 2.6, na.rm = TRUE) +
+  scale_x_log10(
+    breaks = p_valores,
+    labels = format(p_valores, big.mark = ".", scientific = FALSE)
+  ) +
+  scale_color_manual(values = c(Euclidiana = "#2457a6", Coseno = "#c05a20")) +
+  labs(
+    title = "Velocidad de concentración por métrica",
+    subtitle = "Comparación mediante el coeficiente de variación",
+    x = "Dimensión p (escala logarítmica)",
+    y = "Coeficiente de variación",
+    color = "Métrica"
+  )
+```
+
+### Comparación de umbrales y tendencias
+
+```{r comparar-velocidad}
+p_umbral_coseno <- resultados |>
+  filter(is.finite(cv_coseno), cv_coseno < 0.05) |>
+  summarise(p = if (n() == 0) NA_real_ else min(p)) |>
+  pull(p)
+
+datos_pendiente_euclidiana <- resultados |>
+  filter(p >= 5, is.finite(cv_euclidiana), cv_euclidiana > 0)
+
+datos_pendiente_coseno <- resultados |>
+  filter(p >= 5, is.finite(cv_coseno), cv_coseno > 0)
+
+modelo_pendiente_euclidiana <- lm(
+  log(cv_euclidiana) ~ log(p),
+  data = datos_pendiente_euclidiana
+)
+
+modelo_pendiente_coseno <- lm(
+  log(cv_coseno) ~ log(p),
+  data = datos_pendiente_coseno
+)
+
+pendiente_euclidiana <- unname(coef(modelo_pendiente_euclidiana)[2])
+pendiente_coseno <- unname(coef(modelo_pendiente_coseno)[2])
+
+comparacion_umbral <- tibble(
+  metrica = c("Euclidiana", "Coseno"),
+  `Primer p con CV < 5 %` = c(p_umbral_euclidiana, p_umbral_coseno),
+  `Pendiente log(CV) vs. log(p)` = c(
+    pendiente_euclidiana,
+    pendiente_coseno
+  )
+)
+
+kable(
+  comparacion_umbral,
+  digits = c(0, 0, 4),
+  align = c("l", "r", "r")
+)
+```
+
+```{r texto-comparacion, include=FALSE}
+if (is.na(p_umbral_coseno)) {
+  texto_umbral_coseno <- paste(
+    "la distancia coseno no alcanza un CV inferior al 5 % dentro de la",
+    "cuadrícula evaluada"
+  )
+} else {
+  texto_umbral_coseno <- paste0(
+    "la distancia coseno alcanza un CV inferior al 5 % por primera vez en p = ",
+    p_umbral_coseno
+  )
+}
+
+if (is.na(p_umbral_euclidiana) || is.na(p_umbral_coseno)) {
+  texto_rapidez <- paste(
+    "No es posible comparar ambos umbrales completos únicamente con esta",
+    "cuadrícula; las pendientes logarítmicas aportan una comparación adicional."
+  )
+} else if (p_umbral_coseno < p_umbral_euclidiana) {
+  texto_rapidez <- "Según el umbral del 5 %, la distancia coseno se concentra antes."
+} else if (p_umbral_coseno > p_umbral_euclidiana) {
+  texto_rapidez <- "Según el umbral del 5 %, la distancia coseno se concentra después."
+} else {
+  texto_rapidez <- paste(
+    "Según la cuadrícula evaluada, ambas métricas cruzan el umbral del 5 %",
+    "en la misma dimensión."
+  )
+}
+```
+
+<div class="respuesta">
+**Respuesta 4.** En esta simulación, `r texto_umbral_coseno`. 
+`r texto_rapidez` Las pendientes estimadas en escala log--log son 
+`r round(pendiente_euclidiana, 3)` para la distancia euclidiana y 
+`r round(pendiente_coseno, 3)` para la distancia coseno.
+
+Las dos métricas presentan concentración al aumentar \(p\), pero no debe 
+afirmarse que lo hacen exactamente a la misma velocidad: sus medias, 
+dispersiones y umbrales pueden diferir. La conclusión se basa en el CV, el 
+primer \(p\) que cruza el 5 % y la pendiente de la curva, no solo en la 
+apariencia del gráfico.
+</div>
+
+# Ejercicio 5
+
+```{r importar-dato-5, include=FALSE}
+titanic <- read_csv(ruta_titanic, show_col_types = FALSE)
+
+normalizar_nombres <- function(x) {
+  x <- tolower(x)
+  x <- gsub("[^[:alnum:]]+", "_", x)
+  x <- gsub("^_+|_+$", "", x)
+  x
+}
+
+normalizar_supervivencia <- function(x) {
+  texto <- tolower(trimws(as.character(x)))
+  salida <- rep(NA_integer_, length(texto))
+
+  valores_positivos <- c("1", "yes", "y", "true", "survived", "si", "sí")
+  valores_negativos <- c(
+    "0", "no", "n", "false", "died", "dead", "not survived"
+  )
+
+  salida[texto %in% valores_positivos] <- 1L
+  salida[texto %in% valores_negativos] <- 0L
+  salida
+}
+
+names(titanic) <- normalizar_nombres(names(titanic))
+
+predictores <- c("age", "fare", "sibsp", "parch", "pclass")
+columnas_requeridas <- c(predictores, "survived")
+columnas_faltantes <- setdiff(columnas_requeridas, names(titanic))
+
+if (length(columnas_faltantes) > 0) {
+  stop(
+    "El archivo no contiene las columnas requeridas: ",
+    paste(columnas_faltantes, collapse = ", ")
+  )
+}
+
+glimpse(titanic)
+```
+
+## Casos completos
+
+Se convierten las variables explicativas a tipo numérico y se eliminan 
+únicamente los registros incompletos en las seis variables requeridas.
+
+```{r preparar-casos}
+datos_modelo <- titanic |>
+  transmute(
+    across(
+      all_of(predictores),
+      ~ suppressWarnings(as.numeric(.x))
+    ),
+    survived = normalizar_supervivencia(.data$survived)
+  ) |>
+  drop_na()
+
+if (!identical(sort(unique(datos_modelo$survived)), c(0L, 1L))) {
+  stop("La variable survived debe contener las dos categorías 0 y 1.")
+}
+
+if (nrow(datos_modelo) < 3) {
+  stop("No hay suficientes casos completos para ejecutar PCA y K-Means.")
+}
+
+resumen_casos <- tibble(
+  concepto = c(
+    "Filas originales",
+    "Casos completos utilizados",
+    "Filas excluidas"
+  ),
+  cantidad = c(
+    nrow(titanic),
+    nrow(datos_modelo),
+    nrow(titanic) - nrow(datos_modelo)
+  )
+)
+
+kable(resumen_casos, align = c("l", "r"))
+```
+
+Se verifica que ningún predictor sea constante, porque una desviación estándar 
+igual a cero impediría el escalamiento.
+
+```{r validar-predictores}
+desviaciones <- vapply(
+  datos_modelo[predictores],
+  sd,
+  numeric(1)
+)
+
+desviaciones
+
+```
+
+## Análisis de componentes principales
+
+### Ajuste del PCA
+
+`prcomp()` centra y escala cada variable antes de efectuar la descomposición. 
+Esto es necesario porque `age`, `fare`, `sibsp`, `parch` y `pclass` se expresan 
+en unidades y rangos distintos.
+
+```{r ajustar-pca}
+X_sin_escalar <- datos_modelo |>
+  select(all_of(predictores)) |>
+  as.matrix()
+
+pca <- prcomp(
+  X_sin_escalar,
+  center = TRUE,
+  scale. = TRUE
+)
+
+# Matriz escalada utilizada por el PCA. También se empleará en K-Means.
+X_escalada <- scale(
+  X_sin_escalar,
+  center = pca$center,
+  scale = pca$scale
+)
+
+summary(pca)
+```
+
+### Varianza explicada
+
+```{r varianza-explicada}
+varianza <- pca$sdev^2
+proporcion_varianza <- varianza / sum(varianza)
+varianza_acumulada <- cumsum(proporcion_varianza)
+
+tabla_varianza <- tibble(
+  componente = seq_along(proporcion_varianza),
+  nombre = paste0("PC", componente),
+  valor_propio = varianza,
+  proporcion = proporcion_varianza,
+  acumulada = varianza_acumulada
+)
+
+n_80 <- which(varianza_acumulada >= 0.80)[1]
+n_95 <- which(varianza_acumulada >= 0.95)[1]
+
+kable(
+  tabla_varianza,
+  digits = c(0, 0, 5, 4, 4),
+  align = c("r", "l", "r", "r", "r"),
+  caption = "Varianza explicada por los componentes principales"
+)
+```
+
+<div class="respuesta">
+**Respuesta 1.** Se necesitan **`r n_80` componentes** para retener al menos el 
+80 % de la varianza y **`r n_95` componentes** para retener al menos el 95 %. 
+La selección se realiza con el primer componente cuya varianza acumulada alcanza 
+cada umbral, por lo que no depende de redondeos visuales de la tabla.
+</div>
+
+## *Scree plot* de varianza acumulada
+
+```{r scree-plot}
+ggplot(tabla_varianza, aes(x = componente, y = acumulada)) +
+  geom_hline(
+    yintercept = c(0.80, 0.95),
+    linetype = "dashed",
+    color = c("#c05a20", "#8e2f2f"),
+    linewidth = 0.8
+  ) +
+  geom_vline(
+    xintercept = c(n_80, n_95),
+    linetype = "dotted",
+    color = c("#c05a20", "#8e2f2f"),
+    linewidth = 0.8
+  ) +
+  geom_line(color = "#2457a6", linewidth = 1) +
+  geom_point(color = "#16324f", size = 3) +
+  scale_x_continuous(
+    breaks = tabla_varianza$componente,
+    labels = tabla_varianza$nombre
+  ) +
+  scale_y_continuous(
+    limits = c(0, 1),
+    breaks = seq(0, 1, 0.1),
+    labels = function(x) paste0(round(100 * x), "%")
+  ) +
+  labs(
+    title = "Scree plot: varianza acumulada",
+    subtitle = "Las líneas señalan los umbrales de 80 % y 95 %",
+    x = "Número de componentes",
+    y = "Varianza explicada acumulada"
+  )
+```
+
+<div class="respuesta">
+**Respuesta 2.** La curva siempre es creciente porque cada componente añade 
+varianza explicada. Las líneas horizontales representan 80 % y 95 %, mientras 
+que las líneas verticales identifican el primer número de componentes que 
+alcanza cada umbral.
+</div>
+
+## *Loadings* de PC1 y PC2
+
+Los *loadings* son los coeficientes de las combinaciones lineales que definen 
+cada componente. Una magnitud absoluta alta indica mayor contribución; el signo 
+indica la dirección dentro del componente.
+
+```{r tabla-loadings}
+loadings <- as.data.frame(pca$rotation[, 1:2, drop = FALSE]) |>
+  rownames_to_column("variable") |>
+  as_tibble() |>
+  pivot_longer(
+    cols = c(PC1, PC2),
+    names_to = "componente",
+    values_to = "carga"
+  ) |>
+  mutate(carga_absoluta = abs(carga))
+
+kable(
+  loadings |>
+    select(variable, componente, carga, carga_absoluta),
+  digits = 4,
+  align = c("l", "l", "r", "r"),
+  caption = "Loadings de los dos primeros componentes"
+)
+```
+
+### Variables dominantes
+
+Se seleccionan las dos variables con mayor carga absoluta en cada componente.
+
+```{r variables-dominantes}
+dominantes <- loadings |>
+  group_by(componente) |>
+  arrange(desc(carga_absoluta), .by_group = TRUE) |>
+  slice_head(n = 2) |>
+  ungroup()
+
+kable(
+  dominantes |>
+    select(componente, variable, carga, carga_absoluta),
+  digits = 4,
+  align = c("l", "l", "r", "r"),
+  caption = "Variables dominantes por componente"
+)
+```
+
+```{r texto-loadings, include=FALSE}
+describir_componente <- function(nombre_componente) {
+  loadings |>
+    filter(componente == nombre_componente) |>
+    arrange(desc(carga_absoluta)) |>
+    slice_head(n = 2) |>
+    transmute(
+      texto = paste0(
+        variable,
+        if_else(carga >= 0, " (+)", " (-)")
+      )
+    ) |>
+    pull(texto) |>
+    paste(collapse = " y ")
+}
+
+descripcion_pc1 <- describir_componente("PC1")
+descripcion_pc2 <- describir_componente("PC2")
+```
+
+<div class="respuesta">
+**Respuesta 3.** Las variables con mayor carga absoluta en PC1 son 
+`r descripcion_pc1`; en PC2 son `r descripcion_pc2`. La interpretación debe 
+considerar conjuntamente magnitud y signo: variables con el mismo signo cambian 
+en la misma dirección dentro del componente, mientras que signos opuestos 
+representan un contraste.
+</div>
+
+```{r grafico-loadings}
+ggplot(loadings, aes(x = reorder(variable, carga), y = carga, fill = carga > 0)) +
+  geom_hline(yintercept = 0, color = "#555555", linewidth = 0.6) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  facet_wrap(vars(componente), scales = "free_y") +
+  scale_fill_manual(values = c(`TRUE` = "#2457a6", `FALSE` = "#c05a20")) +
+  labs(
+    title = "Loadings de PC1 y PC2",
+    subtitle = "La importancia se evalúa por la magnitud absoluta de la barra",
+    x = NULL,
+    y = "Loading"
+  )
+```
+
+En el contexto del Titanic:
+
+- `age` representa la edad del pasajero.
+- `fare` aproxima el valor económico del tiquete.
+- `sibsp` y `parch` reflejan acompañamiento familiar a bordo.
+- `pclass` es ordinal: valores altos indican una clase de viaje más baja 
+  —tercera clase frente a primera—.
+
+Por tanto, un componente dominado por `sibsp` y `parch` puede interpretarse 
+como una dimensión de **acompañamiento o tamaño familiar**; uno dominado por 
+`fare` y `pclass`, especialmente con signos opuestos, puede reflejar una 
+dimensión de **posición socioeconómica o condiciones de viaje**; y una carga 
+alta de `age` introduce una dimensión de **ciclo de vida**. La interpretación 
+concreta debe ajustarse a los signos y magnitudes que aparecen en la tabla.
+
+<div class="nota">
+**Precauciones.** El signo completo de un componente puede invertirse sin 
+cambiar el PCA; por ello importa el patrón relativo de signos, no que una carga 
+sea positiva por sí misma. Además, `pclass` es ordinal y aquí se trata como 
+numérica, una simplificación que debe reconocerse al interpretar distancias.
+</div>
+
+## K-Means sobre dos representaciones
+
+### Funciones de evaluación
+
+Las etiquetas 1 y 2 de K-Means son arbitrarias. Por esta razón se utiliza una 
+exactitud con la mejor alineación posible de etiquetas y el índice Rand ajustado 
+(ARI), que es invariante al nombre de los grupos y corrige el acuerdo esperado 
+por azar.
+
+```{r funciones-evaluacion}
+exactitud_binaria_optima <- function(cluster, verdad) {
+  niveles_cluster <- sort(unique(cluster))
+
+  if (length(niveles_cluster) != 2) {
+    return(NA_real_)
+  }
+
+  prediccion <- as.integer(cluster == niveles_cluster[2])
+  max(
+    mean(prediccion == verdad),
+    mean((1L - prediccion) == verdad)
+  )
+}
+
+indice_rand_ajustado <- function(cluster, verdad) {
+  tabla <- table(cluster, verdad)
+  combinar_2 <- function(x) x * (x - 1) / 2
+
+  suma_celdas <- sum(combinar_2(tabla))
+  suma_filas <- sum(combinar_2(rowSums(tabla)))
+  suma_columnas <- sum(combinar_2(colSums(tabla)))
+  total_pares <- combinar_2(sum(tabla))
+
+  esperado <- suma_filas * suma_columnas / total_pares
+  maximo <- 0.5 * (suma_filas + suma_columnas)
+  denominador <- maximo - esperado
+
+  if (abs(denominador) < .Machine$double.eps) {
+    return(NA_real_)
+  }
+
+  (suma_celdas - esperado) / denominador
+}
+```
+
+### Ajuste de los dos modelos
+
+Para la matriz original se utiliza `X_escalada`, es decir, las cinco variables 
+en la misma escala. Para la representación reducida se emplean directamente 
+los puntajes de PC1 y PC2; no se vuelven a escalar, con el fin de conservar la 
+varianza relativa que asigna el PCA.
+
+```{r ajustar-kmeans}
+set.seed(42)
+kmeans_X <- kmeans(
+  X_escalada,
+  centers = 2,
+  nstart = 50,
+  iter.max = 100
+)
+
+puntajes_PC12 <- pca$x[, 1:2, drop = FALSE]
+
+set.seed(42)
+kmeans_PC12 <- kmeans(
+  puntajes_PC12,
+  centers = 2,
+  nstart = 50,
+  iter.max = 100
+)
+
+supervivencia <- datos_modelo$survived
+```
+
+### Tablas de contingencia
+
+```{r tablas-contingencia}
+tabla_X <- table(
+  Cluster = kmeans_X$cluster,
+  Survived = supervivencia
+)
+
+tabla_PC12 <- table(
+  Cluster = kmeans_PC12$cluster,
+  Survived = supervivencia
+)
+
+kable(
+  addmargins(tabla_X),
+  caption = "K-Means sobre X escalada frente a survived"
+)
+
+kable(
+  addmargins(tabla_PC12),
+  caption = "K-Means sobre PC1 y PC2 frente a survived"
+)
+```
+
+### Métricas de coincidencia
+
+```{r metricas-kmeans}
+resumen_kmeans <- tibble(
+  representacion = c("X escalada (5 variables)", "PC1 y PC2"),
+  exactitud_alineada = c(
+    exactitud_binaria_optima(kmeans_X$cluster, supervivencia),
+    exactitud_binaria_optima(kmeans_PC12$cluster, supervivencia)
+  ),
+  ari = c(
+    indice_rand_ajustado(kmeans_X$cluster, supervivencia),
+    indice_rand_ajustado(kmeans_PC12$cluster, supervivencia)
+  ),
+  suma_cuadrados_intra = c(
+    kmeans_X$tot.withinss,
+    kmeans_PC12$tot.withinss
+  )
+)
+
+kable(
+  resumen_kmeans,
+  digits = c(0, 4, 4, 3),
+  align = c("l", "r", "r", "r"),
+  caption = "Comparación de los agrupamientos con la supervivencia"
+)
+```
+
+```{r conclusion-kmeans, include=FALSE}
+diferencia_ari <- resumen_kmeans$ari[1] - resumen_kmeans$ari[2]
+diferencia_exactitud <-
+  resumen_kmeans$exactitud_alineada[1] -
+  resumen_kmeans$exactitud_alineada[2]
+
+if (is.finite(diferencia_ari) && abs(diferencia_ari) > 1e-12) {
+  mejor_representacion <- if (
+    diferencia_ari > 0
+  ) "X escalada con cinco variables" else "los dos primeros componentes"
+
+  criterio_decision <- "el mayor índice Rand ajustado"
+} else if (
+  is.finite(diferencia_exactitud) && abs(diferencia_exactitud) > 1e-12
+) {
+  mejor_representacion <- if (
+    diferencia_exactitud > 0
+  ) "X escalada con cinco variables" else "los dos primeros componentes"
+
+  criterio_decision <- "la mayor exactitud después de alinear las etiquetas"
+} else {
+  mejor_representacion <- "ninguna: ambas producen la misma coincidencia"
+  criterio_decision <- "el empate de las métricas calculadas"
+}
+```
+
+<div class="respuesta">
+**Respuesta 4.** De acuerdo con `r criterio_decision`, la representación que 
+coincide mejor con `survived` es **`r mejor_representacion`**. La conclusión es 
+empírica y corresponde a los casos completos del archivo analizado.
+</div>
+
+### Visualización de la composición de los grupos
+
+```{r grafico-clusters-supervivencia}
+datos_clusters <- tibble(
+  survived = factor(
+    supervivencia,
+    levels = c(0, 1),
+    labels = c("No sobrevivió", "Sobrevivió")
+  ),
+  `X escalada (5 variables)` = factor(kmeans_X$cluster),
+  `PC1 y PC2` = factor(kmeans_PC12$cluster)
+) |>
+  pivot_longer(
+    cols = -survived,
+    names_to = "representacion",
+    values_to = "cluster"
+  )
+
+ggplot(datos_clusters, aes(x = cluster, fill = survived)) +
+  geom_bar(position = "fill") +
+  facet_wrap(vars(representacion)) +
+  scale_y_continuous(
+    breaks = seq(0, 1, 0.2),
+    labels = function(x) paste0(round(100 * x), "%")
+  ) +
+  scale_fill_manual(values = c("#8e2f2f", "#27835b")) +
+  labs(
+    title = "Supervivencia dentro de los grupos K-Means",
+    subtitle = "Las barras muestran proporciones, no tamaños absolutos",
+    x = "Grupo",
+    y = "Composición del grupo",
+    fill = NULL
+  )
+```
+
+### Puntajes de los dos primeros componentes
+
+```{r grafico-pca-supervivencia}
+datos_puntajes <- tibble(
+  PC1 = pca$x[, 1],
+  PC2 = pca$x[, 2],
+  survived = factor(
+    supervivencia,
+    levels = c(0, 1),
+    labels = c("No sobrevivió", "Sobrevivió")
+  ),
+  cluster = factor(kmeans_PC12$cluster)
+)
+
+ggplot(datos_puntajes, aes(x = PC1, y = PC2, color = survived, shape = cluster)) +
+  geom_point(alpha = 0.7, size = 2) +
+  scale_color_manual(values = c("#8e2f2f", "#27835b")) +
+  labs(
+    title = "Pasajeros en el plano PC1–PC2",
+    subtitle = "Color: supervivencia observada; forma: grupo K-Means",
+    x = "PC1",
+    y = "PC2",
+    color = NULL,
+    shape = "Grupo"
+  )
+```
+
+<div class="nota">
+**Alcance de la comparación.** K-Means es un método no supervisado: busca 
+grupos compactos, no maximiza la predicción de `survived`. Una coincidencia 
+baja no implica que el algoritmo esté mal ejecutado; indica que la geometría de 
+estas cinco variables no reproduce de manera directa la clasificación de 
+supervivencia. Además, agrupar sobre los cinco componentes sería equivalente a 
+agrupar sobre `X_escalada`, porque el PCA completo es una rotación ortogonal. 
+Las diferencias aparecen aquí porque la segunda alternativa conserva solo PC1 
+y PC2.
+</div>
+
+

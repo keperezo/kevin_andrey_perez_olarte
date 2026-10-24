@@ -1,0 +1,1365 @@
+---
+title: "Taller Parcial 1 - Análisis de Precios de Vitaminas"
+author: "Luna Katerin Diaz"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+# Cargar las funciones desde el módulo independiente de extracción
+source("scraper.R")
+library(stringi)
+library(ggplot2)
+
+DB_PATH <- "comparador_precios.sqlite"
+
+# Formatos de número para tablas y texto (punto de miles y coma decimal)
+cop <- function(x) {
+  if_else(is.na(x), NA_character_, paste0("$", formatC(round(x), format = "d", big.mark = ".", decimal.mark = ",")))
+}
+cop_dec <- function(x, digitos = 1) {
+  if_else(is.na(x), NA_character_,
+          paste0("$", formatC(x, format = "f", digits = digitos, big.mark = ".", decimal.mark = ",")))
+}
+num1 <- function(x) formatC(x, format = "f", digits = 1, decimal.mark = ",")
+entero <- function(x) formatC(x, format = "d", big.mark = ".", decimal.mark = ",")
+
+# Colores y tema de los gráficos (un color por comercio)
+colores_comercio <- c("CAFAM" = "#2a78d6", "LA ALEMANA" = "#eb6834", "LA REBAJA" = "#1baf7a",
+                      "Empate" = "#898781")
+nombres_comercio <- c("CAFAM" = "Cafam", "LA ALEMANA" = "La Alemana", "LA REBAJA" = "La Rebaja",
+                      "Empate" = "Empate")
+miles_cop <- function(x) {
+  if_else(x == 0, "$0", paste0("$", formatC(x / 1000, format = "f", digits = 0, big.mark = ".", decimal.mark = ","), " mil"))
+}
+tema_graficos <- theme_minimal(base_size = 11) +
+  theme(
+    plot.background    = element_rect(fill = "#fcfcfb", color = NA),
+    panel.background   = element_rect(fill = "#fcfcfb", color = NA),
+    panel.grid.minor   = element_blank(),
+    panel.grid.major   = element_line(color = "#e1e0d9", linewidth = 0.3),
+    axis.text          = element_text(color = "#52514e"),
+    axis.title         = element_text(color = "#52514e"),
+    plot.title         = element_text(color = "#0b0b0b", face = "bold"),
+    plot.subtitle      = element_text(color = "#52514e"),
+    plot.caption       = element_text(color = "#898781", hjust = 0),
+    strip.text         = element_text(color = "#0b0b0b", face = "bold", hjust = 0),
+    legend.position    = "top",
+    legend.justification = "left",
+    legend.title       = element_blank()
+  )
+```
+
+
+## Introducción
+
+Se comparan precios de vitaminas en tres droguerías con venta en línea en Colombia: **Cafam**, **La Rebaja Virtual** y **La Alemana** (Tu Droguería Virtual). Los datos se obtienen mediante *web scraping* y todo el proceso se implementa en R.
+
+Se recolectan los productos que cada sitio lista para la búsqueda "vitaminas" y se comparan 10 presentaciones disponibles en los tres comercios. Corresponden a 8 productos, dos de ellos en dos tamaños: Omega 3 Procaps, Complejo B Genfar, Cebion gotas, Vitacerebrina, Aquasol E, Ácido fólico Ecar, Kola Granulada Tarrito Rojo fresa (135 g y 380 g) y Centrum Silver Women (30 y 60 tabletas).
+
+El objetivo es identificar dónde resulta más económico comprar cada presentación y cuándo un tamaño mayor ofrece un menor precio por unidad de contenido.
+
+
+## 1. Extracción y Carga de Datos
+
+### 1.1 Fuentes y estrategia de extracción
+
+```{r fuentes, echo=FALSE}
+tibble(
+  Comercio = c("Cafam", "La Rebaja Virtual", "La Alemana (Tu Droguería Virtual)"),
+  `Página consultada` = c(
+    "https://www.drogueriascafam.com.co/vitaminas?_q&page=N",
+    "https://www.larebajavirtual.com/vitaminas?_q&page=N",
+    "https://www.tudrogueriavirtual.com/vitaminas?page=N"
+  ),
+  `Productos por página` = c("12", "16", "50"),
+  `Pasos de desplazamiento por página` = c("8 × 700 px", "8 × 700 px", "18 × 800 px + final")
+) %>%
+  kable(caption = "Fuentes consultadas")
+```
+
+**Equivalencia con la categoría.** Ningún sitio tiene una sección idéntica a la categoría registrada. Se usó el listado de resultados del buscador de cada sitio para "vitaminas". Ese listado incluye cosméticos y productos de cuidado personal "con vitamina", que se excluyen en la limpieza (sección 2.3) con su motivo de descarte.
+
+**Estrategia.** Los tres sitios usan VTEX IO y cargan los productos con JavaScript durante el desplazamiento, así que una petición HTTP simple no devuelve el listado. Por eso `scraper.R` abre cada página con `chromote` (Chrome sin interfaz), espera 4 s y se desplaza en pasos con pausas de 1,5 s para forzar la carga diferida. Después lee el HTML con `rvest`. Cada comercio tiene su propia función de extracción y todas devuelven las mismas columnas.
+
+| Campo | Selector |
+|---|---|
+| Tarjeta de producto | `[data-af-element='search-result']` |
+| Nombre | `h3 span` |
+| Enlace | `a.vtex-product-summary-2-x-clearLink` o el primer `a` de la tarjeta |
+| Precio de venta | Cafam: `.drogueriascafam-discounts-management-0-x-convenioNormalPrice`; La Rebaja: `.vtex-product-price-1-x-sellingPriceValue`; La Alemana: `.vtex-product-price-1-x-sellingPrice` |
+| Precio antes del descuento | Cafam: `.drogueriascafam-discounts-management-0-x-price`; La Rebaja: `.vtex-product-price-1-x-listPriceValue`; La Alemana: `.vtex-product-price-1-x-listPrice` |
+| Marca | `.vtex-product-summary-2-x-productBrandName` (La Rebaja: `.vtex-store-components-3-x-productBrandName`) |
+| Contenido | `[class*='PUM-content-wrapper']` |
+
+**Condiciones de uso (`robots.txt`, revisado el 13-oct-2026).**
+
+- **La Rebaja Virtual** solo restringe cuenta, inicio de sesión, pago y `/busca/`; la ruta usada está permitida.
+- **Cafam** restringe su API interna y los parámetros de búsqueda de texto completo (`_q=`, `map=ft`). La URL usada no contiene literalmente `_q=`.
+- **La Alemana** restringe las URL con parámetros y solo permite `?page=`. La primera ejecución usó `vitaminas?_q&page=N`, que cae en el patrón restringido. Desde la segunda se usa `vitaminas?page=N`, que está permitida y devuelve los mismos productos.
+
+La extracción no inicia sesión ni usa APIs privadas, y consulta una página a la vez, con pausas.
+
+### 1.2 Ejecución y carga en SQLite
+
+`ejecutar_recoleccion_completa()` tiene dos modos:
+
+- **En línea:** crea una ejecución con identificador `AAAAMMDD_HHMMSS` (hora de Colombia) y recorre las páginas de cada comercio hasta que una página ya no trae productos nuevos. El HTML de cada página se guarda en `raw/<comercio>/<id_ejecucion>/pagina_NN.html.gz`, con un índice `paginas.csv` que registra página, URL y fecha-hora de consulta.
+- **Sin conexión:** vuelve a extraer los productos del HTML guardado con las mismas funciones de cada comercio, sin consultar los sitios.
+
+La tabla `historico_productos` tiene una restricción de unicidad sobre `(comercio, enlace, fecha_extraccion)` y la carga usa `INSERT OR IGNORE`. Así, reprocesar las copias no duplica observaciones y las ejecuciones nuevas se agregan sin sobrescribir las anteriores. La fecha y hora de consulta se guardan en ISO 8601 con hora de Colombia, por ejemplo `2026-10-11T22:28:13-05:00`.
+
+```{r ejecucion}
+# Para una nueva recolección en línea: modo_offline = FALSE
+ejecutar_recoleccion_completa(
+  db_path = DB_PATH,
+  modo_offline = TRUE
+)
+
+con <- dbConnect(RSQLite::SQLite(), DB_PATH)
+
+ejecuciones <- dbGetQuery(con, "
+  SELECT id_ejecucion, comercio, fecha_inicio, modo, paginas_consultadas,
+         n_registros, productos_unicos, total_sitio, estado
+  FROM ejecuciones
+  ORDER BY id_ejecucion, comercio
+")
+kable(ejecuciones, caption = "Ejecuciones registradas en SQLite")
+
+# Ejecución usada en el análisis: la más reciente con los tres comercios y sin fallas
+sql_ejecucion_analisis <- "
+  SELECT id_ejecucion
+  FROM ejecuciones
+  GROUP BY id_ejecucion
+  HAVING COUNT(DISTINCT comercio) = 3 AND SUM(estado = 'fallida') = 0
+  ORDER BY id_ejecucion DESC
+  LIMIT 1
+"
+id_ejec <- dbGetQuery(con, sql_ejecucion_analisis)$id_ejecucion
+
+cob_ejec <- filter(ejecuciones, id_ejecucion == id_ejec)
+cob <- function(com, campo) cob_ejec[[campo]][cob_ejec$comercio == com]
+```
+
+El análisis usa la ejecución más reciente, **`r id_ejec`**.
+
+**Cobertura de la categoría.** `productos_unicos` cuenta los productos distintos obtenidos y `total_sitio` el total que muestra el buscador del sitio. En la ejecución analizada, Cafam muestra `r cob("CAFAM", "total_sitio")` productos y se obtuvieron `r cob("CAFAM", "productos_unicos")`. La Rebaja muestra `r cob("LA REBAJA", "total_sitio")` y se obtuvieron `r cob("LA REBAJA", "productos_unicos")`. La Alemana no muestra el total: su recorrido termina cuando una página ya no trae productos nuevos, y su última página trae menos productos que las demás.
+
+La primera ejecución (11 de octubre, de 19:56 a 22:40) recorrió un número fijo de páginas y no registró el total de cada sitio. Además, solo guardó el CSV con los productos extraídos (`raw/*_vitaminas_resultados.csv`). En los tres comercios su última página trae menos productos que las anteriores, lo que indica que llegó al final del listado de esa fecha.
+
+
+## 2. Limpieza de los datos
+
+La unidad de limpieza es el **anuncio**: cada producto tal como aparece en un comercio, identificado por su enlace. El texto original (`n_producto`, `marca`, `contenido`) no se modifica. Los campos derivados (`codigo_producto`, `nombre_std`, `marca_std`, `subcategoria`, `cantidad`, `unidad`) se guardan en la tabla `anuncios`.
+
+### 2.1 Consolidación y registros descartados
+
+```{r consolidacion}
+obs <- dbGetQuery(con, "
+  SELECT id_observacion, id_ejecucion, comercio, n_producto, enlace, marca, contenido,
+         precio_num, precio_sin_promo_num, fecha_extraccion
+  FROM historico_productos
+")
+
+# Enlaces que, en una misma ejecución, aparecen con nombres de productos distintos:
+# la tarjeta no enlaza a su propio producto
+enlaces_ambiguos <- obs %>%
+  group_by(id_ejecucion, comercio, enlace) %>%
+  filter(n_distinct(n_producto) > 1) %>%
+  ungroup() %>%
+  distinct(comercio, enlace) %>%
+  mutate(ambiguo = TRUE)
+
+# Un registro por anuncio (comercio + enlace), con el texto de su observación más reciente
+df_consolidado <- obs %>%
+  arrange(comercio, enlace, desc(fecha_extraccion)) %>%
+  group_by(comercio, enlace) %>%
+  summarise(
+    n_producto = first(n_producto),
+    marca = first(marca),
+    contenido = first(contenido),
+    n_observaciones = n(),
+    .groups = "drop"
+  ) %>%
+  left_join(enlaces_ambiguos, by = c("comercio", "enlace")) %>%
+  mutate(motivo_descarte = case_when(
+    !str_detect(enlace, "/p(\\?|$)") ~ "enlace_no_es_producto",
+    ambiguo %in% TRUE                ~ "enlace_ambiguo",
+    TRUE                             ~ NA_character_
+  )) %>%
+  select(-ambiguo)
+
+df_consolidado %>%
+  filter(!is.na(motivo_descarte)) %>%
+  select(comercio, motivo_descarte, enlace, n_observaciones) %>%
+  kable(caption = "Anuncios descartados por enlace inválido")
+```
+
+Se descartan dos tipos de tarjetas, sin borrarlas de la base:
+
+- En **Cafam**, la primera tarjeta de cada página enlaza a la página de inicio. Esa tarjeta repite un producto que también aparece en la página con su enlace correcto.
+- En **La Alemana**, un enlace patrocinado (`multivitaminas-y-minerales-x-20-tabl-efervescentes/p`) aparece en cada página con el nombre de un producto distinto.
+
+Otros datos faltantes o repetidos:
+
+- De los `r entero(sum(ejecuciones$n_registros))` registros obtenidos, `r sum(ejecuciones$n_registros) - nrow(obs)` no se insertaron porque repiten comercio, enlace y fecha-hora de consulta. Son lecturas del mismo anuncio en la misma página, casi todas de La Rebaja, y siguen disponibles en las copias crudas.
+- `r sum(is.na(obs$precio_num))` observaciones tienen precio ausente (`NULL`): los sitios publican \$0 en productos agotados, y ese valor no se guarda como 0.
+
+### 2.2 Estandarización y contenido
+
+```{r contenido}
+# Versiones estandarizadas: mayúsculas, sin tildes y sin espacios repetidos
+estandarizar <- function(x) str_squish(stri_trans_general(str_to_upper(x), "Latin-ASCII"))
+
+# Unidades reconocidas después de un número. Los mg, mcg y UI no se toman como contenido:
+# en vitaminas corresponden a la concentración del principio activo, no al tamaño del empaque.
+patron_unidad <- "(ML|CC|MILILITROS?|LTS?|L|KG|GRAMOS|GRS?|GM|G|TABLETAS?|TABL|TABS?|TBL|CAPSULAS?|CAPS?|CBG|CGB|SOFTGELS?|COMPRIMIDOS?|GRAGEAS?|GRAG|PASTILLAS?|SOBRES?|SOB|SACHETS?|STICKS?|AMPOLLAS?|AMP|VIALES|JERINGAS?|GOMITAS?|GOMAS|CARAMELOS|UNIDADES|UNDS?|PERLAS?|FRASCOS|LATAS)\\b"
+
+# Contenido total del empaque en mL, g o unidades (und), con esta prioridad:
+#  1. número precedido de "X" o "CON": "FRASCO X 30 CAP", "CAJA CON 250 TABLETAS"
+#  2. número seguido de una unidad:    "SABOR FRESA 380 G", "+50 AÑOS 30 TABLETAS"
+#  3. "X" y número al final, sin unidad: "BLISTER X 10"
+extraer_contenido <- function(texto) {
+  con_x  <- str_match(texto, paste0("\\b(?:X|CON)\\s*(\\d+(?:[.,]\\d+)?)\\s*", patron_unidad))
+  suelto <- str_match(texto, paste0("(?<!/)\\b(\\d+(?:[.,]\\d+)?)\\s*", patron_unidad))
+  solo_x <- str_match(texto, "\\bX\\s*(\\d+)\\s*$")
+
+  numero <- coalesce(con_x[, 2], suelto[, 2], solo_x[, 2])
+  unidad <- coalesce(con_x[, 3], suelto[, 3], if_else(is.na(solo_x[, 2]), NA_character_, "UND"))
+  # "1.000" usa separador de miles; "1,5" o "1.5" son decimales
+  numero <- if_else(str_detect(numero, "^\\d{1,3}([.,]\\d{3})+$"),
+                    str_remove_all(numero, "[.,]"),
+                    str_replace(numero, ",", "."))
+  cantidad <- as.numeric(numero)
+
+  tibble(
+    cantidad = if_else(unidad %in% c("L", "LT", "LTS", "KG"), cantidad * 1000, cantidad),
+    unidad = case_when(
+      unidad %in% c("ML", "CC", "MILILITRO", "MILILITROS", "L", "LT", "LTS") ~ "mL",
+      unidad %in% c("G", "GR", "GRS", "GM", "GRAMOS", "KG")                  ~ "g",
+      !is.na(unidad)                                                         ~ "und",
+      TRUE                                                                   ~ NA_character_
+    )
+  )
+}
+
+df_limpio <- df_consolidado %>%
+  mutate(
+    # Identificador interno del comercio: número final de la URL, cuando el sitio lo incluye
+    codigo_producto = str_match(enlace, "-(\\d+)/p$")[, 2],
+    nombre_std    = estandarizar(n_producto),
+    marca_std     = estandarizar(marca),
+    contenido_std = estandarizar(contenido)
+  )
+
+# Prioridad: el campo de contenido del sitio (La Rebaja lo publica) y luego el nombre
+cont_campo  <- extraer_contenido(df_limpio$contenido_std)
+cont_nombre <- extraer_contenido(df_limpio$nombre_std)
+usar_campo  <- !is.na(cont_campo$cantidad)
+
+df_limpio <- df_limpio %>%
+  mutate(
+    cantidad = if_else(usar_campo, cont_campo$cantidad, cont_nombre$cantidad),
+    unidad   = if_else(usar_campo, cont_campo$unidad, cont_nombre$unidad)
+  )
+```
+
+### 2.3 Productos fuera de la categoría
+
+La búsqueda "vitaminas" también devuelve cosméticos y productos de cuidado personal con vitaminas (cremas, sueros, champús, etc.), que no pertenecen a la categoría. Las palabras de exclusión se buscan como **palabras completas**. Así, *Softgel*, *Cápsulas de gelatina* o *Gelicart* no se excluyen por contener "GEL". Los suplementos en aceite (aceite de pescado, hígado de bacalao) se conservan.
+
+```{r exclusiones}
+patron_exclusiones <- paste0(
+  "\\b(SERUM|PANAL(ES)?|PANITOS?|RUBOR|REMOVEDOR|MASCARILLAS?|SHAMPOO|CHAMPU|CREMAS?|GEL|",
+  "DESODORANTE|LACA|LECHE CORPORAL|LOCAO|LOCION|ACEITE|MICELAR|TOALLITAS|ACONDICIONADOR|",
+  "JABON|PROTECTOR SOLAR|BLOQUEADOR)\\b"
+)
+patron_excepciones <- "\\b(OMEGA|PESCADO|BACALAO)\\b"
+
+df_limpio <- df_limpio %>%
+  mutate(motivo_descarte = if_else(
+    is.na(motivo_descarte) &
+      str_detect(nombre_std, patron_exclusiones) &
+      !str_detect(nombre_std, patron_excepciones),
+    "fuera_de_categoria",
+    motivo_descarte
+  ))
+
+resumen_limpieza <- df_limpio %>%
+  group_by(comercio) %>%
+  summarise(
+    anuncios = n(),
+    enlace_invalido = sum(motivo_descarte %in% c("enlace_no_es_producto", "enlace_ambiguo")),
+    fuera_de_categoria = sum(motivo_descarte %in% "fuera_de_categoria"),
+    en_categoria = sum(is.na(motivo_descarte)),
+    con_contenido = sum(is.na(motivo_descarte) & !is.na(cantidad)),
+    .groups = "drop"
+  ) %>%
+  mutate(pct_con_contenido = round(100 * con_contenido / en_categoria, 1))
+
+kable(resumen_limpieza, caption = "Anuncios por comercio después de la limpieza")
+```
+
+### 2.4 Marca y subcategoría
+
+La Alemana publica como marca el laboratorio fabricante (por ejemplo, *GLAXO CONSUMER HEALTH CARE* para Centrum), mientras que los otros dos sitios publican la marca comercial. Por eso la marca común de los productos comparables se fija en `productos_comparables`.
+
+Ningún sitio publica la subcategoría en el listado. Se asigna con reglas de palabras clave sobre el nombre, aplicadas en orden: gana la primera que coincide. Es una clasificación aproximada.
+
+```{r subcategorias}
+reglas_subcategoria <- tribble(
+  ~subcategoria,                                ~patron,
+  "Multivitamínicos",                           "\\b(MULTIVITAMIN\\w*|MULTI ?VIT\\w*|CENTRUM|SUPRADYN|PHARMATON|VITACEREBRINA|GESTAVIT|REDOXITOS|DAYAMINERAL)\\b",
+  "Omega 3 y aceites de pescado",               "\\b(OMEGA|FISH OIL|PESCADO|BACALAO|KRILL)\\b",
+  "Colágeno",                                   "\\b(COLAGENO|COLLAGEN|GELICART|NUTRIGEL)\\b",
+  "Kola granulada y tónicos",                   "\\b(KOLA|TONICO|EMULSION|LEVADURA|JALEA)\\b",
+  "Alimentos y fórmulas nutricionales",         "\\b(ALIMENTO|LACTEO|GLUCERNA|KLIM|ENSURE|PEDIASURE|FORMULA|NESTOGENO|PEDIALYTE|SCANDISHAKE|ALULA)\\b",
+  "Proteínas y nutrición deportiva",            "\\b(PROTEIN\\w*|PROTEINA|PROWHEY|WHEY|CREATIN\\w*|GLUTAMIN\\w*|CARNITIN\\w*|AMINOACIDOS?|PRE-ENTRENO)\\b",
+  "Probióticos y enzimas",                      "\\b(PROBIOTIC\\w*|BIOFLOR|ENTEROPHYLUS|ENZYMAX|LACTOBACILL\\w*)\\b",
+  "Vitamina C",                                 "\\b(VITAMINA C|VITAMIN C|VIT C|VITA C|CEBION|REDOXON|ACIDO ASCORBICO)\\b",
+  "Calcio",                                     "\\b(CALCIO|CALCIUM|BIOCALCIUM|CALCIBON|CITRAGEL|CALTRATE|CALCITRAL|KIDCAL)\\b",
+  "Vitamina D",                                 "\\b(VITAMINA D3?|VITAMIN D3?|D3|DEFEROL|FARMA D|DEBLAX)\\b",
+  "Vitamina E",                                 "\\b(VITAMINA E|VITAMIN E|AQUASOL)\\b",
+  "Complejo B y ácido fólico",                  "\\b(COMPLEJO B|B12|B-12|B1|B6|BIOTIN\\w*|TIAMINA|NEUROBION|FOLICO|B-VIT|BEDOYECTA)\\b",
+  "Minerales (magnesio, zinc, hierro y otros)", "\\b(MAGNES\\w*|ZINC|HIERRO|FERR\\w*|FERPRO|ANEMIDOX|SELENI\\w*|POTAS\\w*|CHROMIUM|CROMO)\\b"
+)
+
+asignar_subcategoria <- function(nombre_std) {
+  subcategoria <- rep("Otros suplementos", length(nombre_std))
+  asignado <- rep(FALSE, length(nombre_std))
+  for (i in seq_len(nrow(reglas_subcategoria))) {
+    coincide <- !asignado & str_detect(nombre_std, reglas_subcategoria$patron[i]) %in% TRUE
+    subcategoria[coincide] <- reglas_subcategoria$subcategoria[i]
+    asignado <- asignado | coincide
+  }
+  subcategoria
+}
+
+df_limpio <- df_limpio %>%
+  mutate(subcategoria = asignar_subcategoria(nombre_std))
+```
+
+### 2.5 Correspondencia de productos comparables
+
+Una correspondencia exige que coincidan la marca o el nombre comercial, la variante (sabor), la concentración cuando aplica y el contenido exacto del empaque. Las reglas se aplican a los campos estandarizados de los anuncios no descartados. Cada presentación debe quedar asignada a exactamente un anuncio por comercio.
+
+Se descartó la Vitamina E 1000 UI x 50 de Healthy America: en La Alemana solo aparece la versión con selenio, que es otra formulación. Se incluyeron dos tamaños de Kola Granulada Tarrito Rojo fresa y de Centrum Silver Women para poder comparar el precio por unidad (sección 4.2).
+
+```{r comparables}
+productos_comparables <- tribble(
+  ~id_producto, ~producto, ~nombre_corto, ~marca, ~subcategoria, ~presentacion, ~contenido, ~unidad, ~familia,
+  "P01", "Omega 3 cápsulas blandas", "Omega 3 Procaps x30", "Procaps", "Omega 3 y aceites de pescado", "30 cápsulas", 30, "cápsula", "omega3_procaps",
+  "P02", "Complejo B tabletas", "Complejo B Genfar x250", "Genfar", "Complejo B y ácido fólico", "250 tabletas", 250, "tableta", "complejo_b_genfar",
+  "P03", "Cebion gotas vitamina C 100 mg/mL sabor fresa", "Cebion gotas fresa 30 mL", "Cebion", "Vitamina C", "30 mL", 30, "mL", "cebion_gotas_fresa",
+  "P04", "Vitacerebrina jarabe sabor caramelo", "Vitacerebrina caramelo 180 mL", "Vitacerebrina", "Multivitamínicos", "180 mL", 180, "mL", "vitacerebrina_caramelo",
+  "P05", "Aquasol E 800 UI cápsulas blandas", "Aquasol E 800 UI x30", "Aquasol", "Vitamina E", "30 cápsulas", 30, "cápsula", "aquasol_e_800",
+  "P06", "Ácido fólico 1 mg tabletas", "Ácido fólico Ecar 1 mg x100", "Ecar", "Complejo B y ácido fólico", "100 tabletas", 100, "tableta", "acido_folico_ecar_1mg",
+  "P07", "Kola granulada Tarrito Rojo sabor fresa", "Kola Tarrito Rojo fresa 380 g", "Tarrito Rojo (JGB)", "Kola granulada y tónicos", "380 g", 380, "g", "kola_tarrito_rojo_fresa",
+  "P08", "Kola granulada Tarrito Rojo sabor fresa", "Kola Tarrito Rojo fresa 135 g", "Tarrito Rojo (JGB)", "Kola granulada y tónicos", "135 g", 135, "g", "kola_tarrito_rojo_fresa",
+  "P09", "Centrum Silver Women +50", "Centrum Silver Women x30", "Centrum", "Multivitamínicos", "30 tabletas", 30, "tableta", "centrum_silver_women",
+  "P10", "Centrum Silver Women +50", "Centrum Silver Women x60", "Centrum", "Multivitamínicos", "60 tabletas", 60, "tableta", "centrum_silver_women"
+)
+
+# Reglas de correspondencia sobre los campos estandarizados
+reglas_correspondencia <- tribble(
+  ~id_producto, ~patron_nombre,                       ~patron_excluir,          ~patron_marca, ~cantidad, ~unidad,
+  "P01",        "\\bOMEGA[ -]?3\\b",                   NA,                       "PROCAPS",     30,        "und",
+  "P02",        "\\bCOMPLEJO B\\b",                    NA,                       "GENFAR",      250,       "und",
+  "P03",        "\\bCEBION\\b.*\\bFRESA\\b",           NA,                       NA,            30,        "mL",
+  "P04",        "\\bVITACEREBRINA\\b.*\\bCARAMELO\\b", NA,                       NA,            180,       "mL",
+  "P05",        "\\bAQUASOL\\b.*\\bE[ -]?800\\b",      NA,                       NA,            30,        "und",
+  "P06",        "\\bACIDO FOLICO 1 MG\\b",             NA,                       "ECAR",        100,       "und",
+  "P07",        "\\bTARRITO ROJO\\b.*\\bFRESA\\b",     "TRADICIONAL|OFERTA|\\+", NA,            380,       "g",
+  "P08",        "\\bTARRITO ROJO\\b.*\\bFRESA\\b",     "TRADICIONAL|OFERTA|\\+", NA,            135,       "g",
+  "P09",        "\\bCENTRUM SILVER WOMEN\\b",          NA,                       NA,            30,        "und",
+  "P10",        "\\bCENTRUM SILVER WOMEN\\b",          NA,                       NA,            60,        "und"
+)
+
+asignar_producto <- function(df, reglas) {
+  id <- rep(NA_character_, nrow(df))
+  for (i in seq_len(nrow(reglas))) {
+    r <- reglas[i, ]
+    cumple <- str_detect(df$nombre_std, r$patron_nombre) &
+      df$cantidad %in% r$cantidad &
+      df$unidad %in% r$unidad
+    if (!is.na(r$patron_excluir)) cumple <- cumple & !str_detect(df$nombre_std, r$patron_excluir)
+    if (!is.na(r$patron_marca))   cumple <- cumple & str_detect(df$marca_std, r$patron_marca)
+    id[is.na(id) & cumple %in% TRUE] <- r$id_producto
+  }
+  id
+}
+
+ids_asignados <- asignar_producto(df_limpio, reglas_correspondencia)
+df_limpio <- df_limpio %>%
+  mutate(
+    id_producto = if_else(is.na(motivo_descarte), ids_asignados, NA_character_),
+    comparable  = as.integer(!is.na(id_producto))
+  )
+
+# Validación: cada presentación debe tener exactamente un anuncio en cada comercio
+tabla_cobertura <- table(
+  factor(df_limpio$id_producto, levels = productos_comparables$id_producto),
+  df_limpio$comercio
+)
+kable(as.data.frame.matrix(tabla_cobertura),
+      caption = "Anuncios asignados a cada presentación por comercio (debe ser 1 en todas las celdas)")
+if (any(tabla_cobertura != 1)) {
+  cat("ATENCIÓN: hay presentaciones sin anuncio o con más de un anuncio en algún comercio;",
+      "revisar las reglas de correspondencia.\n")
+}
+
+df_limpio %>%
+  filter(comparable == 1) %>%
+  arrange(id_producto, comercio) %>%
+  select(id_producto, comercio, texto_original = n_producto, marca, cantidad, unidad) %>%
+  kable(caption = "Correspondencia: anuncio de cada comercio asignado a cada presentación")
+```
+
+`productos_comparables` y `anuncios` se derivan de `historico_productos`, así que se reconstruyen en cada compilación. La vista `v_precios_comparables` toma una sola observación por ejecución, comercio y presentación: la primera lectura, cuando un anuncio se leyó más de una vez.
+
+```{r guardar_correspondencia, results="hide"}
+sql_tabla_productos <- "
+  CREATE TABLE productos_comparables (
+    id_producto TEXT PRIMARY KEY,
+    producto TEXT NOT NULL,
+    nombre_corto TEXT NOT NULL,
+    marca TEXT NOT NULL,
+    subcategoria TEXT NOT NULL,
+    presentacion TEXT NOT NULL,
+    contenido REAL NOT NULL,
+    unidad TEXT NOT NULL,
+    familia TEXT NOT NULL
+  )
+"
+
+sql_tabla_anuncios <- "
+  CREATE TABLE anuncios (
+    comercio TEXT NOT NULL,
+    enlace TEXT NOT NULL,
+    codigo_producto TEXT,
+    n_producto TEXT,
+    marca TEXT,
+    nombre_std TEXT,
+    marca_std TEXT,
+    subcategoria TEXT,
+    cantidad REAL,
+    unidad TEXT,
+    n_observaciones INTEGER,
+    motivo_descarte TEXT,
+    id_producto TEXT REFERENCES productos_comparables (id_producto),
+    comparable INTEGER NOT NULL,
+    PRIMARY KEY (comercio, enlace)
+  )
+"
+
+sql_vista_observaciones <- "
+  CREATE VIEW v_observaciones AS
+  SELECT h.id_observacion, h.id_ejecucion, h.comercio, h.enlace, h.n_producto, h.marca,
+         h.contenido, h.precio_num, h.precio_sin_promo_num, h.promocion, h.fecha_extraccion,
+         a.nombre_std, a.marca_std, a.subcategoria, a.cantidad, a.unidad, a.motivo_descarte,
+         a.id_producto, COALESCE(a.comparable, 0) AS comparable
+  FROM historico_productos h
+  LEFT JOIN anuncios a ON a.comercio = h.comercio AND a.enlace = h.enlace
+"
+
+sql_vista_precios <- "
+  CREATE VIEW v_precios_comparables AS
+  SELECT o.id_ejecucion, o.comercio, o.id_producto, p.producto, p.nombre_corto, p.presentacion,
+         p.familia, p.contenido, p.unidad, o.precio_num AS precio, o.precio_sin_promo_num AS precio_lista,
+         o.promocion, o.precio_num / p.contenido AS precio_unitario,
+         o.enlace, o.n_producto, o.fecha_extraccion
+  FROM (
+    SELECT v.*,
+           ROW_NUMBER() OVER (PARTITION BY v.id_ejecucion, v.comercio, v.id_producto
+                              ORDER BY v.fecha_extraccion, v.id_observacion) AS n_obs
+    FROM v_observaciones v
+    WHERE v.comparable = 1
+  ) o
+  JOIN productos_comparables p ON p.id_producto = o.id_producto
+  WHERE o.n_obs = 1
+"
+
+for (sql in c("DROP VIEW IF EXISTS v_precios_comparables",
+              "DROP VIEW IF EXISTS v_observaciones",
+              "DROP TABLE IF EXISTS anuncios",
+              "DROP TABLE IF EXISTS productos_comparables",
+              sql_tabla_productos,
+              sql_tabla_anuncios)) {
+  dbExecute(con, sql)
+}
+
+dbAppendTable(con, "productos_comparables", productos_comparables)
+dbAppendTable(con, "anuncios", df_limpio %>%
+  select(comercio, enlace, codigo_producto, n_producto, marca, nombre_std, marca_std, subcategoria,
+         cantidad, unidad, n_observaciones, motivo_descarte, id_producto, comparable))
+
+dbExecute(con, sql_vista_observaciones)
+dbExecute(con, sql_vista_precios)
+```
+
+
+## 3. Lectura desde SQLite y Análisis Exploratorio
+
+```{r exploratorio}
+sql_resumen_oferta <- "
+  WITH u AS (
+    SELECT comercio, enlace, MIN(precio_num) AS precio
+    FROM v_observaciones
+    WHERE id_ejecucion = ? AND motivo_descarte IS NULL
+    GROUP BY comercio, enlace
+  )
+  SELECT comercio,
+         COUNT(*) AS productos,
+         ROUND(AVG(precio)) AS precio_promedio,
+         MIN(precio) AS precio_minimo,
+         MAX(precio) AS precio_maximo
+  FROM u
+  GROUP BY comercio
+  ORDER BY productos DESC
+"
+resumen_oferta <- dbGetQuery(con, sql_resumen_oferta, params = list(id_ejec))
+
+resumen_oferta %>%
+  mutate(across(starts_with("precio"), cop)) %>%
+  kable(caption = paste("Oferta de la categoría por comercio, ejecución", id_ejec),
+        align = "lrrrr")
+```
+
+El precio promedio describe surtidos distintos (otros productos, marcas y tamaños). Por eso no sirve para concluir qué comercio es más barato. Esa comparación se hace en la sección 4, solo con presentaciones idénticas.
+
+
+## 4. Comparación de precios y presentaciones
+
+Las comparaciones usan las presentaciones comparables de una misma ejecución. Los precios corresponden al momento de la captura y no incluyen envío ni descuentos por afiliación o medio de pago. Los comentarios de resultados de las secciones 4 a 8 se refieren a la ejecución del 13 de octubre de 2026 (`20261013_191617`).
+
+`r if (id_ejec != "20261013_191617") paste0("**Nota:** las tablas muestran la ejecución ", id_ejec, ".") else ""`
+
+```{r cobertura_comparables}
+sql_cobertura <- "
+  SELECT comercio,
+         COUNT(DISTINCT id_producto) AS presentaciones,
+         COUNT(*) AS observaciones
+  FROM v_precios_comparables
+  WHERE id_ejecucion = ?
+  GROUP BY comercio
+  ORDER BY comercio
+"
+cobertura <- dbGetQuery(con, sql_cobertura, params = list(id_ejec))
+kable(cobertura, caption = "Cobertura de las presentaciones comparables en la ejecución analizada")
+```
+
+### 4.1 Mismo producto y misma presentación
+
+```{r comparacion_41}
+sql_41 <- "
+  WITH p AS (
+    SELECT * FROM v_precios_comparables WHERE id_ejecucion = ?
+  ),
+  r AS (
+    SELECT id_producto,
+           MIN(precio) AS precio_min,
+           MAX(precio) AS precio_max,
+           COUNT(DISTINCT comercio) AS n_comercios
+    FROM p
+    GROUP BY id_producto
+  )
+  SELECT p.id_producto, p.producto, p.presentacion,
+         MAX(CASE WHEN p.comercio = 'CAFAM' THEN p.precio END) AS cafam,
+         MAX(CASE WHEN p.comercio = 'LA ALEMANA' THEN p.precio END) AS la_alemana,
+         MAX(CASE WHEN p.comercio = 'LA REBAJA' THEN p.precio END) AS la_rebaja,
+         r.precio_min,
+         r.precio_max,
+         GROUP_CONCAT(CASE WHEN p.precio = r.precio_min THEN p.comercio END, ' = ') AS menor_precio_en,
+         SUM(p.precio = r.precio_min) AS n_con_menor_precio,
+         MAX(CASE WHEN p.precio = r.precio_min THEN p.promocion ELSE 0 END) AS menor_precio_en_promocion,
+         r.precio_max - r.precio_min AS diferencia_vs_max,
+         r.n_comercios
+  FROM p
+  JOIN r ON r.id_producto = p.id_producto
+  GROUP BY p.id_producto
+  ORDER BY p.id_producto
+"
+comp_41 <- dbGetQuery(con, sql_41, params = list(id_ejec))
+
+comp_41 %>%
+  transmute(
+    Presentación = paste(producto, "-", presentacion),
+    Cafam = cop(cafam),
+    `La Alemana` = cop(la_alemana),
+    `La Rebaja` = cop(la_rebaja),
+    `Menor precio en` = menor_precio_en,
+    `¿Precio promocional?` = if_else(menor_precio_en_promocion == 1, "Sí", "No"),
+    `Diferencia vs. máximo` = cop(diferencia_vs_max)
+  ) %>%
+  kable(caption = "Precio por presentación idéntica y comercio (COP)", align = "lrrrlcr")
+
+# Los empates en el menor precio cuentan para cada comercio empatado
+menor_por_comercio <- tibble(comercio = c("CAFAM", "LA ALEMANA", "LA REBAJA")) %>%
+  mutate(presentaciones_con_menor_precio = map_int(
+    comercio, ~ sum(str_detect(comp_41$menor_precio_en, fixed(.x)))
+  ))
+kable(menor_por_comercio, caption = "Presentaciones en que cada comercio ofrece el menor precio")
+```
+
+La Alemana tiene el menor precio en 6 de las 10 presentaciones, La Rebaja en 2 y Cafam en 2. No hay empates en el mínimo. Dos de los menores precios son promocionales (Complejo B en La Rebaja y Kola Granulada de 135 g en Cafam), así que esa ventaja depende de que la promoción siga vigente.
+
+### 4.2 Mismo producto en diferentes presentaciones
+
+$$\text{Precio por unidad} = \frac{\text{Precio del empaque (COP)}}{\text{Contenido total}}$$
+
+Hay dos familias con tamaños distintos en los tres comercios. Kola Granulada Tarrito Rojo fresa (135 g y 380 g) se compara en COP por gramo y Centrum Silver Women (30 y 60 tabletas) en COP por tableta. Cada familia se ordena por separado para no mezclar unidades en un mismo ranking.
+
+```{r comparacion_42}
+sql_42 <- "
+  WITH p AS (
+    SELECT *
+    FROM v_precios_comparables
+    WHERE id_ejecucion = ?
+      AND familia IN (SELECT familia FROM productos_comparables
+                      GROUP BY familia HAVING COUNT(*) > 1)
+  )
+  SELECT familia, producto, presentacion, comercio, precio, contenido, unidad,
+         precio_unitario,
+         RANK() OVER (PARTITION BY familia ORDER BY precio_unitario) AS puesto
+  FROM p
+  ORDER BY familia, precio_unitario
+"
+comp_42 <- dbGetQuery(con, sql_42, params = list(id_ejec))
+
+comp_42 %>%
+  transmute(
+    Producto = producto,
+    Presentación = presentacion,
+    Comercio = comercio,
+    `Precio (COP)` = cop(precio),
+    `Precio por unidad` = paste0(cop_dec(precio_unitario, 1), " / ", unidad),
+    Puesto = puesto
+  ) %>%
+  kable(caption = "Precio por unidad de contenido dentro de cada familia (puesto 1 = menor precio por unidad)",
+        align = "lllrrc")
+
+sql_42b <- "
+  WITH p AS (
+    SELECT * FROM v_precios_comparables WHERE id_ejecucion = ?
+  ),
+  tam AS (
+    SELECT familia, MIN(contenido) AS c_peq, MAX(contenido) AS c_gde
+    FROM productos_comparables
+    GROUP BY familia
+    HAVING COUNT(*) > 1
+  ),
+  x AS (
+    SELECT p.familia, p.producto, p.comercio, p.unidad,
+           MAX(CASE WHEN p.contenido = tam.c_peq THEN p.presentacion END) AS presentacion_peq,
+           MAX(CASE WHEN p.contenido = tam.c_gde THEN p.presentacion END) AS presentacion_gde,
+           MAX(CASE WHEN p.contenido = tam.c_peq THEN p.precio END) AS precio_peq,
+           MAX(CASE WHEN p.contenido = tam.c_gde THEN p.precio END) AS precio_gde,
+           MAX(CASE WHEN p.contenido = tam.c_peq THEN p.precio_unitario END) AS pu_peq,
+           MAX(CASE WHEN p.contenido = tam.c_gde THEN p.precio_unitario END) AS pu_gde
+    FROM p
+    JOIN tam ON tam.familia = p.familia
+    GROUP BY p.familia, p.comercio
+  )
+  SELECT familia, producto, comercio, unidad, presentacion_peq, presentacion_gde,
+         precio_peq, precio_gde, pu_peq, pu_gde,
+         ROUND(100.0 * (pu_peq - pu_gde) / pu_peq, 1) AS ahorro_unitario_pct,
+         precio_gde - precio_peq AS desembolso_adicional
+  FROM x
+  ORDER BY familia, comercio
+"
+comp_42b <- dbGetQuery(con, sql_42b, params = list(id_ejec))
+
+comp_42b %>%
+  transmute(
+    Producto = producto,
+    Comercio = comercio,
+    `Pequeña` = paste0(presentacion_peq, ": ", cop(precio_peq), " (", cop_dec(pu_peq, 1), " / ", unidad, ")"),
+    `Grande` = paste0(presentacion_gde, ": ", cop(precio_gde), " (", cop_dec(pu_gde, 1), " / ", unidad, ")"),
+    `Ahorro por unidad con la grande` = paste0(num1(ahorro_unitario_pct), " %"),
+    `Desembolso adicional de la grande` = cop(desembolso_adicional)
+  ) %>%
+  kable(caption = "Presentación grande frente a la pequeña en cada comercio", align = "llrrrr")
+```
+
+En Centrum Silver Women, el frasco de 60 tabletas cuesta entre 13,1 % y 14,9 % menos por tableta en los tres comercios, a cambio de unos \$40.000 más de desembolso. En Kola Granulada, el tarro de 380 g es cerca de 18 % más barato por gramo en La Alemana y La Rebaja. En Cafam la relación se invierte porque el tarro de 135 g está en promoción (\$9.730, frente a \$13.900 antes del descuento): queda en \$72,1 por gramo, el menor de la familia.
+
+El menor precio por unidad y el menor desembolso son, por tanto, conclusiones distintas.
+
+### 4.3 Ahorro potencial
+
+$$\text{Ahorro (COP)} = P_{\max} - P_{\min}, \qquad \text{Ahorro (\%)} = 100\,\frac{P_{\max} - P_{\min}}{P_{\max}}$$
+
+El ahorro de cada presentación se calcula en la pregunta 4 (sección 6).
+
+Para comparar comercios en conjunto se usa una canasta con exactamente las mismas presentaciones, todas con precio en los tres comercios y en la misma ejecución. No se usan promedios de surtidos distintos.
+
+```{r canasta_43}
+sql_43b <- "
+  WITH p AS (
+    SELECT * FROM v_precios_comparables
+    WHERE id_ejecucion = ?
+      AND id_producto IN (SELECT id_producto FROM v_precios_comparables
+                          WHERE id_ejecucion = ?
+                          GROUP BY id_producto
+                          HAVING COUNT(DISTINCT comercio) = 3)
+  )
+  SELECT comercio AS opcion, COUNT(*) AS presentaciones, SUM(precio) AS total
+  FROM p
+  GROUP BY comercio
+  UNION ALL
+  SELECT 'COMBINANDO COMERCIOS', COUNT(*), SUM(precio_min)
+  FROM (SELECT id_producto, MIN(precio) AS precio_min FROM p GROUP BY id_producto)
+  ORDER BY total
+"
+canasta <- dbGetQuery(con, sql_43b, params = list(id_ejec, id_ejec))
+total_combinado <- canasta$total[canasta$opcion == "COMBINANDO COMERCIOS"]
+
+canasta %>%
+  mutate(
+    ahorro_combinando = total - total_combinado,
+    ahorro_combinando_pct = round(100 * ahorro_combinando / total, 1)
+  ) %>%
+  transmute(
+    `Opción de compra` = opcion,
+    Presentaciones = presentaciones,
+    `Total canasta` = cop(total),
+    `Ahorro al combinar comercios (COP)` = cop(ahorro_combinando),
+    `Ahorro al combinar comercios (%)` = num1(ahorro_combinando_pct)
+  ) %>%
+  kable(caption = "Canasta con una unidad de cada presentación comparable", align = "lrrrr")
+```
+
+El resultado de la canasta vale para estas 10 presentaciones y esta captura; no se extiende al resto de la categoría.
+
+### 4.4 Cambios de precio entre ejecuciones
+
+```{r cambios_precio}
+sql_44 <- "
+  WITH e AS (
+    SELECT id_ejecucion
+    FROM ejecuciones
+    GROUP BY id_ejecucion
+    HAVING COUNT(DISTINCT comercio) = 3 AND SUM(estado = 'fallida') = 0
+  ),
+  ext AS (
+    SELECT MIN(id_ejecucion) AS primera, MAX(id_ejecucion) AS ultima FROM e
+  )
+  SELECT a.nombre_corto, a.comercio,
+         a.precio AS precio_primera, b.precio AS precio_ultima,
+         b.precio - a.precio AS cambio_cop,
+         ROUND(100.0 * (b.precio - a.precio) / a.precio, 1) AS cambio_pct
+  FROM v_precios_comparables a
+  JOIN v_precios_comparables b ON b.id_producto = a.id_producto AND b.comercio = a.comercio
+  JOIN ext ON a.id_ejecucion = ext.primera AND b.id_ejecucion = ext.ultima
+  WHERE ext.primera < ext.ultima
+  ORDER BY ABS(b.precio - a.precio) DESC, a.nombre_corto
+"
+cambios <- dbGetQuery(con, sql_44)
+
+cambios %>%
+  filter(cambio_cop != 0) %>%
+  mutate(
+    precio_primera = cop(precio_primera),
+    precio_ultima = cop(precio_ultima),
+    cambio_cop = if_else(cambio_cop < 0, paste0("-", cop(-cambio_cop)), paste0("+", cop(cambio_cop))),
+    cambio_pct = num1(cambio_pct)
+  ) %>%
+  kable(caption = "Presentaciones comparables cuyo precio cambió entre la primera y la última ejecución",
+        align = "llrrrr")
+```
+
+Cambiaron `r sum(cambios$cambio_cop != 0)` de los `r nrow(cambios)` precios comparables. Cebion gotas en La Alemana subió 25,3 % al terminar su promoción. Sigue siendo el menor precio de esa presentación, pero el ahorro frente al más caro bajó de 26,4 % a 7,8 %.
+
+## 5. Base de datos SQLite
+
+### 5.1 Estructura y relaciones
+
+Las tablas que llena `scraper.R` guardan lo extraído. Las que reconstruye este documento guardan lo derivado de la limpieza.
+
+| Objeto | Tipo | Una fila por | Clave | Lo llena |
+|---|---|---|---|---|
+| `ejecuciones` | tabla | corrida del scraper y comercio | `(id_ejecucion, comercio)` | `scraper.R` |
+| `historico_productos` | tabla | observación de precio | `id_observacion`; única `(comercio, enlace, fecha_extraccion)` | `scraper.R` |
+| `anuncios` | tabla | producto tal como aparece en un comercio | `(comercio, enlace)` | limpieza (sección 2) |
+| `productos_comparables` | tabla | presentación comparable (identificador común) | `id_producto` | limpieza (sección 2.5) |
+| `v_observaciones` | vista | observación con su anuncio e indicadores | — | — |
+| `v_precios_comparables` | vista | ejecución, comercio y presentación comparable | — | — |
+
+Relaciones:
+
+- `historico_productos (id_ejecucion, comercio)` → `ejecuciones (id_ejecucion, comercio)`: cada observación pertenece a una ejecución registrada.
+- `historico_productos (comercio, enlace)` → `anuncios (comercio, enlace)`: cada observación corresponde a un anuncio.
+- `anuncios.id_producto` → `productos_comparables.id_producto`: el identificador común entre comercios. Es `NULL` si el anuncio no es comparable.
+
+**Carga.** `cargar_comercio()` registra la ejecución con su estado (`completa`, `parcial` o `fallida`) antes de insertar las observaciones con `INSERT OR IGNORE` (sección 1.2). Una ejecución es parcial en tres casos: si alguna página quedó sin datos, si se obtuvieron menos productos que el total del sitio o, cuando el sitio no muestra total, si la última página está llena (el listado podría continuar).
+
+```{r estructura_bd}
+objetos <- dbGetQuery(con, "
+  SELECT type AS tipo, name AS nombre
+  FROM sqlite_master
+  WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'
+  ORDER BY type, name
+")
+objetos$filas <- map_int(objetos$nombre, function(nombre) {
+  as.integer(dbGetQuery(con, paste0("SELECT COUNT(*) AS n FROM ", nombre))$n)
+})
+kable(objetos, caption = "Tablas y vistas de comparador_precios.sqlite")
+```
+
+### 5.2 Campos exigidos
+
+| Campo o grupo | Dónde está |
+|---|---|
+| Comercio | `historico_productos.comercio` |
+| Producto (identificación común) | `productos_comparables.id_producto`, asignado a cada anuncio en `anuncios.id_producto` |
+| Marca y subcategoría | `productos_comparables.marca` y `.subcategoria` (comparables); `anuncios.marca_std` y `.subcategoria` (toda la categoría) |
+| Presentación | `productos_comparables.presentacion`, `.contenido` y `.unidad`; `anuncios.cantidad` y `.unidad` |
+| Precio | `historico_productos.precio_num` (COP); el texto publicado queda en `precio` |
+| Promoción | `historico_productos.promocion` y `precio_sin_promo_num` (precio antes del descuento) |
+| URL de extracción | `historico_productos.enlace` |
+| Identificador interno (SKU o código) | `anuncios.codigo_producto`, tomado de la URL cuando el sitio lo incluye |
+| Texto original del anuncio | `historico_productos.n_producto`, `marca` y `contenido`, sin limpieza |
+| Fecha y hora de consulta | `historico_productos.fecha_extraccion`, ISO 8601 con hora de Colombia (obligatoria, `NOT NULL`) |
+| Comparable | `anuncios.comparable` y `v_observaciones.comparable` |
+| Ejecución | `historico_productos.id_ejecucion` → `ejecuciones` |
+
+### 5.3 Ejecuciones y validaciones
+
+```{r ejecuciones_bd}
+sql_carga_ejecuciones <- "
+  SELECT e.id_ejecucion, e.comercio, e.estado,
+         e.n_registros AS registros_obtenidos,
+         COUNT(h.id_observacion) AS observaciones_en_base,
+         e.n_registros - COUNT(h.id_observacion) AS no_insertadas_por_repetidas
+  FROM ejecuciones e
+  LEFT JOIN historico_productos h
+    ON h.id_ejecucion = e.id_ejecucion AND h.comercio = e.comercio
+  GROUP BY e.id_ejecucion, e.comercio
+  ORDER BY e.id_ejecucion, e.comercio
+"
+kable(dbGetQuery(con, sql_carga_ejecuciones), caption = "Registros obtenidos y cargados por ejecución y comercio")
+
+sql_validaciones <- "
+  SELECT 'Integridad del archivo (PRAGMA integrity_check)' AS validacion,
+         CAST((SELECT integrity_check FROM pragma_integrity_check) AS TEXT) AS resultado,
+         'ok' AS esperado
+  UNION ALL
+  SELECT 'Claves foráneas sin correspondencia (PRAGMA foreign_key_check)',
+         CAST((SELECT COUNT(*) FROM pragma_foreign_key_check) AS TEXT), '0'
+  UNION ALL
+  SELECT 'Observaciones repetidas en la clave única (comercio, enlace, fecha)',
+         CAST((SELECT COUNT(*) FROM (SELECT 1 FROM historico_productos
+               GROUP BY comercio, enlace, fecha_extraccion HAVING COUNT(*) > 1)) AS TEXT), '0'
+  UNION ALL
+  SELECT 'Observaciones sin fecha y hora de consulta',
+         CAST((SELECT COUNT(*) FROM historico_productos WHERE fecha_extraccion IS NULL) AS TEXT), '0'
+  UNION ALL
+  SELECT 'Fechas fuera del formato ISO 8601 con hora de Colombia',
+         CAST((SELECT COUNT(*) FROM historico_productos WHERE fecha_extraccion NOT GLOB
+               '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]-05:00') AS TEXT), '0'
+  UNION ALL
+  SELECT 'Observaciones sin URL de extracción',
+         CAST((SELECT COUNT(*) FROM historico_productos WHERE enlace IS NULL OR enlace = '') AS TEXT), '0'
+  UNION ALL
+  SELECT 'Observaciones sin ejecución registrada',
+         CAST((SELECT COUNT(*) FROM historico_productos h LEFT JOIN ejecuciones e
+               ON e.id_ejecucion = h.id_ejecucion AND e.comercio = h.comercio
+               WHERE e.id_ejecucion IS NULL) AS TEXT), '0'
+  UNION ALL
+  SELECT 'Observaciones sin anuncio en la tabla anuncios',
+         CAST((SELECT COUNT(*) FROM historico_productos h LEFT JOIN anuncios a
+               ON a.comercio = h.comercio AND a.enlace = h.enlace
+               WHERE a.enlace IS NULL) AS TEXT), '0'
+  UNION ALL
+  SELECT 'Presentaciones con precio en los tres comercios (ejecución analizada)',
+         CAST((SELECT COUNT(*) FROM (SELECT id_producto FROM v_precios_comparables
+               WHERE id_ejecucion = ? GROUP BY id_producto
+               HAVING COUNT(DISTINCT comercio) = 3)) AS TEXT), 'al menos 8'
+  UNION ALL
+  SELECT 'Observaciones comparables (ejecución analizada)',
+         CAST((SELECT COUNT(*) FROM v_precios_comparables WHERE id_ejecucion = ?) AS TEXT), 'al menos 24'
+"
+validaciones <- dbGetQuery(con, sql_validaciones, params = list(id_ejec, id_ejec))
+kable(validaciones, caption = "Validaciones de la base de datos")
+```
+
+Todas las validaciones se cumplen. La diferencia entre registros obtenidos y cargados corresponde a lecturas repetidas del mismo anuncio con la misma fecha y hora, casi todas de La Rebaja, que la restricción de unicidad no admite.
+
+
+## 6. Preguntas respondidas con SQL
+
+Las preguntas 2 a 6 usan la ejecución analizada (`r id_ejec`).
+
+### Pregunta 1. ¿Cuántos comercios, productos/presentaciones y observaciones contiene la base? ¿Cuántos productos aporta cada comercio?
+
+```{r q1}
+sql_q1a <- "
+  SELECT
+    (SELECT COUNT(DISTINCT comercio) FROM historico_productos) AS comercios,
+    (SELECT COUNT(DISTINCT id_ejecucion) FROM ejecuciones) AS ejecuciones,
+    (SELECT COUNT(DISTINCT producto) FROM productos_comparables) AS productos_comparables,
+    (SELECT COUNT(*) FROM productos_comparables) AS presentaciones_comparables,
+    (SELECT COUNT(*) FROM anuncios) AS anuncios_extraidos,
+    (SELECT COUNT(*) FROM anuncios WHERE motivo_descarte IS NULL) AS productos_en_categoria,
+    (SELECT COUNT(*) FROM historico_productos) AS observaciones
+"
+q1a <- dbGetQuery(con, sql_q1a)
+kable(q1a, caption = "Contenido de la base")
+
+sql_q1b <- "
+  SELECT a.comercio,
+         COUNT(*) AS anuncios_extraidos,
+         SUM(a.motivo_descarte IS NULL) AS productos_en_categoria,
+         SUM(a.comparable) AS presentaciones_comparables,
+         (SELECT COUNT(*) FROM historico_productos h WHERE h.comercio = a.comercio) AS observaciones
+  FROM anuncios a
+  GROUP BY a.comercio
+  ORDER BY productos_en_categoria DESC
+"
+q1b <- dbGetQuery(con, sql_q1b)
+kable(q1b, caption = "Productos aportados por cada comercio")
+```
+
+De los `r entero(q1a$anuncios_extraidos)` anuncios extraídos, `r entero(q1a$productos_en_categoria)` pertenecen a la categoría. `r str_to_title(q1b$comercio[1])` aporta la oferta más amplia (`r entero(q1b$productos_en_categoria[1])` productos), y los tres comercios aportan las `r q1a$presentaciones_comparables` presentaciones comparables.
+
+### Pregunta 2. ¿Se obtuvieron al menos 24 observaciones comparables en una misma ejecución? ¿Hay registros repetidos del mismo producto y comercio?
+
+```{r q2}
+sql_q2a <- "
+  SELECT id_ejecucion,
+         COUNT(*) AS observaciones_comparables,
+         COUNT(DISTINCT id_producto || '|' || comercio) AS pares_presentacion_comercio,
+         COUNT(DISTINCT id_producto) AS presentaciones,
+         COUNT(DISTINCT comercio) AS comercios,
+         CASE WHEN COUNT(DISTINCT id_producto || '|' || comercio) >= 24
+              THEN 'Sí' ELSE 'No' END AS cumple_minimo_24
+  FROM v_observaciones
+  WHERE comparable = 1
+  GROUP BY id_ejecucion
+  ORDER BY id_ejecucion
+"
+kable(dbGetQuery(con, sql_q2a), caption = "Observaciones comparables por ejecución")
+
+sql_q2b <- "
+  SELECT comercio,
+         COUNT(*) AS anuncios_repetidos,
+         SUM(n - 1) AS lecturas_adicionales,
+         SUM(comparable) AS repetidos_comparables,
+         SUM(precios_distintos > 1) AS con_precios_distintos
+  FROM (
+    SELECT comercio, enlace, COUNT(*) AS n, MAX(comparable) AS comparable,
+           COUNT(DISTINCT precio_num) AS precios_distintos
+    FROM v_observaciones
+    WHERE id_ejecucion = ?
+      AND COALESCE(motivo_descarte, '') NOT IN ('enlace_no_es_producto', 'enlace_ambiguo')
+    GROUP BY comercio, enlace
+    HAVING COUNT(*) > 1
+  )
+  GROUP BY comercio
+"
+repetidos <- dbGetQuery(con, sql_q2b, params = list(id_ejec))
+kable(repetidos, caption = "Anuncios con más de una observación en la ejecución analizada")
+```
+
+Se cumple el mínimo en las dos ejecuciones, con 30 observaciones comparables en cada una. En la ejecución analizada ningún anuncio tiene más de una observación. Las lecturas repetidas de un anuncio en la misma página comparten fecha y hora, así que la restricción de unicidad no las admite (sección 5.3).
+
+### Pregunta 3. Para cada presentación comparable, ¿cuáles son el precio mínimo, máximo y promedio? ¿Qué comercio ofrece el menor precio?
+
+```{r q3}
+sql_q3 <- "
+  WITH p AS (
+    SELECT * FROM v_precios_comparables WHERE id_ejecucion = ?
+  ),
+  r AS (
+    SELECT id_producto, MIN(precio) AS precio_min, MAX(precio) AS precio_max,
+           AVG(precio) AS precio_promedio
+    FROM p
+    GROUP BY id_producto
+  )
+  SELECT p.id_producto, p.nombre_corto,
+         r.precio_min, r.precio_max, ROUND(r.precio_promedio) AS precio_promedio,
+         GROUP_CONCAT(CASE WHEN p.precio = r.precio_min THEN p.comercio END, ' = ') AS comercio_menor_precio,
+         CASE WHEN SUM(p.precio = r.precio_min) > 1 THEN 'Sí' ELSE 'No' END AS hay_empate
+  FROM p
+  JOIN r ON r.id_producto = p.id_producto
+  GROUP BY p.id_producto
+  ORDER BY p.id_producto
+"
+q3 <- dbGetQuery(con, sql_q3, params = list(id_ejec))
+q3 %>%
+  mutate(across(starts_with("precio"), cop)) %>%
+  kable(caption = "Precio mínimo, máximo y promedio por presentación (COP)", align = "llrrrlc")
+```
+
+No hay empates en el precio mínimo. Con tres precios por presentación, el promedio es sensible a un valor extremo. En Vitacerebrina, por ejemplo, queda cerca del máximo (\$59.767) porque solo un comercio la vende barata, así que el promedio no indica dónde comprar.
+
+### Pregunta 4. ¿Cuál es el ahorro en COP y en porcentaje al elegir la oferta más económica de cada presentación?
+
+```{r q4}
+sql_q4 <- "
+  WITH p AS (
+    SELECT * FROM v_precios_comparables WHERE id_ejecucion = ?
+  ),
+  r AS (
+    SELECT id_producto, MIN(precio) AS precio_min, MAX(precio) AS precio_max
+    FROM p
+    GROUP BY id_producto
+  )
+  SELECT p.id_producto, p.nombre_corto,
+         GROUP_CONCAT(CASE WHEN p.precio = r.precio_min THEN p.comercio END, ' = ') AS comprar_en,
+         GROUP_CONCAT(CASE WHEN p.precio = r.precio_max THEN p.comercio END, ' = ') AS precio_mas_alto_en,
+         r.precio_max - r.precio_min AS ahorro_cop,
+         ROUND(100.0 * (r.precio_max - r.precio_min) / r.precio_max, 1) AS ahorro_pct
+  FROM p
+  JOIN r ON r.id_producto = p.id_producto
+  GROUP BY p.id_producto
+  ORDER BY p.id_producto
+"
+q4 <- dbGetQuery(con, sql_q4, params = list(id_ejec))
+q4 %>%
+  mutate(ahorro_cop = cop(ahorro_cop), ahorro_pct = num1(ahorro_pct)) %>%
+  kable(caption = "Ahorro al elegir la oferta más económica", align = "llllrr")
+```
+
+El ahorro va de \$1.500 a \$12.430 por presentación. Comprar una unidad de cada presentación en el comercio más barato, y no en el más caro, ahorra \$`r entero(sum(q4$ahorro_cop))` en total.
+
+### Pregunta 5. ¿Qué presentación y comercio tienen el menor precio por unidad de contenido?
+
+Solo aplica a las dos familias con tamaños distintos (sección 4.2). Los mg que aparecen en los nombres indican la concentración del principio activo, no el contenido del empaque, así que no se usan como unidad.
+
+```{r q5}
+sql_q5 <- "
+  WITH p AS (
+    SELECT * FROM v_precios_comparables
+    WHERE id_ejecucion = ?
+      AND familia IN (SELECT familia FROM productos_comparables
+                      GROUP BY familia HAVING COUNT(*) > 1)
+  ),
+  r AS (
+    SELECT p.*, RANK() OVER (PARTITION BY familia ORDER BY precio_unitario) AS puesto
+    FROM p
+  )
+  SELECT familia, nombre_corto, comercio, precio, contenido, unidad,
+         ROUND(precio_unitario, 2) AS precio_por_unidad
+  FROM r
+  WHERE puesto = 1
+  ORDER BY familia
+"
+dbGetQuery(con, sql_q5, params = list(id_ejec)) %>%
+  mutate(precio = cop(precio), precio_por_unidad = cop_dec(precio_por_unidad, 2)) %>%
+  kable(caption = "Menor precio por unidad de contenido en cada familia de tamaños", align = "lllrrlr")
+```
+
+En Kola Granulada, el mínimo por gramo se debe a una promoción. Sin ella, el más económico sería el tarro de 380 g de La Alemana (\$78,16 por gramo).
+
+### Pregunta 6. ¿Cuáles son las mayores diferencias de precio entre comercios?
+
+```{r q6}
+sql_q6a <- "
+  WITH p AS (
+    SELECT * FROM v_precios_comparables WHERE id_ejecucion = ?
+  ),
+  r AS (
+    SELECT id_producto, MIN(precio) AS precio_min, MAX(precio) AS precio_max
+    FROM p
+    GROUP BY id_producto
+  )
+  SELECT RANK() OVER (ORDER BY 1.0 * (r.precio_max - r.precio_min) / r.precio_max DESC) AS puesto,
+         p.nombre_corto,
+         GROUP_CONCAT(CASE WHEN p.precio = r.precio_max THEN p.comercio END, ' = ') AS mas_caro_en,
+         GROUP_CONCAT(CASE WHEN p.precio = r.precio_min THEN p.comercio END, ' = ') AS mas_barato_en,
+         r.precio_max - r.precio_min AS diferencia_cop,
+         ROUND(100.0 * (r.precio_max - r.precio_min) / r.precio_max, 1) AS ahorro_pct,
+         MAX(CASE WHEN p.precio = r.precio_min THEN p.promocion ELSE 0 END) AS menor_es_promocion
+  FROM p
+  JOIN r ON r.id_producto = p.id_producto
+  GROUP BY p.id_producto
+  ORDER BY puesto
+"
+q6 <- dbGetQuery(con, sql_q6a, params = list(id_ejec))
+q6 %>%
+  mutate(diferencia_cop = cop(diferencia_cop), ahorro_pct = num1(ahorro_pct)) %>%
+  kable(caption = "Presentaciones ordenadas por ahorro porcentual", align = "clllrrc")
+
+# Comparación directa entre cada par de comercios sobre las mismas presentaciones
+sql_q6b <- "
+  WITH p AS (
+    SELECT id_producto, comercio, precio FROM v_precios_comparables WHERE id_ejecucion = ?
+  )
+  SELECT a.comercio AS comercio_a, b.comercio AS comercio_b,
+         COUNT(*) AS presentaciones,
+         SUM(a.precio < b.precio) AS a_mas_barato,
+         SUM(a.precio > b.precio) AS b_mas_barato,
+         SUM(a.precio = b.precio) AS empates,
+         ROUND(AVG(100.0 * (a.precio - b.precio) / b.precio), 1) AS diferencia_media_pct
+  FROM p a
+  JOIN p b ON b.id_producto = a.id_producto AND a.comercio < b.comercio
+  GROUP BY a.comercio, b.comercio
+  ORDER BY a.comercio, b.comercio
+"
+dbGetQuery(con, sql_q6b, params = list(id_ejec)) %>%
+  mutate(diferencia_media_pct = num1(diferencia_media_pct)) %>%
+  kable(caption = "Comparación por pares de comercios (diferencia media = cuánto más caro es A que B, en %)")
+```
+
+Las dos mayores diferencias porcentuales (Kola Granulada de 135 g y Complejo B) corresponden a precios promocionales; la tercera, Vitacerebrina, no. En la comparación por pares, La Alemana es más barata que cada uno de los otros dos comercios en 8 de 10 presentaciones. Cafam y La Rebaja quedan prácticamente empatados (diferencia media de −0,1 %).
+
+### Pregunta 7. ¿Qué datos faltantes o inconsistentes afectan la comparación y cuántos son?
+
+```{r q7}
+sql_q7 <- "
+  SELECT 'Observaciones con precio ausente (el sitio mostraba precio cero)' AS problema,
+         COUNT(*) AS registros, COALESCE(SUM(comparable), 0) AS en_comparables
+  FROM v_observaciones WHERE precio_num IS NULL
+  UNION ALL
+  SELECT 'Observaciones sin precio antes del descuento (sin promoción visible)',
+         COUNT(*), COALESCE(SUM(comparable), 0)
+  FROM v_observaciones WHERE precio_sin_promo_num IS NULL
+  UNION ALL
+  SELECT 'Precio antes del descuento menor que el de venta (inconsistente)',
+         COUNT(*), COALESCE(SUM(comparable), 0)
+  FROM v_observaciones WHERE precio_sin_promo_num < precio_num
+  UNION ALL
+  SELECT 'Descuento aparente mayor al 60 % (precio antes del descuento dudoso)',
+         COUNT(*), COALESCE(SUM(comparable), 0)
+  FROM v_observaciones WHERE precio_sin_promo_num > 2.5 * precio_num
+  UNION ALL
+  SELECT 'Observaciones con el campo de contenido vacío en el sitio',
+         COUNT(*), COALESCE(SUM(comparable), 0)
+  FROM v_observaciones WHERE contenido IS NULL
+  UNION ALL
+  SELECT 'Lecturas repetidas del mismo anuncio en una ejecución',
+         COALESCE(SUM(n - 1), 0), COALESCE(SUM(CASE WHEN comparable = 1 THEN n - 1 ELSE 0 END), 0)
+  FROM (
+    SELECT id_ejecucion, comercio, enlace, COUNT(*) AS n, MAX(comparable) AS comparable
+    FROM v_observaciones
+    WHERE COALESCE(motivo_descarte, '') NOT IN ('enlace_no_es_producto', 'enlace_ambiguo')
+    GROUP BY id_ejecucion, comercio, enlace
+  )
+  UNION ALL
+  SELECT 'Anuncios con enlace inválido (descartados)', COUNT(*), COALESCE(SUM(comparable), 0)
+  FROM anuncios WHERE motivo_descarte IN ('enlace_no_es_producto', 'enlace_ambiguo')
+  UNION ALL
+  SELECT 'Anuncios fuera de la categoría (descartados)', COUNT(*), COALESCE(SUM(comparable), 0)
+  FROM anuncios WHERE motivo_descarte = 'fuera_de_categoria'
+  UNION ALL
+  SELECT 'Anuncios de la categoría sin contenido identificable', COUNT(*), COALESCE(SUM(comparable), 0)
+  FROM anuncios WHERE motivo_descarte IS NULL AND cantidad IS NULL
+  UNION ALL
+  SELECT 'Anuncios de la categoría sin marca', COUNT(*), COALESCE(SUM(comparable), 0)
+  FROM anuncios WHERE motivo_descarte IS NULL AND (marca IS NULL OR TRIM(marca) = '')
+"
+q7 <- dbGetQuery(con, sql_q7)
+kable(q7, caption = "Datos faltantes o inconsistentes (en_comparables = cuántos tocan las presentaciones comparables)")
+
+n_comparables <- dbGetQuery(con, "SELECT COUNT(*) AS n FROM v_observaciones WHERE comparable = 1")$n
+```
+
+Las presentaciones comparables no tienen precios ausentes ni inconsistentes. Sí tienen dos limitaciones:
+
+- `r q7$en_comparables[2]` de las `r n_comparables` observaciones comparables de las dos ejecuciones no publican precio antes del descuento, así que una promoción solo puede identificarse en las demás.
+- La Alemana no publica el campo de contenido. Su contenido se toma del nombre y se revisó en la correspondencia de la sección 2.5.
+
+En el resto de la categoría hay `r q7$registros[3] + q7$registros[4]` precios antes del descuento inconsistentes o dudosos. Por eso el indicador de promoción debe leerse con cautela.
+
+### Pregunta 8. ¿Cuántos productos de la categoría se obtuvieron por comercio y ejecución? ¿Qué proporción tiene descripción, marca y contenido identificables?
+
+```{r q8}
+sql_q8a <- "
+  WITH u AS (
+    SELECT DISTINCT id_ejecucion, comercio, enlace
+    FROM v_observaciones
+    WHERE motivo_descarte IS NULL
+  )
+  SELECT u.id_ejecucion, u.comercio,
+         COUNT(*) AS productos,
+         ROUND(100.0 * SUM(a.n_producto IS NOT NULL AND TRIM(a.n_producto) <> '') / COUNT(*), 1) AS pct_con_descripcion,
+         ROUND(100.0 * SUM(a.marca IS NOT NULL AND TRIM(a.marca) <> '') / COUNT(*), 1) AS pct_con_marca,
+         ROUND(100.0 * SUM(a.cantidad IS NOT NULL) / COUNT(*), 1) AS pct_con_contenido,
+         ROUND(100.0 * SUM(a.subcategoria <> 'Otros suplementos') / COUNT(*), 1) AS pct_con_subcategoria
+  FROM u
+  JOIN anuncios a ON a.comercio = u.comercio AND a.enlace = u.enlace
+  GROUP BY u.id_ejecucion, u.comercio
+  ORDER BY u.id_ejecucion, productos DESC
+"
+dbGetQuery(con, sql_q8a) %>%
+  mutate(across(starts_with("pct"), num1)) %>%
+  kable(caption = "Productos de la categoría por comercio y ejecución (porcentajes)")
+
+sql_q8b <- "
+  SELECT subcategoria,
+         SUM(comercio = 'CAFAM') AS cafam,
+         SUM(comercio = 'LA ALEMANA') AS la_alemana,
+         SUM(comercio = 'LA REBAJA') AS la_rebaja,
+         COUNT(*) AS total
+  FROM anuncios
+  WHERE motivo_descarte IS NULL
+  GROUP BY subcategoria
+  ORDER BY total DESC
+"
+kable(dbGetQuery(con, sql_q8b), caption = "Productos de la categoría por subcategoría y comercio")
+```
+
+Las dos ejecuciones llegaron al final del listado de cada comercio (sección 1.2). Entre el 11 y el 13 de octubre la oferta se mantuvo en La Alemana y La Rebaja. En Cafam aumentó porque su buscador devolvió 283 productos en la primera ejecución y 400 en la segunda.
+
+La oferta más amplia de La Alemana se explica en parte por su composición: 151 de sus 647 productos son alimentos, fórmulas nutricionales o productos deportivos. En vitamina C y multivitamínicos la oferta de los tres comercios es similar.
+
+El 99,8 % o más de los productos tiene nombre y marca. La descripción corresponde al título del anuncio, porque no se recolectó la ficha técnica.
+
+
+## 7. Visualización e interpretación
+
+Los valores exactos de cada gráfico están en las tablas de las secciones 4 y 6.
+
+### 7.1 Precio de las mismas presentaciones entre comercios
+
+```{r grafico_precios, fig.width=8.5, fig.height=5.2}
+datos_g1 <- dbGetQuery(con, "
+  SELECT id_producto, nombre_corto, comercio, precio
+  FROM v_precios_comparables
+  WHERE id_ejecucion = ?
+", params = list(id_ejec))
+
+orden_g1 <- datos_g1 %>%
+  group_by(nombre_corto) %>%
+  summarise(precio_min = min(precio), precio_max = max(precio), .groups = "drop") %>%
+  arrange(precio_min) %>%
+  mutate(fila = row_number())
+
+# Cada comercio en su propio carril dentro de la fila, para que los empates no se oculten
+carril <- c("CAFAM" = 0.22, "LA ALEMANA" = 0, "LA REBAJA" = -0.22)
+datos_g1 <- datos_g1 %>%
+  left_join(orden_g1, by = "nombre_corto") %>%
+  mutate(y = fila + unname(carril[comercio]))
+
+ggplot() +
+  geom_segment(data = orden_g1, aes(x = precio_min, xend = precio_max, y = fila, yend = fila),
+               color = "#e1e0d9", linewidth = 4, lineend = "round") +
+  geom_point(data = datos_g1, aes(x = precio, y = y, fill = comercio),
+             shape = 21, size = 3.2, color = "#fcfcfb", stroke = 0.7) +
+  scale_fill_manual(values = colores_comercio, labels = nombres_comercio) +
+  scale_y_continuous(breaks = orden_g1$fila, labels = orden_g1$nombre_corto,
+                     expand = expansion(add = 0.6)) +
+  scale_x_continuous(labels = miles_cop) +
+  labs(title = "Precio por presentación y comercio", x = "Precio del empaque (COP)", y = NULL) +
+  tema_graficos +
+  theme(panel.grid.major.y = element_blank())
+```
+
+La franja gris va del menor al mayor precio de cada presentación. El eje está en COP por empaque, así que muestra el desembolso, no el precio por unidad. Por eso las presentaciones caras tienen franjas más largas aunque su diferencia porcentual sea menor; la comparación relativa está en 7.3.
+
+### 7.2 Precio por unidad de contenido en presentaciones de distinto tamaño
+
+```{r grafico_unitario, fig.width=9, fig.height=4.2}
+orden_presentaciones <- productos_comparables %>%
+  arrange(familia, contenido) %>%
+  pull(presentacion) %>%
+  unique()
+
+# Un panel por familia: cada uno con su propia unidad (g o tableta)
+datos_g2 <- comp_42 %>%
+  mutate(
+    panel = paste0(producto, " (COP por ", unidad, ")"),
+    presentacion = factor(presentacion, levels = orden_presentaciones)
+  )
+
+ggplot(datos_g2, aes(x = presentacion, y = precio_unitario, fill = comercio)) +
+  geom_col(position = position_dodge(width = 0.82), width = 0.75) +
+  facet_wrap(~ panel, scales = "free") +
+  scale_fill_manual(values = colores_comercio, labels = nombres_comercio) +
+  scale_y_continuous(labels = function(x) paste0("$", formatC(x, format = "f", digits = 0, big.mark = ".", decimal.mark = ",")),
+                     expand = expansion(mult = c(0, 0.05))) +
+  labs(title = "Precio por unidad de contenido", x = NULL, y = "COP por unidad") +
+  tema_graficos +
+  theme(panel.grid.major.x = element_blank())
+```
+
+La presentación grande tiene menor precio por unidad en todos los casos, salvo el tarro de 135 g de Cafam, que está en promoción. El precio por unidad no considera el vencimiento ni el ritmo de consumo.
+
+### 7.3 Oportunidades de ahorro entre comercios
+
+```{r grafico_ahorro, fig.width=8.5, fig.height=4.8}
+datos_g3 <- comp_41 %>%
+  left_join(productos_comparables %>% select(id_producto, nombre_corto), by = "id_producto") %>%
+  mutate(
+    ahorro_pct = 100 * diferencia_vs_max / precio_max,
+    donde = if_else(n_con_menor_precio > 1, "Empate", menor_precio_en),
+    etiqueta = paste0(num1(ahorro_pct), " %")
+  )
+
+ggplot(datos_g3, aes(x = ahorro_pct, y = reorder(nombre_corto, ahorro_pct), fill = donde)) +
+  geom_col(width = 0.65) +
+  geom_text(aes(label = etiqueta), hjust = -0.1, size = 3.1, color = "#52514e") +
+  scale_fill_manual(values = colores_comercio, labels = nombres_comercio) +
+  scale_x_continuous(labels = function(x) paste0(x, " %"), expand = expansion(mult = c(0, 0.12))) +
+  labs(title = "Ahorro al comprar en el comercio más barato",
+       x = "Ahorro (% del precio más alto)", y = NULL, fill = "Menor precio en:") +
+  tema_graficos +
+  theme(panel.grid.major.y = element_blank(), legend.title = element_text(color = "#52514e"))
+```
+
+```{r grafico_canasta, fig.width=8.5, fig.height=2.8}
+datos_g4 <- canasta %>%
+  filter(opcion != "COMBINANDO COMERCIOS") %>%
+  mutate(nombre = unname(nombres_comercio[opcion]))
+
+ggplot(datos_g4, aes(x = total, y = reorder(nombre, -total), fill = opcion)) +
+  geom_col(width = 0.6) +
+  geom_vline(xintercept = total_combinado, color = "#0b0b0b", linewidth = 0.4) +
+  annotate("text", x = total_combinado, y = 3.45, hjust = 1.03, size = 3.1, color = "#0b0b0b",
+           label = "Combinando comercios") +
+  geom_text(aes(label = cop(total)), hjust = -0.08, size = 3.1, color = "#52514e") +
+  scale_fill_manual(values = colores_comercio, guide = "none") +
+  scale_x_continuous(labels = miles_cop, expand = expansion(mult = c(0, 0.15))) +
+  labs(title = "Costo de la canasta de 10 presentaciones", x = "Total (COP)", y = NULL) +
+  tema_graficos +
+  theme(panel.grid.major.y = element_blank())
+```
+
+Las dos barras más largas corresponden a precios promocionales. La tercera, Vitacerebrina (16,1 %), es la mayor diferencia sin promoción.
+
+En la canasta, comprar todo en La Alemana cuesta \$10.150 más que combinar comercios. Esa diferencia es menor que la que separa a La Alemana de La Rebaja (\$19.270) y de Cafam (\$29.700). La canasta incluye una unidad de cada presentación y no incluye costos de envío.
+
+### 7.4 Conclusión para el consumidor
+
+```{r recomendacion}
+comp_41 %>%
+  left_join(productos_comparables %>% select(id_producto, nombre_corto), by = "id_producto") %>%
+  transmute(
+    Presentación = nombre_corto,
+    `Dónde comprar` = str_to_title(menor_precio_en),
+    `Precio (COP)` = cop(precio_min),
+    `Ahorro frente al más caro` = paste0(cop(diferencia_vs_max), " (", num1(100 * diferencia_vs_max / precio_max), " %)"),
+    `Condición del menor precio` = if_else(menor_precio_en_promocion == 1, "Promoción", "Sin promoción visible")
+  ) %>%
+  kable(caption = "Dónde conviene comprar cada presentación", align = "llrrl")
+```
+
+- **Compra en un solo comercio:** La Alemana es la opción más económica para esta canasta.
+- **Compras puntuales:** La Rebaja tiene el menor precio en Complejo B y Aquasol E, y Cafam en Kola Granulada de 135 g (en promoción). En Ácido fólico, Cafam y La Alemana difieren en \$50.
+- **Presentación grande:** Centrum Silver Women x60 y Kola Granulada de 380 g reducen el precio por unidad, pero exigen un desembolso mayor. Solo convienen si el producto se consume antes de su vencimiento.
+- **Condiciones de compra:** dos de los menores precios son promocionales, y la promoción de Cebion en La Alemana terminó entre una ejecución y otra. Además, los precios no incluyen domicilio, que puede anular ahorros pequeños como el de combinar comercios.
+
+Un menor precio no implica recomendar sustituir un producto por otro: la comparación es solo entre presentaciones idénticas.
+
+
+## 8. Limitaciones y conclusiones
+
+### 8.1 Limitaciones
+
+- Las dos ejecuciones están separadas por dos días, así que solo permiten observar cambios de precio de corto plazo.
+- La categoría se delimita con el buscador de cada sitio y una lista de exclusión por palabras clave, que es aproximada. La subcategoría también se asigna por reglas.
+- La extracción depende de que cada página cargue sus tarjetas durante el desplazamiento automático.
+- De la primera ejecución solo se conserva el CSV con los productos extraídos. El HTML de cada página se guarda desde la segunda.
+- En algunos anuncios el precio antes del descuento es inconsistente, así que el indicador de promoción es aproximado.
+
+### 8.2 Conclusiones
+
+- Para las mismas presentaciones, La Alemana ofrece el menor precio con más frecuencia (6 de 10) y la canasta más barata en las dos ejecuciones. Cafam y La Rebaja quedan prácticamente empatados entre sí.
+- Las dos mayores diferencias entre comercios (27,9 % y 19,0 %) corresponden a precios promocionales. El fin de una promoción entre el 11 y el 13 de octubre bajó el ahorro en Cebion gotas de 26,4 % a 7,8 %.
+- La presentación grande suele tener menor precio por unidad, pero exige un desembolso mayor, y una promoción sobre la pequeña puede invertir esa relación.
+
+```{r cierre, include=FALSE}
+dbDisconnect(con)
+```

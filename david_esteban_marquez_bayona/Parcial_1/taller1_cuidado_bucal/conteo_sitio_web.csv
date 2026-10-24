@@ -1,0 +1,3 @@
+# Verificación de completitud: número de resultados que muestra la PÁGINA WEB de la categoría el día de la captura.
+# Llenar a mano (no son precios). Se muestra en la sección 2.3 del informe.
+comercio,fecha,url_categoria,total_mostrado_en_la_pagina,nota

@@ -1,0 +1,244 @@
+---
+title: "Taller 5: Mineria"
+format: html
+editor: visual
+---
+## Ejercicio 1
+1.Microdatos GEIH del DANE (archivo .csv de 300.000 filas)**Estructurados**
+
+2. Respuesta JSON de la API pública datos.gov.co con indicadores de calidad del aire**Semiestructurado**
+
+3. Grabaciones de audio de audiencias judiciales de la Rama Judicial **No estructurados**
+
+4.Factura electrónica emitida por la DIAN (formato XML)**Semiestructurados**
+
+5.Tabla HTML de Wikipedia scrapeada con rvest en las clases 2–3**Semiestruturados**
+
+##Ejercicio 2
+
+```{r}
+
+library(jsonlite); library(dplyr); library(tibble)
+url  <- "https://jsonplaceholder.typicode.com/users"
+raw  <- fromJSON(url)
+
+```
+
+1. Explore la estructura con str(raw). ¿Qué columnas son listas anidadas?
+
+```{r}
+str(raw)
+```
+Las columnas anidadas son adress y company
+
+2. Aplane el objeto a un tibble con una fila por usuario, extrayendo al menos: name, email, address.city, address.geo.lat, address.geo.lng y company.name.
+
+```{r}
+library(jsonlite)
+library(dplyr)
+library(tidyr)
+
+# Aplanar la estructura JSON y convertir a tibble
+df_plano <- raw %>% 
+  jsonlite::flatten(recursive = TRUE) %>% 
+  as_tibble() %>% 
+  select(
+    name, 
+    email, 
+    address.city, 
+    address.geo.lat, 
+    address.geo.lng, 
+    company.name
+  )
+
+# Visualizar el resultado
+print(df_plano)
+```
+
+3. ¿Qué tipo de dato es esta fuente? ¿Por qué fromJSON no produce directamente un tibble plano?
+
+Es una fuente en formato JSON, estructurada como una lista de objetos , y fromJSON no produce directamente un tibble plano porque address y company contienen objetos anidados en el JSON original, jsonlite los representa creando data frames
+dentro de las columnas del data frame principal
+
+
+##Ejercicio 3
+
+1. Construya X centrada y escalada con scale(). Reporte sus dimensiones y la memoria que ocupa.
+
+```{r}
+install.packages("titanic")
+library(titanic)
+library(dplyr)
+library(Matrix)
+
+titanic <- read.csv("titanic.csv")
+df_clean <- titanic %>% 
+  rename_with(tolower) %>% 
+  select(age, fare, sibsp, parch) %>% 
+  na.omit()
+X <- scale(df_clean)
+dim(X);object.size(X)    
+```
+2. Calcule $X^TX$ ¿Qué representa la diagonal cuando X está escalada?
+```{r}
+XtX <- t(X) %*% X
+print(XtX)
+```
+3. Construya la versión dispersa con Matrix(X, sparse = TRUE). Compare el tamaño en memoria con object.size(). ¿Tiene sentido usar formato disperso aquí?
+
+```{r}
+X_sparse <- Matrix(X, sparse = TRUE)
+object.size(X)        ;object.size(X_sparse) 
+```
+
+4. ¿Qué estructura de datos usaría para modelar las relaciones familiares entre pasajeros (sibsp, parch)? Justifique.
+
+Utilizaria un grafo, porque se podrian representar los pasajeros como los nodos de los vertices y los vinculos son aristas
+
+
+##Ejercicio 4
+
+1. Para cada p, genere 500 puntos uniformes en $[0,1]^p$ y calcule 200 distancias euclidianas entre pares. Reporte la distancia media y el coeficiente de variación (CV).
+```{r}
+library(dplyr)
+set.seed(42)
+p_values <- c(1, 2, 5, 10, 50, 100, 500, 1000, 5000)
+punto1_resultados <- lapply(p_values, function(p) {
+  matriz <- matrix(runif(500 * p), nrow = 500, ncol = p)
+  
+  idx1 <- sample(1:500, 200, replace = TRUE)
+  idx2 <- sample(1:500, 200, replace = TRUE)
+  
+  distancias <- sapply(1:200, function(i) {
+    sqrt(sum((matriz[idx1[i], ] - matriz[idx2[i], ])^2))
+  })
+  
+  tibble(
+    p = p,
+    distancia_media = mean(distancias),
+    cv = sd(distancias) / mean(distancias)
+  )
+}) %>% bind_rows()
+
+
+print(punto1_resultados)
+```
+
+2.Grafique distancia media y CV vs. p (escala log en x) con ggplot2.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+datos_grafica <- punto1_resultados %>%
+  pivot_longer(
+    cols = c(distancia_media, cv), 
+    names_to = "Metrica", 
+    values_to = "Valor"
+  ) %>%
+  mutate(Metrica = factor(Metrica, labels = c("Coeficiente de Variación (CV)", "Distancia Media")))
+
+ggplot(datos_grafica, aes(x = p, y = Valor, color = Metrica)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2.5) +
+  scale_x_log10(breaks = p_values) +
+  facet_wrap(~Metrica, scales = "free_y") +
+  theme_minimal() +
+  labs(
+    title = "Efecto de la Dimensión p en las Distancias Euclidianas",
+    x = "Dimensión p (Escala Logarítmica)",
+    y = "Valor de la Métrica",
+    color = "Métrica"
+  ) +
+  theme(legend.position = "none")
+
+```
+
+3. ¿A partir de qué p el CV cae por debajo del 5%? ¿Qué implica esto para K-NN?
+
+El coeficiente de variación cae por debajo del 5% a partir de $p = 100$ (o $p = 50$ según la variación de la muestra).
+
+4. ¿A partir de qué p el CV cae por debajo del 5%? ¿Qué implica esto para K-NN?
+
+```{r}
+set.seed(42)
+
+p_values <- c(1, 2, 5, 10, 50, 100, 500, 1000, 5000)
+
+dist_coseno <- function(u, v) {
+  1 - sum(u * v) / (sqrt(sum(u^2)) * sqrt(sum(v^2)))
+}
+
+punto4_resultados <- lapply(p_values, function(p) {
+  matriz <- matrix(runif(500 * p), nrow = 500, ncol = p)
+  
+  idx1 <- sample(1:500, 200, replace = TRUE)
+  idx2 <- sample(1:500, 200, replace = TRUE)
+  distancias <- sapply(1:200, function(i) {
+    dist_coseno(matriz[idx1[i], ], matriz[idx2[i], ])
+  })
+  
+  tibble(
+    p = p,
+    distancia_media = mean(distancias),
+    cv = sd(distancias) / mean(distancias)
+  )
+}) %>% bind_rows()
+
+print(punto4_resultados)
+```
+
+
+##Ejercicio 5 
+
+1. Aplique PCA con prcomp(..., scale. = TRUE). ¿Cuántos componentes son necesarios para retener ≥ 80% de la varianza? ¿Y para ≥ 95%?
+
+```{r}
+titanic <- read.csv("titanic.csv")
+df_pca <- titanic %>% 
+  rename_with(tolower) %>% 
+  select(age, fare, sibsp, parch, pclass, survived) %>% 
+  na.omit()
+X <- df_pca %>% select(-survived)
+pca_res <- prcomp(X, scale. = TRUE)
+summary_pca <- summary(pca_res)
+var_exp <- summary_pca$importance[2, ]
+var_acum <- summary_pca$importance[3, ]
+print(var_acum)
+
+n_80 <- min(which(var_acum >= 0.80))
+n_95 <- min(which(var_acum >= 0.95))
+cat("\nComponentes para >= 80%:", n_80)
+cat("\nComponentes para >= 95%:", n_95, "\n")
+```
+
+
+2. Grafique el scree plot (varianza acumulada vs. número de componente) con ggplot2.
+
+```{r}
+df_scree <- data.frame(
+  PC = 1:length(var_acum),
+  VarAcum = var_acum
+)
+ggplot(df_scree, aes(x = PC, y = VarAcum)) +
+  geom_line(color = "steelblue", linewidth = 1) +
+  geom_point(color = "steelblue", size = 3) +
+  geom_hline(yintercept = c(0.80, 0.95), linetype = "dashed", color = "red") +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+  scale_x_continuous(breaks = 1:5) +
+  theme_minimal() +
+  labs(
+    title = "Scree Plot: Varianza Acumulada por PC",
+    x = "Número de Componente Principal",
+    y = "Varianza Explicada Acumulada"
+  )
+```
+3. Examine los loadings de PC1 y PC2. ¿Qué variables dominan cada componente? Proponga una interpretación en el contexto del Titanic.
+
+```{r}
+loadings <- pca_res$rotation[, 1:2]
+print(loadings)
+```
+
+

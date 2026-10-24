@@ -1,0 +1,423 @@
+---
+title: "Ejercicios gráficos"
+author: "Andrea Catalina Mora Roa"
+lang: es
+format:
+  html:
+    toc: true
+    toc-title: "Contenido"
+    number-sections: false
+    code-fold: show
+    code-tools: true
+    embed-resources: true
+    theme: cosmo
+execute:
+  warning: false
+  message: false
+  echo: true
+fig-width: 8
+fig-height: 4.5
+---
+
+```{r}
+#| label: setup
+library(tidyverse)   # incluye ggplot2, dplyr, lubridate...
+library(scales)
+library(knitr)
+
+theme_set(theme_minimal(base_size = 12))
+
+# Paleta con nombres, apta para daltonismo (Okabe-Ito); se reutiliza en varios gráficos
+colores_canal <- c("App" = "#0072B2", "Web" = "#E69F00", "Tienda" = "#009E73")
+```
+
+## Dataset
+
+```{r}
+#| label: dataset
+set.seed(909); n <- 1500
+dias <- seq(as.Date("2025-01-01"), as.Date("2025-12-31"), "day")
+pedidos <- tibble(
+  fecha        = sample(dias, n, replace = TRUE),
+  canal        = sample(c("App", "Web", "Tienda"), n, TRUE,
+                        prob = c(.45, .35, .20)),
+  categoria    = sample(c("Tecnología", "Hogar", "Moda"),
+                        n, replace = TRUE),
+  valor        = round(rlnorm(n, 11.5 + 0.6 *
+                                (categoria == "Tecnología"), 0.6), -2),
+  dias_entrega = rpois(n, lambda = 3) + 1,
+  calificacion = sample(1:5, n, TRUE, prob = c(1, 2, 3, 7, 7))
+)
+glimpse(pedidos)
+```
+
+Todos los ejercicios usan `pedidos`; el valor está en pesos (COP).
+
+---
+
+## Ejercicio 1: tablas de frecuencia
+
+```{r}
+#| label: ej1-calificacion
+freq_calif <- pedidos |>
+  count(calificacion) |>
+  mutate(pct = 100 * n / sum(n), acum = cumsum(pct))
+
+freq_calif |> kable(digits = 1, caption = "Distribución de la calificación")
+```
+
+```{r}
+#| label: ej1-valor
+pedidos |>
+  mutate(rango = cut(valor, c(0, 1e5, 2e5, 4e5, Inf), right = FALSE)) |>
+  count(rango) |>
+  mutate(pct = 100 * n / sum(n)) |>
+  kable(digits = 1, caption = "Distribución del valor del pedido (COP)")
+```
+
+**1. ¿Qué porcentaje de pedidos tiene calificación de 4 o más?**
+
+```{r}
+#| label: ej1-pct
+pct_4_mas <- 100 * mean(pedidos$calificacion >= 4)
+```
+
+El **`r round(pct_4_mas, 1)`%** de los pedidos tiene calificación de 4 o más (coincide con la acumulada: 100 − acumulado hasta 3).
+
+**2. ¿Por qué la acumulada tiene sentido para `calificacion` y no para `canal`?**
+
+La calificación es una variable **ordinal** (1 < 2 < 3 < 4 < 5), así que "hasta 3 estrellas" significa algo. El canal es **nominal**: App, Web y Tienda no tienen un orden natural, por lo que un porcentaje acumulado dependería de un orden arbitrario y no diría nada.
+
+**3. Cortes de igual ancho: ¿qué intervalo queda casi vacío y por qué?**
+
+```{r}
+#| label: ej1-igual-ancho
+pedidos |>
+  mutate(rango = cut(valor, breaks = 5, dig.lab = 10)) |>
+  count(rango) |>
+  mutate(pct = 100 * n / sum(n)) |>
+  kable(digits = 2, caption = "Cinco cortes de igual ancho")
+```
+
+Los intervalos de la **derecha** (valores más altos) quedan casi vacíos. El valor del pedido tiene una distribución asimétrica a la derecha (tipo lognormal): casi todos los pedidos son de valor bajo y muy pocos son enormes. Los cortes de igual ancho no se adaptan a esa cola larga, así que la mayoría de los pedidos cae en los primeros intervalos.
+
+---
+
+## Ejercicio 2: elige el gráfico según la pregunta
+
+```{r}
+#| label: ej2-datos
+ventas_mes <- pedidos |>
+  mutate(mes = floor_date(fecha, "month")) |>
+  group_by(mes, canal) |>
+  summarise(ventas = sum(valor), .groups = "drop")
+```
+
+**1. ¿Qué canal genera más pedidos?** → **Barras** ordenadas.
+
+```{r}
+#| label: ej2-1
+pedidos |>
+  count(canal) |>
+  mutate(canal = fct_reorder(canal, n, .desc = TRUE)) |>
+  ggplot(aes(canal, n, fill = canal)) +
+  geom_col(show.legend = FALSE) +
+  geom_text(aes(label = comma(n)), vjust = -0.4) +
+  scale_fill_manual(values = colores_canal) +
+  labs(title = "Pedidos por canal", x = NULL, y = "Pedidos")
+```
+
+*Justificación:* se comparan conteos de una variable categórica; las barras ordenadas permiten ver el ranking de un vistazo.
+
+**2. ¿Cómo se distribuyen los días de entrega?** → **Barras por valor entero** (histograma de una variable discreta).
+
+```{r}
+#| label: ej2-2
+ggplot(pedidos, aes(dias_entrega)) +
+  geom_bar(fill = "#006DAE") +
+  scale_x_continuous(breaks = 1:max(pedidos$dias_entrega)) +
+  labs(title = "Distribución de los días de entrega",
+       x = "Días de entrega", y = "Pedidos")
+```
+
+*Justificación:* es una variable numérica discreta y se quiere ver su forma (centro, dispersión, asimetría).
+
+**3. ¿El valor del pedido cambia según la categoría?** → **Boxplot** (numérica por grupos), en escala logarítmica por la asimetría.
+
+```{r}
+#| label: ej2-3
+ggplot(pedidos, aes(categoria, valor / 1000, fill = categoria)) +
+  geom_boxplot(show.legend = FALSE) +
+  scale_y_log10(labels = comma) +
+  labs(title = "Valor del pedido por categoría",
+       x = NULL, y = "Valor (miles COP, escala log)")
+```
+
+*Justificación:* compara mediana, dispersión y atípicos de una variable numérica entre grupos.
+
+**4. ¿Cómo evolucionaron las ventas mensuales por canal?** → **Líneas**.
+
+```{r}
+#| label: ej2-4
+ggplot(ventas_mes, aes(mes, ventas / 1e6, color = canal)) +
+  geom_line(linewidth = 1) +
+  geom_point() +
+  scale_color_manual(values = colores_canal) +
+  scale_x_date(date_labels = "%b", date_breaks = "1 month") +
+  labs(title = "Ventas mensuales por canal",
+       x = NULL, y = "Ventas (millones COP)", color = "Canal")
+```
+
+*Justificación:* el eje X es el tiempo y lo que importa es la tendencia de cada canal.
+
+---
+
+## Ejercicio 3: la forma del valor del pedido
+
+```{r}
+#| label: ej3-base
+g3 <- ggplot(pedidos, aes(x = valor / 1000)) +
+  geom_histogram(bins = 30, fill = "#006DAE", color = "white") +
+  geom_vline(xintercept = median(pedidos$valor) / 1000) +
+  labs(x = "Valor del pedido (miles COP)", y = "Pedidos",
+       title = "bins = 30 (línea = mediana)")
+g3
+```
+
+```{r}
+#| label: ej3-bins
+#| fig-height: 3.5
+ggplot(pedidos, aes(x = valor / 1000)) +
+  geom_histogram(bins = 8, fill = "#006DAE", color = "white") +
+  labs(title = "bins = 8", x = "Valor del pedido (miles COP)", y = "Pedidos")
+
+ggplot(pedidos, aes(x = valor / 1000)) +
+  geom_histogram(bins = 120, fill = "#006DAE", color = "white") +
+  labs(title = "bins = 120", x = "Valor del pedido (miles COP)", y = "Pedidos")
+```
+
+```{r}
+#| label: ej3-log
+g3 + scale_x_log10(labels = comma) +
+  labs(title = "bins = 30 con scale_x_log10()")
+```
+
+```{r}
+#| label: ej3-resumen
+resumen <- pedidos |>
+  summarise(media = mean(valor), mediana = median(valor),
+            p90 = quantile(valor, .90), maximo = max(valor))
+resumen |> kable(format.args = list(big.mark = ".", decimal.mark = ","),
+                 digits = 0, caption = "Resumen del valor (COP)")
+```
+
+**1. Describe forma, centro y cola. ¿La media es mayor que la mediana?**
+
+La forma es **asimétrica a la derecha**, con una cola larga de pedidos caros. El centro (mediana) es de unos **`r comma(resumen$mediana)` COP**. La media (**`r comma(round(resumen$media))` COP**) `r ifelse(resumen$media > resumen$mediana, "sí es mayor", "no es mayor")` que la mediana: la cola derecha la jala hacia arriba.
+
+**2. ¿Qué número de bins muestra mejor la forma?**
+
+**30 bins.** Con 8 se suaviza demasiado y se pierde la forma de la distribución; con 120 cada barra tiene pocos datos y aparece ruido (barras irregulares). 30 muestra la asimetría sin ruido.
+
+**3. ¿Qué cambia con `scale_x_log10()`? ¿Qué medida reportarías a gerencia?**
+
+Con escala logarítmica la distribución se ve casi **simétrica** (en forma de campana), porque el valor es aproximadamente lognormal; además se pueden comparar pedidos pequeños y grandes en un mismo gráfico. A gerencia reportaría la **mediana** (y algún percentil, como el p90), porque la media está inflada por pocos pedidos muy caros.
+
+**4. Repite por `categoria`: ¿aparece algo que el histograma global ocultaba?**
+
+```{r}
+#| label: ej3-categoria
+#| fig-height: 6
+ggplot(pedidos, aes(valor / 1000, fill = categoria)) +
+  geom_histogram(bins = 30, color = "white", show.legend = FALSE) +
+  facet_wrap(~ categoria, ncol = 1, scales = "free_y") +
+  labs(title = "Valor del pedido por categoría",
+       x = "Valor del pedido (miles COP)", y = "Pedidos")
+```
+
+```{r}
+#| label: ej3-cat-resumen
+pedidos |>
+  group_by(categoria) |>
+  summarise(mediana = median(valor), media = mean(valor), .groups = "drop") |>
+  kable(format.args = list(big.mark = ".", decimal.mark = ","), digits = 0)
+```
+
+Sí: el histograma global **mezcla dos poblaciones**. **Tecnología** está desplazada hacia valores más altos, mientras que Hogar y Moda se parecen entre sí. Esa mezcla explica buena parte de la cola derecha del histograma global.
+
+---
+
+## Ejercicio 4: color con propósito
+
+```{r}
+#| label: ej4-divergente
+desvio_mes <- pedidos |>
+  count(mes = month(fecha)) |>
+  mutate(desvio = n - mean(n))
+
+ggplot(desvio_mes, aes(factor(mes), desvio, fill = desvio)) +
+  geom_col() +
+  scale_fill_gradient2(low = "#b2182b", mid = "grey90",
+                       high = "#2166ac", midpoint = 0) +
+  labs(title = "Desvío mensual de pedidos respecto al promedio mensual",
+       x = "Mes", y = "Desvío (pedidos)", fill = "Desvío")
+```
+
+**1. ¿Por qué aquí conviene una paleta divergente? ¿Cuál es la referencia?**
+
+Porque la variable tiene un **punto central con significado**: el 0 es el promedio mensual de pedidos. Los valores se separan en dos direcciones (meses por encima y por debajo del promedio), y la paleta divergente lo refleja: un color para cada lado y gris neutro en el centro. La referencia es el **promedio mensual** (`midpoint = 0`).
+
+**2. Define `colores_canal` con nombres y úsalo en dos gráficos distintos.**
+
+`colores_canal` se definió al inicio como un vector con nombres (`App`, `Web`, `Tienda`). Se usa con `scale_*_manual()` para que cada canal conserve siempre su color (ya se usó en el Ejercicio 2; aquí, en dos gráficos más):
+
+```{r}
+#| label: ej4-colores
+#| fig-height: 3.5
+pedidos |>
+  count(canal) |>
+  ggplot(aes(canal, n, fill = canal)) +
+  geom_col(show.legend = FALSE) +
+  scale_fill_manual(values = colores_canal) +
+  labs(title = "Pedidos por canal", x = NULL, y = "Pedidos")
+
+pedidos |>
+  group_by(canal) |>
+  summarise(mediana = median(valor) / 1000) |>
+  ggplot(aes(canal, mediana, fill = canal)) +
+  geom_col(show.legend = FALSE) +
+  scale_fill_manual(values = colores_canal) +
+  labs(title = "Valor mediano por canal", x = NULL, y = "Miles COP")
+```
+
+**3. ¿Tus gráficos se entienden sin distinguir rojo y verde?**
+
+La paleta de `colores_canal` (azul, naranja, verde azulado) es la **Okabe-Ito**, diseñada para daltonismo, y además en los gráficos de barras cada canal está rotulado en el eje X, así que no depende solo del color. En el gráfico divergente, rojo y azul se distinguen por luminosidad y contrastan con el gris central. Puedes comprobarlo de forma rápida con una simulación en R:
+
+```{r}
+#| label: ej4-daltonismo
+#| eval: !expr requireNamespace("colorspace", quietly = TRUE)
+# Simulación de deuteranopia (requiere el paquete colorspace)
+rbind(original = colores_canal,
+      deuteranopia = colorspace::deutan(colores_canal))
+```
+
+Para la prueba formal en Coblis, guarda los gráficos con `ggsave()` y súbelos allí.
+
+---
+
+## Ejercicio 5: tabla de contingencia y su gráfico
+
+```{r}
+#| label: ej5-tabla
+tabla <- table(pedidos$canal, pedidos$categoria)
+pct_fila <- round(100 * prop.table(tabla, margin = 1), 1)   # % por fila
+tabla
+pct_fila
+```
+
+```{r}
+#| label: ej5-grafico
+ggplot(pedidos, aes(x = canal, fill = categoria)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = percent) +
+  labs(y = "Proporción dentro del canal", x = NULL, fill = "Categoría")
+```
+
+**1. ¿En qué canal pesa más Tecnología? ¿Coincide con las barras al 100 %?**
+
+```{r}
+#| label: ej5-canal-max
+canal_max <- names(which.max(pct_fila[, "Tecnología"]))
+```
+
+Tecnología pesa más en **`r canal_max`** (`r max(pct_fila[, "Tecnología"])` % de sus pedidos). Sí coincide con las barras al 100 %: en ese canal el segmento de Tecnología es el más alto. Las diferencias entre canales son pequeñas.
+
+**2. Las barras al 100 % ocultan cuántos pedidos tiene cada canal: ¿qué gráfico de los retos lo resuelve?**
+
+El **gráfico de barras de pedidos por canal** (Ejercicio 2.1). Como complemento, las barras apiladas con conteos absolutos muestran a la vez el tamaño de cada canal y su composición:
+
+```{r}
+#| label: ej5-conteos
+ggplot(pedidos, aes(x = canal, fill = categoria)) +
+  geom_bar() +
+  labs(title = "Pedidos por canal y categoría (conteos)",
+       y = "Pedidos", x = NULL, fill = "Categoría")
+```
+
+**3. Presenta la tabla con `kable()` y escribe dos frases de interpretación.**
+
+```{r}
+#| label: ej5-kable
+as.data.frame.matrix(pct_fila) |>
+  rownames_to_column("Canal") |>
+  kable(digits = 1,
+        caption = "Categoría dentro de cada canal (% por fila)")
+```
+
+- En todos los canales las tres categorías pesan cerca de un tercio (entre `r min(pct_fila)` % y `r max(pct_fila)` %), es decir, el mix de categorías es muy similar entre canales.
+- Tecnología tiene su mayor peso en **`r canal_max`**, pero la diferencia frente a los otros canales es pequeña; no hay evidencia de una asociación fuerte entre canal y categoría.
+
+Como respaldo, una prueba chi-cuadrado:
+
+```{r}
+#| label: ej5-chisq
+chisq.test(tabla)
+```
+
+---
+
+## Ejercicio 6: interactividad con criterio
+
+**1. Versión interactiva en español, con separador de miles**
+
+```{r}
+#| label: ej6-highcharter
+#| eval: !expr requireNamespace("highcharter", quietly = TRUE)
+library(highcharter)
+
+# Separadores en español
+opt_lang <- getOption("highcharter.lang")
+opt_lang$thousandsSep <- "."
+opt_lang$decimalPoint <- ","
+options(highcharter.lang = opt_lang)
+
+datos_hc <- pedidos |> count(categoria, canal)
+
+datos_hc |>
+  hchart("column", hcaes(x = categoria, y = n, group = canal)) |>
+  hc_colors(unname(colores_canal[sort(unique(datos_hc$canal))])) |>
+  hc_tooltip(shared = TRUE,
+             headerFormat = "<b>Categoría: {point.key}</b><br/>",
+             pointFormat  = "{series.name}: <b>{point.y:,.0f}</b> pedidos<br/>") |>
+  hc_xAxis(title = list(text = "Categoría")) |>
+  hc_yAxis(title = list(text = "Número de pedidos")) |>
+  hc_legend(title = list(text = "Canal")) |>
+  hc_title(text = "Pedidos por categoría y canal")
+```
+
+*(Si no ves el gráfico, instala el paquete con `install.packages("highcharter")`.)*
+
+**2. Versión en ggplot2: ¿qué gana y qué pierde cada una?**
+
+```{r}
+#| label: ej6-ggplot
+pedidos |>
+  count(categoria, canal) |>
+  ggplot(aes(categoria, n, fill = canal)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = colores_canal) +
+  scale_y_continuous(labels = label_comma(big.mark = ".", decimal.mark = ",")) +
+  labs(title = "Pedidos por categoría y canal",
+       x = "Categoría", y = "Número de pedidos", fill = "Canal")
+```
+
+| | Gana | Pierde |
+|---|---|---|
+| **ggplot2** | Control total del diseño, reproducible, sale perfecto en PDF e impresión, se integra con `facet_wrap()`, temas, etc. | No tiene tooltip ni zoom; para leer valores exactos hay que añadir etiquetas. |
+| **highcharter** | Tooltip, zoom, ocultar series con un clic, exploración rápida. | Solo funciona en HTML (no sale en PDF), depende de JavaScript, es más pesado y menos flexible para personalizar. |
+
+**3. ¿Cuál usarías en un informe PDF para gerencia y cuál en un dashboard? ¿Por qué?**
+
+- **Informe PDF → ggplot2.** El PDF es estático, la interactividad no funciona y gerencia necesita una figura clara con etiquetas y conclusiones ya visibles.
+- **Dashboard → highcharter.** El usuario explora (oculta canales, ve el valor exacto al pasar el cursor) y ahí la interactividad aporta valor.

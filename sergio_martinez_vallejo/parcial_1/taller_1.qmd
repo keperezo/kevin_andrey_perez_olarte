@@ -1,0 +1,627 @@
+---
+title: "Taller 1 — Comparador de precios: papel y desechables"
+subtitle: "Minería de Datos - Universidad Nacional de Colombia"
+author: "Sergio Martínez Vallejo"
+date: today
+lang: es
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: show
+    code-tools: true
+    embed-resources: true
+    df-print: kable
+execute:
+  warning: false
+  message: false
+params:
+  ejecutar_scraping: false        # TRUE = nueva recolección en línea
+  id_principal: "20261013T183453" # ejecución usada en el análisis
+---
+
+```{r}
+#| label: setup
+#| code-summary: "Configuración"
+library(DBI); library(RSQLite)
+library(dplyr); library(tidyr); library(purrr); library(stringr)
+library(ggplot2); library(scales); library(knitr)
+source("scraper.R", encoding = "UTF-8")   # funciones de extracción (módulo independiente)
+
+ID_PRINCIPAL <- params$id_principal
+
+# Recolección en línea opcional: una sola llamada ejecuta las tres tiendas
+if (isTRUE(params$ejecutar_scraping)) {
+  resumen_nueva <- ejecutar_recoleccion()
+  print(resumen_nueva)
+}
+
+con <- dbConnect(SQLite(), "comparador_precios.sqlite")
+
+# Colores consistentes por comercio en todos los gráficos
+colores <- c("Carulla" = "#1b9e77", "Olímpica" = "#d95f02", "Éxito" = "#7570b3")
+cop <- function(x) paste0("$", format(round(x), big.mark = ".", decimal.mark = ",", trim = TRUE))
+pct <- function(x) paste0(format(round(x, 1), decimal.mark = ","), " %")
+```
+
+# Introducción
+
+Este trabajo construye un comparador de precios para la categoría **papel y desechables** a partir de datos recolectados con *web scraping* en tres supermercados con venta en línea en Colombia: **Éxito**, **Carulla** y **Olímpica**.
+
+Según la planilla del curso, la categoría incluye papel higiénico, pañuelos, servilletas, toallas de cocina, y vasos, platos y cubiertos desechables, y excluye absorbentes y material de curación.
+
+El objetivo es identificar dónde resulta más económico comprar cada producto y qué presentación ofrece el menor precio por unidad de contenido cuando la comparación es válida. Se recolectó la categoría completa en cada comercio y, dentro de esos datos, se identificaron **13 presentaciones idénticas presentes en las tres tiendas** —con el mismo código de barras (EAN)—: papel higiénico de tres marcas en dos tamaños, servilletas en dos tamaños, toallas de cocina, vasos, platos y tenedores desechables.
+
+Todo el proceso se desarrolló en R. Los precios corresponden al momento de la captura (ejecución `r ID_PRINCIPAL`) y no deben interpretarse como permanentes.
+
+# Fuentes y scraping
+
+## Comercios y páginas consideradas
+
+```{r}
+#| label: tbl-fuentes
+#| tbl-cap: "Secciones de cada comercio consideradas equivalentes a la categoría"
+map_dfr(TIENDAS, function(cfg) tibble(
+  Comercio = cfg$comercio,
+  Sitio    = cfg$base,
+  `Rutas de categoría` = paste(cfg$rutas, collapse = " · ")
+))
+```
+
+En Éxito, la ruta `id:346100590` corresponde a la categoría «Desechables para fiesta»; el scraper la resuelve desde el árbol de categorías del sitio (`eventos-y-temporadas/fiesta-y-pinateria/desechables-para-fiesta`).
+
+Cada sitio organiza sus categorías de forma distinta, así que se tomaron todas las secciones que contienen productos de la delimitación: papel higiénico, servilletas, toallas de cocina, pañuelos y desechables. Las rutas se identificaron con `listar_categorias_vtex()`, que consulta el árbol de categorías de cada tienda.
+
+**Delimitación de la categoría.** Las secciones de los comercios son más amplias que la categoría de la planilla, y se recolectaron completas para documentar la oferta de cada sitio. Los siguientes tipos de producto aparecen en ellas pero **no pertenecen a la categoría** y se excluyeron de la selección de comparables:
+
+- velas, carbón, encendedores y fósforos (en las secciones «Desechables, velas y carbón»);
+- bolsas, papel aluminio y plástico adherente;
+- decoración de fiesta (globos, piñatas, serpentinas, gorros);
+- pañitos húmedos, pañales, algodón, gasas y otros absorbentes o material de curación, excluidos expresamente por la planilla.
+
+```{r}
+#| label: tbl-fuera
+#| tbl-cap: "Productos recolectados fuera de la delimitación (identificados por su nombre)"
+fuera <- "vela|carb[oó]n|encended|f[oó]sforo|bolsa|aluminio|vinip|adherente|globo|pi[ñn]ata|serpentina|confeti|gorro|toalla h[uú]meda|pa[ñn]it|pa[ñn]al|algod[oó]n|gasa|absorb"
+dbGetQuery(con, "SELECT comercio, nombre_original FROM observaciones WHERE id_ejecucion = ?",
+           params = list(ID_PRINCIPAL)) |>
+  mutate(fuera_de_categoria = str_detect(str_to_lower(nombre_original), fuera)) |>
+  count(comercio, fuera_de_categoria) |>
+  pivot_wider(names_from = fuera_de_categoria, values_from = n, values_fill = 0) |>
+  rename(dentro = `FALSE`, fuera = `TRUE`)
+```
+
+La regla por nombre es una aproximación: sirve para cuantificar cuánto de lo recolectado está fuera de la delimitación, pero los comparables se eligieron revisando cada producto.
+
+## Estrategia de extracción
+
+Los tres comercios funcionan sobre la plataforma de comercio electrónico **VTEX**, que carga los productos desde un servicio interno. Se identificó con las herramientas de desarrollador del navegador (pestaña *Network*) y se consulta directamente con `httr2`, sin necesidad de un navegador:
+
+-   Árbol de categorías: `/api/catalog_system/pub/category/tree/3`.
+-   Productos de una categoría: `/api/catalog_system/pub/products/search/{ruta}?map=c,c,c&_from=0&_to=49`, recorriendo páginas de 50 productos. Si una tienda rechaza el parámetro `map`, la petición se repite sin él.
+-   El encabezado HTTP `resources` (por ejemplo `0-49/312`) informa el total de productos de cada ruta y se usa para verificar que la recolección está completa.
+-   Cada producto puede tener varias presentaciones (ítems o SKU). Por cada una se registra precio (`Price`), precio antes del descuento (`ListPrice`), disponibilidad (`AvailableQuantity`) y **código de barras EAN**.
+-   Un mismo producto puede aparecer en dos rutas; se conserva una sola vez por SKU.
+
+Buenas prácticas de recolección: *user agent* de navegador, máximo una petición por segundo (`req_throttle`), reintentos (`req_retry`) y registro de las peticiones fallidas sin detener la recolección de las demás rutas.
+
+**Revisión de `robots.txt` (consultado el 2026-10-11).**
+
+- **Éxito** y **Carulla** permiten todo a los robots genéricos (`User-agent: *` → `Allow: /`). Sus archivos incluyen `Disallow: /api/`, pero dentro del grupo de un robot específico (`Applebot-Extended`), por lo que no aplica a `User-agent: *`. Éxito declara además `Content-Signal: ai-train=no`, que no afecta este uso.
+- **Olímpica** bloquea para robots genéricos las URL que contienen `&` (`Disallow: /*&`). Las peticiones a su servicio de productos usan ese carácter (`&_from=...&_to=...`), así que la extracción de Olímpica no sigue esa indicación. Para mitigar el impacto se hicieron pocas peticiones (unas siete por ejecución), con una tasa máxima de una por segundo y solo de información pública de precios.
+
+**Términos y condiciones.** No se realizó una revisión detallada de los términos y condiciones de los tres sitios; se recomienda verificarlos antes de cualquier uso de los datos distinto al académico. Ninguna extracción accede a áreas privadas (cuentas, carrito o pagos) ni usa credenciales. La recolección tiene fines académicos, se limita a información pública de precios y no redistribuye contenidos de los sitios.
+
+## Ejecuciones de recolección
+
+```{r}
+#| label: tbl-ejecuciones
+#| tbl-cap: "Tabla de ejecuciones registradas por el scraper"
+dbGetQuery(con, "
+  SELECT id_ejecucion, comercio, inicio, modo, n_registros, n_esperado, estado, detalle
+  FROM ejecuciones ORDER BY inicio")
+```
+
+La tabla incluye una primera ejecución de prueba en la que Éxito y Carulla fallaron (HTTP 500) porque el scraper se detenía en el primer error; se corrigió para reintentar sin el parámetro `map` y continuar con las demás rutas. El análisis usa la ejecución **`r ID_PRINCIPAL`**, en la que se recolectaron las tres tiendas en una misma corrida.
+
+**Completitud.** `n_esperado` es la suma de los totales que el sitio reporta para cada ruta, y `n_registros` el número de presentaciones (SKU) obtenidas. En los tres comercios ambos valores coinciden o difieren en pocas unidades: las diferencias se deben a productos con varias presentaciones (más registros que productos) o a productos que aparecen en dos rutas (se cuentan una vez).
+
+## Datos recolectados
+
+La siguiente tabla muestra todos los productos obtenidos en la ejecución principal, tal como quedaron en la tabla `observaciones`. Las columnas `comparable` e `id_producto` identifican las 13 presentaciones de la comparación.
+
+```{r}
+#| label: tbl-datos
+#| tbl-cap: "Productos recolectados en la ejecución principal"
+datos <- dbGetQuery(con, "
+  SELECT comercio, sku, ean, nombre_original, marca, precio, precio_antes, promocion,
+         comparable, id_producto, url, fecha_hora_consulta
+  FROM v_observaciones
+  WHERE id_ejecucion = ?
+  ORDER BY comercio, nombre_original", params = list(ID_PRINCIPAL)) |>
+  mutate(url = sprintf('<a href="%s" target="_blank">abrir</a>', url))
+
+DT::datatable(
+  datos,
+  escape   = FALSE,
+  filter   = "top",
+  rownames = FALSE,
+  options  = list(pageLength = 10, scrollX = TRUE)
+) |>
+  DT::formatCurrency(c("precio", "precio_antes"), currency = "$", digits = 0,
+                     mark = ".", dec.mark = ",")
+```
+
+## Copias crudas y modo sin conexión
+
+Cada ejecución guarda las respuestas originales comprimidas en `raw/<comercio>/<id_ejecucion>/`, junto con su URL, la ruta de categoría y la hora de consulta. El siguiente bloque reprocesa esas copias **sin volver a consultar los sitios** y verifica que se obtienen los mismos registros:
+
+```{r}
+#| label: tbl-offline
+#| tbl-cap: "Verificación del modo sin conexión"
+tibble(comercio = names(COMERCIOS)) |>
+  mutate(n_sin_conexion = map_int(comercio, ~ nrow(COMERCIOS[[.x]](ID_PRINCIPAL, offline = TRUE)))) |>
+  left_join(dbGetQuery(con, "SELECT comercio, n_registros FROM ejecuciones WHERE id_ejecucion = ?",
+                       params = list(ID_PRINCIPAL)), by = "comercio") |>
+  mutate(coincide = n_sin_conexion == n_registros)
+```
+
+
+# Preparación de los datos
+
+## Limpieza
+
+Reglas aplicadas en la extracción (`scraper.R`):
+
+-   **Precios** numéricos en COP; un precio ausente o igual a cero queda como `NULL`, nunca como cero.
+-   **Promoción**: `promocion = 1` cuando el precio anterior (`ListPrice`) es mayor que el precio de venta.
+-   **Texto original** del anuncio conservado sin limpieza (`nombre_original`, `descripcion_original`); las versiones estandarizadas se guardan en la tabla `productos`.
+-   **Fecha y hora** de consulta en ISO 8601 y hora de Colombia (por ejemplo `2026-10-11T10:12:02-05:00`).
+-   **Descartes**: registros sin nombre y repeticiones del mismo SKU dentro de una ejecución.
+
+## Correspondencia de productos
+
+La correspondencia se hizo con el **código de barras EAN**: una presentación es comparable cuando el mismo EAN aparece en los tres comercios. El EAN identifica de forma única marca, variante, contenido y número de unidades, por lo que la correspondencia no depende de cómo cada tienda escribe el nombre. Esto es importante en esta categoría, porque los nombres cambian mucho entre tiendas. Por ejemplo, el mismo producto (EAN 7702120014174) aparece como «Papel higiénico ROSAL triple hoja x12 rollos (360 mts)» en Éxito y Carulla, y como «P/HIG ROSAL PLUS XXG 30M X12R» en Olímpica.
+
+De los 73 EAN presentes en las tres tiendas dentro de la delimitación, se eligieron 13 presentaciones que cubren las subcategorías con oferta común y que incluyen **tres marcas de papel higiénico y una de servilletas en dos tamaños**, para comparar el precio por unidad de contenido. Se descartaron EAN cuyo anuncio no era equivalente en alguna tienda, por ejemplo vasos Domingo vendidos en Olímpica como promoción «pague 2 lleve 3» o platos con un precio en una tienda varias veces mayor que en las otras, lo que sugiere un empaque distinto. **Pañuelos** no tuvieron ningún EAN común en las tres tiendas: Carulla y Olímpica no tienen una sección de pañuelos.
+
+El contenido estandarizado se tomó del anuncio (metros y rollos para el papel higiénico, hojas para las toallas de cocina, unidades para servilletas y desechables).
+
+```{r}
+#| label: correspondencia
+#| code-summary: "Carga de productos comparables y correspondencia (correspondencia.R)"
+invisible(capture.output(source("correspondencia.R", encoding = "UTF-8")))
+con <- dbConnect(SQLite(), "comparador_precios.sqlite")   # correspondencia.R cierra su conexión
+```
+
+```{r}
+#| label: tbl-productos
+#| tbl-cap: "Presentaciones comparables y su contenido estandarizado"
+dbGetQuery(con, "SELECT * FROM productos")
+```
+
+```{r}
+#| label: tbl-correspondencia
+#| tbl-cap: "Correspondencia entre el identificador común y el SKU de cada comercio"
+dbGetQuery(con, "
+  SELECT c.id_producto, c.comercio, c.sku, o.nombre_original, c.nota
+  FROM correspondencia c
+  LEFT JOIN observaciones o
+    ON o.comercio = c.comercio AND o.sku = c.sku AND o.id_ejecucion = ?
+  ORDER BY c.id_producto, c.comercio", params = list(ID_PRINCIPAL))
+```
+
+# Base de datos SQLite
+
+La base `comparador_precios.sqlite` contiene cuatro tablas y una vista:
+
+-   **`ejecuciones`**: una fila por comercio y corrida del scraper (identificador, inicio, fin, modo, registros obtenidos, total esperado y estado `completa`, `parcial` o `fallida`).
+-   **`observaciones`**: cada producto tal como aparece en un comercio en un momento dado (EAN, precio, promoción, URL, texto original, fecha y hora). Tiene una **restricción de unicidad** sobre `(comercio, sku, fecha_hora_consulta)`, de modo que una misma observación no se inserta dos veces y las ejecuciones nuevas se agregan sin sobrescribir las anteriores.
+-   **`productos`**: identificador común de las presentaciones comparables, con su EAN, marca, subcategoría, contenido y unidad estandarizados.
+-   **`correspondencia`**: relaciona el identificador común con el SKU de cada comercio.
+-   **`v_observaciones`** (vista): todas las observaciones con su `id_producto` y el indicador `comparable`.
+
+```{r}
+#| label: esquema
+#| code-summary: "Definición de tablas y vista"
+cat(dbGetQuery(con, "SELECT sql FROM sqlite_master WHERE type IN ('table', 'view')
+                     AND name NOT LIKE 'sqlite_%'")$sql, sep = "\n\n")
+```
+
+# Consultas SQL
+
+Todas las consultas se refieren a la ejecución principal `r ID_PRINCIPAL`, salvo que se indique lo contrario.
+
+## ¿Cuántos comercios, productos y observaciones contiene la base?
+
+```{sql}
+--| connection: con
+SELECT
+  (SELECT COUNT(DISTINCT comercio) FROM observaciones)                AS n_comercios,
+  (SELECT COUNT(DISTINCT comercio || '|' || sku) FROM observaciones
+    WHERE id_ejecucion = ?ID_PRINCIPAL)                               AS n_productos_ejec_principal,
+  (SELECT COUNT(*) FROM productos)                                    AS n_presentaciones_comparables,
+  (SELECT COUNT(*) FROM observaciones)                                AS n_observaciones,
+  (SELECT COUNT(DISTINCT id_ejecucion) FROM observaciones)            AS n_ejecuciones
+```
+
+```{sql}
+--| connection: con
+--| output.var: por_comercio
+SELECT comercio,
+       COUNT(DISTINCT sku) AS n_productos,
+       SUM(comparable)     AS n_comparables
+FROM v_observaciones
+WHERE id_ejecucion = ?ID_PRINCIPAL
+GROUP BY comercio
+ORDER BY n_productos DESC
+```
+
+```{r}
+por_comercio
+```
+
+La ejecución principal reúne `r format(sum(por_comercio$n_productos), big.mark = ".")` presentaciones: `r paste0(por_comercio$comercio, " (", format(por_comercio$n_productos, big.mark = "."), ")", collapse = ", ")`. La diferencia de tamaño se explica en buena parte porque las secciones de Éxito y Carulla incluyen muchos artículos de fiesta, velas y carbón, fuera de la delimitación. Las 13 presentaciones comparables están en los tres comercios.
+
+## ¿Hay al menos 24 observaciones comparables en una misma ejecución? ¿Hay registros repetidos?
+
+```{sql}
+--| connection: con
+SELECT COUNT(*)                                       AS n_obs_comparables,
+       COUNT(DISTINCT id_producto)                    AS n_presentaciones,
+       COUNT(DISTINCT comercio)                       AS n_comercios,
+       COUNT(DISTINCT id_producto || '|' || comercio) AS n_pares_producto_comercio,
+       CASE WHEN COUNT(DISTINCT id_producto || '|' || comercio) >= 24
+            THEN 'cumple' ELSE 'no cumple' END       AS minimo_24
+FROM v_observaciones
+WHERE comparable = 1 AND id_ejecucion = ?ID_PRINCIPAL
+```
+
+```{sql}
+--| connection: con
+SELECT id_producto, comercio, COUNT(*) AS n_registros, GROUP_CONCAT(sku) AS skus
+FROM v_observaciones
+WHERE comparable = 1 AND id_ejecucion = ?ID_PRINCIPAL
+GROUP BY id_producto, comercio
+HAVING COUNT(*) > 1
+```
+
+La ejecución principal contiene 39 observaciones comparables (13 presentaciones × 3 comercios), por encima del mínimo de 24. La segunda consulta no devuelve filas: no hay registros repetidos del mismo producto y comercio en esa ejecución.
+
+## Precio mínimo, máximo y promedio por presentación, y comercio más barato
+
+```{sql}
+--| connection: con
+--| max.print: 20
+WITH base AS (
+  SELECT v.id_producto, p.nombre_std, v.comercio, v.precio
+  FROM v_observaciones v
+  JOIN productos p ON p.id_producto = v.id_producto
+  WHERE v.id_ejecucion = ?ID_PRINCIPAL AND v.precio IS NOT NULL
+),
+est AS (
+  SELECT id_producto, nombre_std,
+         MIN(precio) AS precio_min, MAX(precio) AS precio_max,
+         ROUND(AVG(precio), 0) AS precio_promedio
+  FROM base GROUP BY id_producto, nombre_std
+)
+SELECT e.id_producto, e.nombre_std, e.precio_min, e.precio_max, e.precio_promedio,
+       GROUP_CONCAT(b.comercio, ', ') AS comercio_mas_barato,
+       COUNT(b.comercio)              AS n_empatados
+FROM est e
+JOIN base b ON b.id_producto = e.id_producto AND b.precio = e.precio_min
+GROUP BY e.id_producto
+ORDER BY e.id_producto
+```
+
+No hay un comercio más barato en todo. Olímpica tiene el menor precio en 7 presentaciones, Éxito en 6 y Carulla en 2, con empates en el papel Suave Gold ×12 (Carulla y Éxito a \$27.950) y en los vasos Tami (Carulla y Éxito a \$5.710). Éxito y Carulla, del mismo grupo empresarial, cobran exactamente lo mismo en varios productos (papel Rosal ×12, vasos, platos y tenedores), mientras que Olímpica se separa de ellos en ambas direcciones: es la más barata en varios empaques grandes, en las toallas de cocina, los platos y los tenedores, y la más cara en papel Suave Gold ×12, Rosal ×4 y vasos Tami.
+
+## Ahorro al elegir la oferta más económica
+
+```{sql}
+--| connection: con
+--| max.print: 20
+SELECT v.id_producto, p.nombre_std,
+       MAX(v.precio)                 AS precio_max,
+       MIN(v.precio)                 AS precio_min,
+       MAX(v.precio) - MIN(v.precio) AS ahorro_cop,
+       ROUND(100.0 * (MAX(v.precio) - MIN(v.precio)) / MAX(v.precio), 1) AS ahorro_pct
+FROM v_observaciones v
+JOIN productos p ON p.id_producto = v.id_producto
+WHERE v.id_ejecucion = ?ID_PRINCIPAL AND v.precio IS NOT NULL
+GROUP BY v.id_producto
+ORDER BY v.id_producto
+```
+
+El ahorro varía mucho entre productos: desde un 2,3 % en el papel Familia Green ×4 (\$230) hasta un 22,8 % en el papel Rosal ×12 (\$5.610) y un 22,1 % en el Suave Gold ×12 (\$7.950, el mayor en pesos). En el papel higiénico de 12 rollos las diferencias entre tiendas son grandes, así que es donde más conviene comparar antes de comprar.
+
+## Menor precio por unidad entre tamaños del mismo producto
+
+```{sql}
+--| connection: con
+--| max.print: 30
+WITH familias AS (
+  SELECT marca_std, unidad
+  FROM productos
+  GROUP BY marca_std, unidad
+  HAVING COUNT(DISTINCT contenido) > 1
+)
+SELECT p.marca_std, p.unidad, p.nombre_std, v.comercio, v.precio, p.contenido,
+       ROUND(v.precio / p.contenido, 1) AS precio_por_unidad,
+       RANK() OVER (PARTITION BY p.marca_std, p.unidad
+                    ORDER BY v.precio / p.contenido) AS ranking
+FROM v_observaciones v
+JOIN productos p ON p.id_producto = v.id_producto
+JOIN familias f  ON f.marca_std = p.marca_std AND f.unidad = p.unidad
+WHERE v.id_ejecucion = ?ID_PRINCIPAL AND v.precio IS NOT NULL
+ORDER BY p.marca_std, p.unidad, ranking
+```
+
+El ranking se calcula por separado para cada marca y unidad (precio por metro de papel o por servilleta), sin mezclar unidades. En papel higiénico el empaque de 12 rollos casi siempre tiene un menor precio por metro: en Rosal, el ×12 de Olímpica sale a \$52,8 por metro frente a \$72,3 del ×4 más barato. Pero el comercio pesa: el Suave Gold ×12 de Olímpica (\$93,5 por metro) apenas mejora al ×4 de Éxito (\$102,7). En servilletas Familia, el paquete de 300 de Olímpica (\$54,3 por servilleta) y el de 100 de Éxito (\$55,1) cuestan prácticamente lo mismo por unidad, así que el tamaño grande no aporta ahorro real.
+
+## Mayores diferencias de precio entre comercios
+
+```{sql}
+--| connection: con
+--| max.print: 20
+WITH base AS (
+  SELECT v.id_producto, p.nombre_std, v.comercio, v.precio
+  FROM v_observaciones v
+  JOIN productos p ON p.id_producto = v.id_producto
+  WHERE v.id_ejecucion = ?ID_PRINCIPAL AND v.precio IS NOT NULL
+),
+est AS (
+  SELECT id_producto, nombre_std, MIN(precio) AS pmin, MAX(precio) AS pmax
+  FROM base GROUP BY id_producto, nombre_std
+)
+SELECT e.id_producto, e.nombre_std,
+       (SELECT GROUP_CONCAT(comercio, ', ') FROM base b
+         WHERE b.id_producto = e.id_producto AND b.precio = e.pmax) AS comercio_mas_caro,
+       (SELECT GROUP_CONCAT(comercio, ', ') FROM base b
+         WHERE b.id_producto = e.id_producto AND b.precio = e.pmin) AS comercio_mas_barato,
+       e.pmax - e.pmin                              AS ahorro_cop,
+       ROUND(100.0 * (e.pmax - e.pmin) / e.pmax, 1) AS ahorro_pct
+FROM est e
+ORDER BY ahorro_pct DESC
+```
+
+Las tres mayores diferencias porcentuales están en papel higiénico: Rosal ×12 (22,8 %), Suave Gold ×12 (22,1 %) y Rosal ×4 (21,0 %). Carulla es el comercio más caro con más frecuencia (en 9 de las 13 presentaciones, sola o empatada), aunque Olímpica es la más cara en dos de los papeles con mayor diferencia.
+
+## Datos faltantes o inconsistentes
+
+```{sql}
+--| connection: con
+SELECT comercio,
+       COUNT(*)                               AS n,
+       SUM(precio IS NULL)                    AS sin_precio,
+       SUM(ean IS NULL OR TRIM(ean) = '')     AS sin_ean,
+       SUM(marca IS NULL OR TRIM(marca) = '') AS sin_marca,
+       SUM(subcategoria IS NULL)              AS sin_subcategoria,
+       SUM(disponible = 0)                    AS no_disponible,
+       SUM(promocion = 1)                     AS en_promocion
+FROM observaciones
+WHERE id_ejecucion = ?ID_PRINCIPAL
+GROUP BY comercio
+```
+
+```{sql}
+--| connection: con
+SELECT comercio, sku, nombre_original, precio, precio_antes
+FROM observaciones
+WHERE id_ejecucion = ?ID_PRINCIPAL AND precio_antes IS NOT NULL AND precio_antes <= precio
+```
+
+```{sql}
+--| connection: con
+--| max.print: 20
+SELECT comercio, ean, COUNT(*) AS n, GROUP_CONCAT(sku, ', ') AS skus
+FROM observaciones
+WHERE id_ejecucion = ?ID_PRINCIPAL AND ean IS NOT NULL AND TRIM(ean) <> ''
+GROUP BY comercio, ean
+HAVING COUNT(*) > 1
+```
+
+```{sql}
+--| connection: con
+SELECT comercio,
+       SUM(promocion = 1)                  AS comparables_en_promocion,
+       COALESCE(SUM(disponible = 0), 0)    AS comparables_no_disponibles
+FROM v_observaciones
+WHERE comparable = 1 AND id_ejecucion = ?ID_PRINCIPAL
+GROUP BY comercio
+```
+
+```{r}
+#| label: faltantes-resumen
+#| include: false
+falt <- dbGetQuery(con, "
+  SELECT SUM(precio IS NULL) AS sin_precio,
+         SUM(ean IS NULL OR TRIM(ean) = '') AS sin_ean,
+         SUM(disponible = 0) AS no_disp
+  FROM observaciones WHERE id_ejecucion = ?", params = list(ID_PRINCIPAL))
+```
+
+-   En la ejecución principal hay `r falt$sin_precio` presentaciones sin precio (productos sin oferta vigente, que se guardan como `NULL`), `r falt$sin_ean` sin EAN y `r falt$no_disp` marcadas como no disponibles. Los productos sin precio o sin EAN no pueden entrar en la comparación.
+-   La segunda consulta revisa precios anteriores menores o iguales al precio de venta, que serían promociones inconsistentes.
+-   La tercera busca un mismo EAN publicado con varios SKU en una misma tienda, que sería un posible duplicado.
+-   La última muestra cuántos de los comparables estaban en promoción o no disponibles en cada comercio. Un precio promocional puede explicar parte de las diferencias observadas.
+
+## Oferta por comercio y ejecución, y calidad de la información
+
+```{sql}
+--| connection: con
+--| max.print: 20
+SELECT o.id_ejecucion, o.comercio, e.estado,
+       COUNT(*) AS n_productos,
+       ROUND(100.0 * AVG(o.ean IS NOT NULL AND TRIM(o.ean) <> ''), 1) AS pct_ean,
+       ROUND(100.0 * AVG(o.marca IS NOT NULL AND TRIM(o.marca) <> ''), 1) AS pct_marca,
+       ROUND(100.0 * AVG(o.descripcion_original IS NOT NULL
+                         AND TRIM(o.descripcion_original) <> ''), 1) AS pct_descripcion,
+       ROUND(100.0 * AVG(
+         LOWER(o.nombre_original) GLOB '*[0-9]*mts*' OR LOWER(o.nombre_original) GLOB '*[0-9]*m x*' OR
+         LOWER(o.nombre_original) GLOB '*[0-9]*und*' OR LOWER(o.nombre_original) GLOB '*x[0-9]*' OR
+         LOWER(o.nombre_original) GLOB '*x [0-9]*' OR LOWER(o.nombre_original) GLOB '*[0-9]*hoja*' OR
+         LOWER(o.nombre_original) GLOB '*[0-9]*rollo*'
+       ), 1) AS pct_contenido
+FROM observaciones o
+JOIN ejecuciones e ON e.id_ejecucion = o.id_ejecucion AND e.comercio = o.comercio
+GROUP BY o.id_ejecucion, o.comercio
+ORDER BY o.id_ejecucion, o.comercio
+```
+
+Se considera que un anuncio tiene *contenido identificable* cuando su nombre incluye metros, unidades, hojas, rollos o una cantidad del tipo «x 12». Contar con el EAN es lo que permitió hacer la correspondencia de forma exacta, porque el contenido no siempre aparece en el nombre y cada tienda lo escribe de forma distinta.
+
+## Canasta común
+
+Como la comparación de promedios entre surtidos diferentes no es válida, se compara una canasta con **exactamente las mismas 13 presentaciones** en los tres comercios:
+
+```{sql}
+--| connection: con
+--| output.var: canasta
+SELECT comercio,
+       COUNT(*)    AS n_presentaciones,
+       SUM(precio) AS total_canasta
+FROM v_observaciones
+WHERE comparable = 1 AND id_ejecucion = ?ID_PRINCIPAL AND precio IS NOT NULL
+GROUP BY comercio
+ORDER BY total_canasta
+```
+
+```{r}
+#| label: tbl-canasta
+#| tbl-cap: "Costo de la canasta común de 13 presentaciones"
+canasta |> mutate(diferencia_vs_mas_barato = total_canasta - min(total_canasta))
+```
+
+La canasta completa cuesta `r cop(canasta$total_canasta[1])` en `r canasta$comercio[1]`, `r cop(canasta$total_canasta[3] - canasta$total_canasta[1])` menos que en `r canasta$comercio[3]` (`r pct(100 * (canasta$total_canasta[3] - canasta$total_canasta[1]) / canasta$total_canasta[3])`). Aunque Olímpica es la más barata en más presentaciones, la canasta resulta más económica en Éxito: Olímpica gana por poco en muchos productos baratos, pero pierde por mucho en el papel Suave Gold ×12. Las diferencias entre canastas son pequeñas; lo que más pesa es elegir bien dónde comprar el papel higiénico.
+
+# Visualizaciones
+
+```{r}
+#| label: datos-graficos
+precios <- dbGetQuery(con, "
+  SELECT v.id_producto, p.nombre_std, p.subcategoria_std, p.marca_std,
+         p.contenido, p.unidad, p.n_unidades, v.comercio, v.precio
+  FROM v_observaciones v
+  JOIN productos p ON p.id_producto = v.id_producto
+  WHERE v.id_ejecucion = ? AND v.precio IS NOT NULL", params = list(ID_PRINCIPAL))
+
+orden <- precios |> group_by(nombre_std) |> summarise(m = min(precio)) |>
+  arrange(m) |> pull(nombre_std)
+etiqueta_ejec <- paste("Ejecución", ID_PRINCIPAL, "· precios en COP")
+```
+
+## Precio de las mismas presentaciones entre comercios
+
+```{r}
+#| label: fig-precios
+#| fig-cap: "Precio de cada presentación comparable por comercio"
+#| fig-height: 6.5
+desfase <- c("Carulla" = 0.22, "Olímpica" = 0, "Éxito" = -0.22)
+precios |>
+  mutate(y = as.numeric(factor(nombre_std, levels = orden)) + desfase[comercio]) |>
+  ggplot(aes(precio, y, color = comercio)) +
+  geom_point(size = 3) +
+  scale_y_continuous(breaks = seq_along(orden), labels = orden) +
+  scale_x_log10(labels = label_dollar(prefix = "$", big.mark = ".", decimal.mark = ",")) +
+  scale_color_manual(values = colores) +
+  labs(x = "Precio del empaque (COP, escala logarítmica)", y = NULL, color = "Comercio",
+       caption = etiqueta_ejec) +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "top", panel.grid.minor = element_blank())
+```
+
+Los precios van de unos \$2.500 (toalla de cocina Familia Green) a más de \$35.000 (papel Suave Gold ×12), por eso se usa escala logarítmica. Ningún color queda siempre a la izquierda: el comercio más barato cambia según el producto. *Limitación*: el gráfico compara el precio del empaque, no el precio por unidad.
+
+## Oportunidades de ahorro
+
+```{r}
+#| label: fig-sobrecosto
+#| fig-cap: "Sobrecosto de cada comercio frente al precio mínimo de la presentación"
+#| fig-height: 6.5
+precios |>
+  group_by(nombre_std) |>
+  mutate(sobrecosto = 100 * (precio / min(precio) - 1)) |>
+  ungroup() |>
+  ggplot(aes(comercio, factor(nombre_std, levels = orden), fill = sobrecosto)) +
+  geom_tile(color = "white", linewidth = 1) +
+  geom_text(aes(label = ifelse(sobrecosto == 0, "mínimo", sprintf("+%.1f %%", sobrecosto))),
+            size = 3.3) +
+  scale_fill_gradient(low = "#f7f7f7", high = "#d6604d", name = "Sobrecosto (%)") +
+  labs(x = NULL, y = NULL, caption = etiqueta_ejec) +
+  theme_minimal(base_size = 11) +
+  theme(panel.grid = element_blank())
+```
+
+Cada celda indica cuánto más se paga en ese comercio frente a la opción más barata de la misma presentación. Las celdas más oscuras están en el papel higiénico: el Suave Gold ×12 en Olímpica, el Rosal ×12 en Carulla y Éxito, y el Rosal ×4 en Olímpica.
+
+```{r}
+#| label: fig-ahorro
+#| fig-cap: "Ahorro máximo por presentación (precio más alto menos precio más bajo)"
+#| fig-height: 5.5
+precios |>
+  group_by(nombre_std) |>
+  summarise(ahorro = max(precio) - min(precio), pct = 100 * ahorro / max(precio)) |>
+  ggplot(aes(ahorro, reorder(nombre_std, ahorro))) +
+  geom_col(fill = "grey45", width = 0.7) +
+  geom_text(aes(label = sprintf("%s (%.1f %%)", cop(ahorro), pct)), hjust = -0.08, size = 3.3) +
+  scale_x_continuous(labels = label_dollar(prefix = "$", big.mark = ".", decimal.mark = ","),
+                     expand = expansion(mult = c(0, 0.35))) +
+  labs(x = "Ahorro (COP)", y = NULL, caption = etiqueta_ejec) +
+  theme_minimal(base_size = 11) +
+  theme(panel.grid.minor = element_blank(), panel.grid.major.y = element_blank())
+```
+
+Los mayores ahorros en pesos se concentran en los empaques de 12 rollos de papel higiénico. En toallas de cocina, servilletas pequeñas y desechables el ahorro es de pocos cientos de pesos.
+
+## Precio por unidad de contenido
+
+```{r}
+#| label: fig-unidad
+#| fig-cap: "Precio por metro de papel higiénico según marca, tamaño y comercio"
+#| fig-height: 4.5
+precios |>
+  filter(unidad == "m") |>
+  mutate(ppm = precio / contenido,
+         tamano = paste0("x", n_unidades, " rollos")) |>
+  ggplot(aes(tamano, ppm, fill = comercio)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  geom_text(aes(label = round(ppm)), position = position_dodge(width = 0.8),
+            vjust = -0.4, size = 3) +
+  facet_wrap(~ marca_std) +
+  scale_fill_manual(values = colores) +
+  scale_y_continuous(labels = label_dollar(prefix = "$", big.mark = ".", decimal.mark = ","),
+                     expand = expansion(mult = c(0, 0.12))) +
+  labs(x = NULL, y = "Precio por metro (COP)", fill = "Comercio", caption = etiqueta_ejec) +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "top")
+```
+
+Solo se compara precio por metro entre empaques de la misma marca y línea; no se comparan marcas entre sí, porque tienen distinta calidad (número de hojas, suavidad). En las tres marcas el empaque de 12 rollos suele salir más barato por metro, pero no siempre: el Suave Gold ×12 en Olímpica cuesta por metro casi lo mismo que el ×4 en Éxito.
+
+# Limitaciones y conclusiones
+
+## Limitaciones
+
+-   **Momento de captura.** Los precios corresponden a la ejecución `r ID_PRINCIPAL` y pueden cambiar en cualquier momento; no son permanentes.
+-   **Promociones.** Parte de los precios corresponden a promociones temporales; las conclusiones pueden cambiar cuando terminen. Una segunda ejecución en otra fecha permitiría verificarlo.
+-   **Condiciones de compra.** No se consideraron costos de envío, montos mínimos, descuentos con tarjetas o programas de fidelización, ni medios de pago.
+-   **Ubicación.** Los precios y la disponibilidad pueden variar según la ciudad o la tienda asignada; se usaron los que el servicio devuelve sin seleccionar ubicación.
+-   **Mismo grupo empresarial.** Éxito y Carulla pertenecen al Grupo Éxito. Son comercios distintos con precios propios, pero comparten productos y, en varios casos, precios idénticos.
+-   **Cobertura de la categoría.** No hubo pañuelos con el mismo EAN en las tres tiendas, por lo que esa subcategoría no está en la comparación.
+-   **Uso de los datos.** El `robots.txt` de Olímpica bloquea las URL con `&` que usa la extracción. Los datos y las copias crudas se usan solo con fines académicos y para verificar la extracción, sin redistribución.
+-   **Calidad entre marcas.** Las comparaciones se hacen entre presentaciones idénticas; un menor precio por metro entre marcas distintas no implica que sean equivalentes.
+
+## Conclusión para el consumidor
+
+-   **No hay una tienda más barata en todo.** Olímpica gana en más presentaciones (7 de 13): toallas de cocina, platos, tenedores y algunos empaques grandes; Éxito gana en 6, sobre todo en papel de 4 rollos y servilletas pequeñas.
+-   **Para la canasta completa**, Éxito resulta la opción más económica (`r cop(canasta$total_canasta[1])`), aunque la diferencia con las otras dos tiendas es pequeña.
+-   **Donde más vale la pena comparar es el papel higiénico de 12 rollos**: las diferencias entre tiendas superan el 20 % (hasta \$7.950 en el Suave Gold ×12).
+-   **El empaque grande suele convenir, pero depende de la tienda.** En papel higiénico, el ×12 normalmente tiene menor precio por metro, pero un ×12 caro puede igualar a un ×4 barato. En servilletas Familia, el paquete de 300 no es más barato por unidad que el de 100 en la tienda adecuada.
+
+```{r}
+#| label: cierre
+#| include: false
+dbDisconnect(con)
+```

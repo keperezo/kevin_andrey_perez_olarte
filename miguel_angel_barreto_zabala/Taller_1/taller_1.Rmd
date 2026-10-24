@@ -1,0 +1,456 @@
+---
+title: "Taller 1 - Comparador de precios: lágrimas artificiales y medicamentos de aplicación ocular"
+author: "Miguel Barreto"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    df_print: paged
+params:
+  ejecutar_scraping: false     # TRUE = consulta los sitios (requiere FARMATODO_ALGOLIA_KEY)
+  reprocesar_offline: false    # TRUE = reconstruye una base desde raw/ sin consultar los sitios
+  db: "comparador_precios.sqlite"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, comment = "")
+library(DBI); library(RSQLite); library(dplyr); library(ggplot2); library(knitr);library(httr2); library(jsonlite); library(purrr); library(stringr); library(tibble);library(rmarkdown); library(scales)
+source("scraper.R")          # funciones de extracción, limpieza y carga (no se duplica código aquí)
+colores <- c("Farmatodo" = "#1b9e77", "Colsubsidio" = "#d95f02", "Farmacias Pasteur" = "#7570b3")
+fmt_cop <- scales::label_number(big.mark = ".", decimal.mark = ",", prefix = "$")
+```
+
+# 1. Introducción
+
+**Categoría registrada en la planilla:** *Lágrimas artificiales y medicamentos de aplicación ocular u ótica. Excluye soluciones para limpiar lentes de contacto.*
+
+**Objetivo.** Construir un comparador de precios a partir de datos extraídos con *web scraping* de tres comercios con venta en línea en Colombia (Farmatodo, Droguerías Colsubsidio y Farmacias Pasteur), para identificar dónde resulta más económico comprar cada presentación y qué tamaño ofrece el menor precio por mL, cuando la comparación es válida.
+
+**Delimitación aplicada.** COMPLETAR: pegar aquí el texto exacto de la delimitación de la planilla. Reglas de inclusión y exclusión usadas en el código (`estandarizar()` en `scraper.R`):
+
+| Se incluye | Se excluye (con el motivo que queda en la base) |
+|---|---|
+| Todo lo que aparece en la sección ocular/ótica del sitio: lágrimas artificiales, lubricantes, gotas, geles y ungüentos oftálmicos, gotas óticas | Soluciones y accesorios de lentes de contacto (excluidas por la delimitación del taller) |
+| | Productos de higiene de párpados y limpiadores (no son lágrimas ni medicamentos) |
+| | Productos de vía oral |
+| | Frascos de más de 30 mL (probable solución de lentes; se marca "revisar") |
+
+Se aplican las mismas reglas en los tres comercios. Los casos borde incluidos (por ejemplo, productos Renu o promociones) quedan marcados con `revisar_manual = 1`.
+
+**Productos comparables.** Se seleccionaron 15 presentaciones presentes en los tres comercios (ver sección 3).
+
+# 2. Fuentes y scraping
+
+```{r scraping}
+# Por defecto el documento NO consulta los sitios: lee la base ya construida.
+# Para volver a extraer: rmarkdown::render("taller_1.Rmd", params = list(ejecutar_scraping = TRUE))
+if (isTRUE(params$ejecutar_scraping)) {
+  resumen <- recolectar_todo(db = params$db)   # en línea: guarda copias crudas en raw/
+  print(as.data.frame(resumen))
+}
+if (isTRUE(params$reprocesar_offline)) {
+  # modo sin conexión: reconstruye una base nueva (reproceso.sqlite) desde las copias de raw/
+  unlink("reproceso.sqlite")
+  fechas <- list.dirs("raw/colsubsidio", recursive = FALSE, full.names = FALSE)
+  for (f in fechas) recolectar_todo("reproceso.sqlite", offline = TRUE, fecha_dir = f)
+}
+con <- dbConnect(SQLite(), params$db)
+```
+
+```{r fuentes}
+kable(dbGetQuery(con,
+  "SELECT nombre AS comercio, url_base AS sitio, categorias_equivalentes AS secciones_consideradas_equivalentes FROM comercios"))
+```
+
+| Comercio | Estrategia de extracción | Endpoint / selector |
+|---|---|---|
+| Farmatodo | Consulta del índice Algolia que usa la propia página (`products-colombia`), con los mismos filtros del sitio. Paginación `page=0..n`, 100 productos por página. Lo ótico se obtuvo con la búsqueda interna del sitio ("gotas oticas"), porque no tiene sección ótica propia. | `POST https://api-search.farmatodo.com/1/indexes/*/queries`. Requiere el encabezado `x-algolia-api-key` (clave de solo búsqueda que el sitio entrega a todos sus visitantes). No se incluye en el código: se guarda en `.Renviron` (ver README). |
+| Colsubsidio | Tienda VTEX IO. Consulta `productSearchV3` del servicio interno de GraphQL, paginando de 12 en 12 (`from`/`to`). | `GET https://www.drogueriascolsubsidio.com/_v/segment/graphql/v1?operationName=productSearchV3`, ruta `salud-visual/soluciones-y-gotas`. |
+| Farmacias Pasteur | Igual que Colsubsidio (VTEX IO, mismo `productSearchV3`), ordenando por nombre para que la paginación sea estable. | `GET https://www.farmaciaspasteur.com.co/_v/segment/graphql/v1?operationName=productSearchV3`, ruta `salud-y-medicamentos/visuales/gotas-y-lubricantes`. |
+
+Cómo se identificaron los servicios: con las herramientas del navegador (F12, pestaña *Network*, filtro Fetch/XHR) se buscó la petición que devuelve los productos en JSON y se reprodujo con peticiones HTTP directas (paquete `httr2`). No se usó automatización de navegador.
+
+**Revisión de condiciones de uso.** COMPLETAR: resultado de revisar `robots.txt` y los términos de uso de cada sitio, y las medidas tomadas (pausa de 1 a 1,5 segundos entre peticiones, identificación del agente de usuario, uso académico).
+
+**Fecha y hora de captura.** Quedan en `observaciones.fecha_consulta`, en ISO 8601 con hora de Colombia.
+
+## 2.1 Verificación de completitud
+
+Se compara lo extraído con el total que declara el propio sitio al listar la categoría equivalente.
+
+```{r completitud}
+kable(dbGetQuery(con, "
+  SELECT substr(e.id, 1, 15) AS corrida, c.nombre AS comercio, e.inicio,
+         e.n_registros AS extraidos, e.total_sitio AS declarado_por_el_sitio,
+         e.estado, e.detalle
+  FROM ejecuciones e JOIN comercios c ON c.id = e.comercio_id
+  ORDER BY e.inicio, c.nombre"))
+```
+
+Todos los comercios coinsiden, verificando que efectivamente se extrajeron todos los datos
+
+## 2.2 Qué se excluyó y por qué
+Tabla de porque se excluyeron algunos resultados:
+```{r exclusiones}
+kable(dbGetQuery(con, "
+  SELECT c.nombre AS comercio, COALESCE(a.motivo_exclusion, '(incluido)') AS motivo, COUNT(*) AS n
+  FROM anuncios a JOIN comercios c ON c.id = a.comercio_id
+  GROUP BY c.nombre, motivo ORDER BY c.nombre, n DESC"))
+```
+
+# 3. Preparación de los datos
+
+Reglas de transformación (todas en `estandarizar()`):
+
+1. **Precios:** valores numéricos en COP. Un precio ausente queda `NULL`, nunca 0. Si hay precio antes del descuento se guarda en `precio_lista` y `promocion = 1`.
+2. **Texto original:** `nombre_original`, `descripcion_original` y `marca_original` se conservan tal como los publica el sitio. Las versiones estandarizadas van en campos propios (`nombre_estandar`, `marca_estandar`).
+3. **Marca:** se toma del nombre del producto con una lista de marcas conocidas, porque el campo "Marca Comercial" de Colsubsidio es inconsistente (por ejemplo, Hialsoft figuraba como "Chocobreak").
+4. **Contenido:** se extrae en mL o g de la presentación o del nombre. Los mg se ignoran (suelen ser concentración, no contenido del envase). En ofertas, combos, "gratis", "pague 1 lleve 2" y similares el contenido total es ambiguo y queda `NULL`.
+5. **Registro Invima:** Colsubsidio y Pasteur lo publican; se normaliza quitando guiones, el sufijo de renovación (R1, R2) y ceros a la izquierda. Farmatodo **no** lo publica (su campo `brand` es un código fijo), por lo que no se usa.
+6. **Correspondencia entre comercios:** por reglas documentadas sobre el nombre: mismo producto y variante, mismo contenido en mL, una sola unidad y exactamente un anuncio por comercio. Si una regla no cumple, el producto no se marca como comparable.
+
+```{r comparables}
+informe <- asignar_comparables(params$db)
+kable(informe, caption = "Resultado de aplicar las reglas de correspondencia")
+```
+
+```{r correspondencia}
+kable(dbGetQuery(con, "
+  SELECT p.nombre AS producto, c.nombre AS comercio, a.sku, a.nombre_original AS anuncio
+  FROM anuncios a JOIN productos p ON p.id = a.producto_id
+  JOIN comercios c ON c.id = a.comercio_id
+  ORDER BY p.id, c.nombre"), caption = "Anuncio de cada comercio asignado a cada producto comparable")
+```
+
+Se verifica todos los medicamentos a comparar entre las paginas son equivalentes y tambien si la descripcion concuerda con el producto.
+
+# 4. Base de datos SQLite
+
+```{r esquema}
+cat(dbGetQuery(con, "SELECT sql FROM sqlite_master WHERE type = 'table' ORDER BY name")$sql, sep = "\n\n")
+```
+
+**Relaciones.** `observaciones` (precio en un momento dado) apunta a `anuncios` (el producto tal como aparece en un comercio, con su texto original) y a `ejecuciones`. `anuncios` apunta a `comercios` y, si es comparable, a `productos` (identificador común entre comercios). La restricción `UNIQUE(anuncio_id, fecha_consulta)` impide insertar dos veces la misma observación, y las ejecuciones nuevas se agregan sin sobrescribir las anteriores.
+
+Se crean dos vistas para simplificar las consultas: `v_comparables` (una fila por observación de un producto comparable, con el identificador de corrida) y `v_ultima` (la corrida más reciente).
+
+```{r vistas}
+invisible(dbExecute(con, "
+  CREATE VIEW IF NOT EXISTS v_comparables AS
+  SELECT substr(o.ejecucion_id, 1, 15) AS corrida, o.fecha_consulta,
+         p.id AS producto_id, p.nombre AS producto, p.contenido_valor, p.contenido_unidad,
+         c.nombre AS comercio, a.id AS anuncio_id, a.sku, a.url,
+         o.precio, o.precio_lista, o.promocion, o.disponible
+  FROM observaciones o
+  JOIN anuncios a  ON a.id = o.anuncio_id
+  JOIN productos p ON p.id = a.producto_id
+  JOIN comercios c ON c.id = a.comercio_id
+  WHERE a.comparable = 1"))
+invisible(dbExecute(con, "CREATE VIEW IF NOT EXISTS v_ultima AS SELECT MAX(corrida) AS corrida FROM v_comparables"))
+```
+
+**Validaciones.**
+
+```{r validaciones}
+cat("Violaciones de llaves foráneas:", nrow(dbGetQuery(con, "PRAGMA foreign_key_check")), "\n")
+cat("Observaciones con fecha_consulta vacía:",
+    dbGetQuery(con, "SELECT COUNT(*) n FROM observaciones WHERE fecha_consulta IS NULL OR fecha_consulta = ''")$n, "\n")
+cat("Ejemplo de fecha de consulta:", dbGetQuery(con, "SELECT fecha_consulta FROM observaciones LIMIT 1")$fecha_consulta, "\n")
+```
+
+# 5. Consultas SQL
+
+Los precios representan el momento y las condiciones de cada captura; no son permanentes. Salvo que se indique otra cosa, las consultas usan la corrida más reciente.
+
+## Pregunta 1. ¿Cuántos comercios, productos/presentaciones y observaciones contiene la base? ¿Cuántos productos aporta cada comercio?
+
+```{r q1}
+kable(dbGetQuery(con, "
+  SELECT (SELECT COUNT(*) FROM comercios)     AS comercios,
+         (SELECT COUNT(*) FROM productos)     AS productos_comparables,
+         (SELECT COUNT(*) FROM anuncios)      AS anuncios,
+         (SELECT COUNT(*) FROM observaciones) AS observaciones,
+         (SELECT COUNT(*) FROM ejecuciones)   AS ejecuciones"))
+kable(dbGetQuery(con, "
+  SELECT c.nombre AS comercio, COUNT(*) AS anuncios, SUM(a.incluido) AS incluidos,
+         SUM(a.comparable) AS comparables,
+         (SELECT COUNT(*) FROM observaciones o JOIN anuncios a2 ON a2.id = o.anuncio_id
+           WHERE a2.comercio_id = c.id) AS observaciones
+  FROM comercios c JOIN anuncios a ON a.comercio_id = c.id
+  GROUP BY c.id ORDER BY c.nombre"))
+```
+
+> **Interpretación:** Al final Colsubsidio cuenta con 85 datos, Pasteur 69 y Farmatodo 50; dejando 15 posibles comparaciones entre ellas, muchas de estas no fueron comparables por temas de nombres o de que alguno de ellos no lo tenia
+
+## Pregunta 2. En una misma ejecución, ¿se obtuvieron al menos 24 observaciones comparables? ¿Hay registros repetidos del mismo producto y comercio?
+
+```{r q2}
+kable(dbGetQuery(con, "
+  SELECT corrida, COUNT(*) AS obs_comparables, COUNT(DISTINCT producto_id) AS productos,
+         COUNT(DISTINCT comercio) AS comercios,
+         COUNT(*) - COUNT(DISTINCT anuncio_id) AS observaciones_repetidas,
+         CASE WHEN COUNT(*) >= 24 AND COUNT(DISTINCT comercio) >= 3 THEN 'SI' ELSE 'NO' END AS cumple_24
+  FROM v_comparables GROUP BY corrida ORDER BY corrida"))
+kable(dbGetQuery(con, "
+  SELECT producto_id, comercio_id, COUNT(*) AS anuncios
+  FROM anuncios WHERE comparable = 1 GROUP BY producto_id, comercio_id HAVING COUNT(*) > 1"),
+  caption = "Productos con más de un anuncio por comercio (debe quedar vacía)")
+```
+
+> **Interpretación:** 15 Productos x 3 comercios nos deja un total de 45 observaciones, tambien verificamos que no se repita alguna observacion.
+
+## Pregunta 3. Para cada presentación comparable: precio mínimo, máximo y promedio. ¿Qué comercio ofrece el menor precio? (con empates)
+
+```{r q3}
+kable(dbGetQuery(con, "
+  WITH p AS (SELECT * FROM v_comparables
+             WHERE corrida = (SELECT corrida FROM v_ultima) AND precio IS NOT NULL),
+       s AS (SELECT producto_id, producto, MIN(precio) AS minimo, MAX(precio) AS maximo,
+                    ROUND(AVG(precio)) AS promedio, COUNT(*) AS n_comercios
+             FROM p GROUP BY producto_id)
+  SELECT s.producto, s.minimo, s.maximo, s.promedio, s.n_comercios,
+         GROUP_CONCAT(p.comercio, ' / ') AS comercio_mas_barato
+  FROM s JOIN p ON p.producto_id = s.producto_id AND p.precio = s.minimo
+  GROUP BY s.producto_id ORDER BY s.producto"))
+```
+
+> **Interpretación:** Farmatodo y Colsubsidio tienden a intercalarse el primer lugar con los precios mínimos dependiendo del producto específico. Pasteur, por su parte, aparece en muy pocas ocasiones como la opción más económica y suele jalonar el precio promedio hacia arriba, particularmente en las líneas especializadas como Hylo Gel.
+
+## Pregunta 4. Ahorro en COP y en % al elegir la oferta más económica de cada presentación
+
+```{r q4}
+kable(dbGetQuery(con, "
+  WITH p AS (SELECT * FROM v_comparables
+             WHERE corrida = (SELECT corrida FROM v_ultima) AND precio IS NOT NULL)
+  SELECT producto, MIN(precio) AS pmin, MAX(precio) AS pmax,
+         MAX(precio) - MIN(precio) AS ahorro_cop,
+         ROUND(100.0 * (MAX(precio) - MIN(precio)) / MAX(precio), 1) AS ahorro_pct
+  FROM p GROUP BY producto_id HAVING COUNT(DISTINCT comercio) >= 2 ORDER BY producto"))
+```
+
+> **Interpretación:** Los ahorros en pesos (COP) fluctúan de forma importante. En lágrimas artificiales de gama alta (línea Systane o Hylo), tomarse el trabajo de elegir la farmacia más barata representa un ahorro porcentual entre el 20% y el 30%, lo que se traduce directamente en más de $15.000 de diferencia por un solo frasco.
+
+## Pregunta 5. Tamaños del mismo producto: ¿qué presentación y comercio tienen el menor precio por mL?
+
+Solo se comparan tamaños del mismo producto y formulación (Freegen PF 0.5 % y Optive Fusion, en 10 y 15 mL). No se mezclan productos distintos en un mismo ranking.
+
+```{r q5}
+q5 <- dbGetQuery(con, "
+  WITH base AS (
+    SELECT producto, comercio, contenido_valor AS ml, precio, precio / contenido_valor AS cop_ml,
+           TRIM(SUBSTR(producto, 1, INSTR(producto, ' ' || CAST(CAST(contenido_valor AS INTEGER) AS TEXT) || ' mL') - 1)) AS familia
+    FROM v_comparables
+    WHERE corrida = (SELECT corrida FROM v_ultima) AND precio IS NOT NULL AND contenido_unidad = 'mL'),
+  multi AS (SELECT familia FROM base GROUP BY familia HAVING COUNT(DISTINCT ml) > 1)
+  SELECT familia, producto, comercio, ml, precio, ROUND(cop_ml, 1) AS cop_por_ml,
+         RANK() OVER (PARTITION BY familia ORDER BY cop_ml) AS puesto
+  FROM base WHERE familia IN (SELECT familia FROM multi) ORDER BY familia, cop_ml, comercio")
+kable(q5)
+```
+
+> **Interpretación:** Al comparar tamaños (por ejemplo, Freegen PF u Optive Fusion en 10 vs 15 mL), la matemática financiera básica se cumple: el frasco de 15 mL requiere un desembolso de caja inicial mayor, pero diluye el costo, otorgando un precio por mL inferior. Si el paciente tiene un tratamiento crónico, financieramente le conviene comprar la presentación más grande.
+
+## Pregunta 6. Mayores diferencias de precio entre comercios (por ahorro porcentual)
+
+```{r q6}
+q6 <- dbGetQuery(con, "
+  WITH p AS (SELECT * FROM v_comparables
+             WHERE corrida = (SELECT corrida FROM v_ultima) AND precio IS NOT NULL),
+       s AS (SELECT producto_id, producto, MIN(precio) AS pmin, MAX(precio) AS pmax
+             FROM p GROUP BY producto_id HAVING COUNT(DISTINCT comercio) >= 2)
+  SELECT s.producto, s.pmin, s.pmax, s.pmax - s.pmin AS ahorro_cop,
+         ROUND(100.0 * (s.pmax - s.pmin) / s.pmax, 1) AS ahorro_pct,
+         (SELECT GROUP_CONCAT(comercio, ' / ') FROM p WHERE p.producto_id = s.producto_id AND p.precio = s.pmin) AS mas_barato,
+         (SELECT GROUP_CONCAT(comercio, ' / ') FROM p WHERE p.producto_id = s.producto_id AND p.precio = s.pmax) AS mas_caro
+  FROM s ORDER BY ahorro_pct DESC, ahorro_cop DESC")
+kable(q6)
+```
+
+> **Interpretación:** Las brechas más agresivas ocurren en las presentaciones de laboratorio especializado (como Hylo o Lagricel), donde comprar en Farmacias Pasteur puede costar hasta un 30% más frente a hacerlo en Colsubsidio. Las opciones genéricas o menos especializadas tienen precios más estabilizados entre competidores.
+## Pregunta 6 (complemento). ¿Cuánto de la diferencia se explica por promociones?
+
+El precio que se compara es el que cada sitio muestra al momento de la captura, y puede incluir descuentos. Aquí se separa el precio pagado del precio antes del descuento (`precio_lista`, que solo existe cuando el sitio muestra una promoción).
+
+```{r q6b}
+kable(dbGetQuery(con, "
+  WITH p AS (SELECT * FROM v_comparables
+             WHERE corrida = (SELECT corrida FROM v_ultima) AND precio IS NOT NULL)
+  SELECT comercio, COUNT(*) AS presentaciones, SUM(promocion) AS en_promocion,
+         ROUND(100.0 * SUM(promocion) / COUNT(*), 1) AS pct_en_promocion,
+         ROUND(AVG(CASE WHEN promocion = 1 THEN 100.0 * (precio_lista - precio) / precio_lista END), 1) AS descuento_promedio_pct
+  FROM p GROUP BY comercio ORDER BY comercio"),
+  caption = "Presentaciones comparables en promoción, por comercio")
+kable(dbGetQuery(con, "
+  WITH p AS (SELECT * FROM v_comparables
+             WHERE corrida = (SELECT corrida FROM v_ultima) AND precio IS NOT NULL)
+  SELECT producto, comercio, precio, precio_lista AS precio_antes_dto,
+         ROUND(100.0 * (precio_lista - precio) / precio_lista, 1) AS descuento_pct
+  FROM p WHERE promocion = 1 ORDER BY producto, comercio"),
+  caption = "Detalle de las presentaciones en promoción")
+kable(dbGetQuery(con, "
+  WITH p AS (SELECT *, COALESCE(precio_lista, precio) AS precio_ref FROM v_comparables
+             WHERE corrida = (SELECT corrida FROM v_ultima) AND precio IS NOT NULL)
+  SELECT producto, MIN(precio_ref) AS pmin_antes_dto, MAX(precio_ref) AS pmax_antes_dto,
+         ROUND(100.0 * (MAX(precio_ref) - MIN(precio_ref)) / MAX(precio_ref), 1) AS ahorro_pct_antes_dto
+  FROM p GROUP BY producto_id HAVING COUNT(DISTINCT comercio) >= 2
+  ORDER BY ahorro_pct_antes_dto DESC"),
+  caption = "Ahorro potencial usando el precio antes del descuento (sin promociones)")
+```
+
+> **Interpretación:** Gran parte de las disparidades vistas en la pregunta anterior están apalancadas por descuentos temporales (`precio_lista` > `precio`). Cuando corremos la sensibilidad calculando todo sobre el precio base (sin promoción), las diferencias relativas entre comercios se aplanan notablemente, demostrando que Colsubsidio suele ser competitivo a punta de ofertas aplicadas al checkout, no por tener precios de lista bajos.
+
+## Pregunta 6 (complemento 2). Canasta de las mismas presentaciones
+
+Para hablar de un comercio "en conjunto" solo es válido comparar una canasta con exactamente las mismas presentaciones y cantidades, con cobertura completa y precios de una misma ejecución. Aquí la canasta es una unidad de cada presentación comparable que tiene precio en los tres comercios. Como sensibilidad, se muestra también sin las tres variantes de Hylo, que es donde más difiere Farmacias Pasteur.
+
+```{r q6c}
+kable(dbGetQuery(con, "
+  WITH p AS (SELECT * FROM v_comparables
+             WHERE corrida = (SELECT corrida FROM v_ultima) AND precio IS NOT NULL),
+       completos AS (SELECT producto_id FROM p GROUP BY producto_id
+                     HAVING COUNT(DISTINCT comercio) = (SELECT COUNT(*) FROM comercios))
+  SELECT comercio, COUNT(*) AS presentaciones, SUM(precio) AS total_canasta,
+         SUM(CASE WHEN producto NOT LIKE 'Hylo%' THEN precio END) AS total_sin_hylo,
+         SUM(CASE WHEN producto NOT LIKE 'Hylo%' THEN 1 END) AS presentaciones_sin_hylo
+  FROM p WHERE producto_id IN (SELECT producto_id FROM completos)
+  GROUP BY comercio ORDER BY total_canasta"))
+```
+
+> **Interpretación:** Si asumiéramos el pago de una canasta comprando un frasco de cada producto, Colsubsidio resulta ser el ticket total más bajo. No obstante, al sacar de la canasta la marca Hylo (donde Pasteur penaliza muchísimo el acumulado por sus sobrecostos), la diferencia total entre comprar en Colsubsidio o Farmatodo se vuelve estadísticamente marginal.
+
+## Pregunta 7. Datos faltantes o inconsistentes que afectan la comparación
+
+```{r q7}
+kable(dbGetQuery(con, "
+  SELECT c.nombre AS comercio, COUNT(*) AS anuncios,
+         SUM(a.descripcion_original IS NULL OR TRIM(a.descripcion_original) = '') AS sin_descripcion,
+         SUM(a.marca_comercial IS NULL) AS sin_marca_comercial,
+         SUM(a.incluido = 1 AND a.contenido_valor IS NULL) AS sin_contenido,
+         SUM(a.incluido = 1 AND a.registro_invima_norm IS NULL) AS sin_registro_invima,
+         SUM(a.revisar_manual) AS para_revisar_a_mano
+  FROM anuncios a JOIN comercios c ON c.id = a.comercio_id
+  GROUP BY c.nombre ORDER BY c.nombre"))
+kable(dbGetQuery(con, "
+  SELECT c.nombre AS comercio, SUM(o.precio IS NULL) AS sin_precio,
+         SUM(o.precio <= 0) AS precio_no_positivo,
+         SUM(o.promocion = 1 AND (o.precio_lista IS NULL OR o.precio_lista <= o.precio)) AS promocion_inconsistente
+  FROM observaciones o JOIN anuncios a ON a.id = o.anuncio_id
+  JOIN comercios c ON c.id = a.comercio_id
+  GROUP BY c.nombre ORDER BY c.nombre"))
+```
+
+> **Interpretación:** Como se anticipó en el script, Farmatodo omite el código del registro Invima y lo reemplaza por un ID interno propio, imposibilitando cruzar tablas por esa vía. Por otro lado, Pasteur y Colsubsidio publican la descripción completa en la gran mayoría de casos. Decidí dejar estas celdas como `NULL` estrictos (y no ceros o textos vacíos) para no corromper las funciones de agregación (`AVG`, `MIN`) en SQLite.
+
+## Pregunta 8. Productos por comercio y ejecución; tamaño de la oferta; proporción con descripción, marca y contenido identificables
+
+```{r q8}
+kable(dbGetQuery(con, "
+  SELECT substr(o.ejecucion_id, 1, 15) AS corrida, c.nombre AS comercio,
+         COUNT(*) AS productos, SUM(a.incluido) AS incluidos,
+         ROUND(100.0 * SUM(a.incluido = 1 AND a.descripcion_original IS NOT NULL AND TRIM(a.descripcion_original) <> '') / SUM(a.incluido), 1) AS pct_descripcion,
+         ROUND(100.0 * SUM(a.incluido = 1 AND a.marca_estandar IS NOT NULL) / SUM(a.incluido), 1) AS pct_marca,
+         ROUND(100.0 * SUM(a.incluido = 1 AND a.contenido_valor IS NOT NULL) / SUM(a.incluido), 1) AS pct_contenido
+  FROM observaciones o JOIN anuncios a ON a.id = o.anuncio_id JOIN comercios c ON c.id = a.comercio_id
+  GROUP BY corrida, c.nombre ORDER BY corrida, c.nombre"))
+```
+
+> **Interpretación:** Colsubsidio posee la vitrina comercial más robusta en volumen, pero Farmatodo destaca en la limpieza de sus datos: casi el 100% de sus títulos permite extraer por regex la información de contenido (mL/g) sin lidiar con ambigüedades.
+
+# 6. Visualizaciones
+
+## 6.1 Precio de las mismas presentaciones entre comercios
+
+```{r g1, fig.height = 7, fig.width = 9}
+d1 <- dbGetQuery(con, "
+  SELECT producto, comercio, precio FROM v_comparables
+  WHERE corrida = (SELECT corrida FROM v_ultima) AND precio IS NOT NULL")
+ggplot(d1, aes(x = precio, y = reorder(producto, precio, FUN = max), color = comercio)) +
+  geom_point(size = 3.2) +
+  scale_color_manual(values = colores) +
+  scale_x_continuous(labels = fmt_cop) +
+  labs(title = "Precio por presentación y comercio", x = "Precio (COP)", y = NULL, color = "Comercio",
+       caption = "Misma presentación en los tres comercios. Precios de la última corrida.") +
+  theme_minimal()
+```
+
+> **Interpretación y limitaciones:** El gráfico ilustra la fuerte dispersión de precios en la mitad superior (productos caros). Los puntos morados (Pasteur) se recuestan consistentemente a la derecha (mayor precio). **Limitación:** El *scraping* toma una "foto" estática; si mañana Farmatodo lanza un "Día de Descuento", los puntos verdes se desplazarían de golpe a la izquierda. Tampoco se grafican costos ocultos de envío.
+
+## 6.2 Precio por mL en tamaños del mismo producto
+
+```{r g2, fig.height = 4.5, fig.width = 9}
+ggplot(q5, aes(x = factor(ml), y = cop_por_ml, fill = comercio)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~ familia) +
+  scale_fill_manual(values = colores) +
+  scale_y_continuous(labels = fmt_cop) +
+  labs(title = "Precio por mL según tamaño del envase", x = "Contenido del envase (mL)",
+       y = "COP por mL", fill = "Comercio",
+       caption = "Solo se comparan tamaños del mismo producto y formulación.") +
+  theme_minimal()
+```
+
+> **Interpretación y limitaciones:** Las barras muestran la caída en el costo marginal por mililitro al escalar de 10 a 15 mL. **Limitación:** Financieramente tiene sentido el envase grande, pero clínicamente asume que el producto no caduca antes de terminarse. En colirios libres de conservantes (PF), el tiempo de vida útil abierto es corto, por lo que el paciente podría tener que botar el saldo, perdiendo el ahorro estimado.
+
+## 6.3 Oportunidades de ahorro entre comercios
+
+```{r g3, fig.height = 6.5, fig.width = 9}
+ggplot(q6, aes(x = ahorro_pct, y = reorder(producto, ahorro_pct))) +
+  geom_col(fill = "grey35") +
+  geom_text(aes(label = paste0(ahorro_pct, " % - más barato: ", mas_barato)), hjust = -0.02, size = 3) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.6))) +
+  labs(title = "Ahorro potencial al comprar en el comercio más barato", x = "Ahorro (%)", y = NULL,
+       caption = "Ahorro % = 100 x (Pmax - Pmin) / Pmax, por presentación idéntica.") +
+  theme_minimal()
+```
+
+> **Interpretación y limitaciones:** Este diagrama sumariza el costo de oportunidad. Comprar sin validar en otra farmacia equivale a dejar entre 10% y 30% del dinero sobre la mesa. **Limitación:** Un ahorro de 15% en un producto que cuesta $20.000 son apenas $3.000; si el consumidor compra el más barato de cada marca en farmacias distintas, el pago de tres domicilios separados anulará cualquier ahorro unitario.
+
+## 6.4 Cambios de precio entre ejecuciones (si hay más de una)
+
+```{r evol, include = FALSE}
+# una observación por día (la última corrida de cada día), para comparar fechas distintas
+evol <- dbGetQuery(con, "
+  WITH ult AS (SELECT substr(corrida, 1, 8) AS dia, MAX(corrida) AS corrida
+               FROM v_comparables GROUP BY 1)
+  SELECT substr(v.corrida, 1, 8) AS dia, v.producto, v.comercio, v.precio
+  FROM v_comparables v JOIN ult u ON u.corrida = v.corrida
+  WHERE v.precio IS NOT NULL")
+evol$dia <- as.Date(evol$dia, format = "%Y%m%d")
+```
+
+```{r g4, eval = length(unique(evol$dia)) > 1, fig.height = 8, fig.width = 10}
+ggplot(evol, aes(x = dia, y = precio, color = comercio, group = comercio)) +
+  geom_line() + geom_point() +
+  facet_wrap(~ producto, scales = "free_y") +
+  scale_color_manual(values = colores) +
+  scale_y_continuous(labels = fmt_cop) + scale_x_date(date_labels = "%d-%m") +
+  labs(title = "Cambios de precio entre fechas", x = "Fecha (última corrida de cada día)",
+       y = "Precio (COP)", color = "Comercio",
+       caption = "Cada panel tiene su propia escala vertical: las variaciones pequeñas se ven amplificadas.") +
+  theme_minimal()
+```
+
+Si hay varias corridas el mismo día, este gráfico usa solo la última de cada día; las corridas intermedias quedan en la base y se pueden consultar con la pregunta 2. Este gráfico solo aparece cuando la base tiene corridas de al menos dos fechas distintas.
+
+# 7. Limitaciones y conclusiones
+
+**Limitaciones.**
+
+- Los precios corresponden al momento y a las condiciones de cada captura, y no deben presentarse como permanentes. Pueden incluir promociones vigentes; no incluyen costos de envío, y el precio de Farmatodo corresponde a Bogotá.
+- Farmatodo oculta en su listado los productos agotados y los que requieren fórmula médica, por lo que su oferta ocular medicada puede estar subrepresentada. Lo ótico de Farmatodo se obtuvo por búsqueda y no por una sección propia. COMPLETAR: estado de lo ótico en Colsubsidio y Pasteur.
+- La correspondencia en Farmatodo se hizo por reglas sobre el nombre, porque el sitio no publica el registro Invima.
+- Las exclusiones (higiene de párpados, volumen mayor de 30 mL, vía oral) son decisiones de delimitación documentadas; los casos dudosos quedan en `revisar_manual`.
+- En ofertas y combos el contenido es ambiguo y no se calculó precio por mL.
+- Una comparación de precios no es una recomendación de sustitución terapéutica: solo se comparan presentaciones del mismo producto y formulación.
+
+**Conclusión para el consumidor.** - **Estado de lo ótico:** A diferencia de Farmatodo, Colsubsidio y Pasteur tampoco manejan una subcategoría limpia de "solo productos óticos"; los mezclan con los oftálmicos bajo el gran paraguas de "cuidado visual/sentidos". Esto nos obligó a depender fuertemente de la clasificación por expresiones regulares (`regex`) en R sobre el título y descripción original.
+
+**Conclusión para el consumidor:** 
+A partir del análisis de los datos extraídos, se concluye que no existe el concepto de "la farmacia siempre más barata". Si la prescripción se enfoca en lágrimas especializadas (como la línea Systane o Hylo), la recomendación es cotizar primero en Colsubsidio y Farmatodo, evitando Pasteur que suele cobrar el precio de lista pleno. 
+
+Adicionalmente, si el paciente afronta un tratamiento recurrente (como síndrome de ojo seco), debe buscar sistemáticamente las presentaciones de 15 mL; la economía de escala amortiza el mayor gasto inicial reduciendo drásticamente el costo por mililitro. Finalmente, el consumidor debe consolidar su carrito; intentar perseguir el "precio mínimo" frasco por frasco en comercios distintos es un error logístico, ya que el cobro múltiple de envíos a domicilio destruirá todo el ahorro proyectado (que típicamente ronda entre los $5.000 y $20.000 COP por unidad).
+
+```{r cierre, include = FALSE}
+dbDisconnect(con)
+```

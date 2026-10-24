@@ -1,0 +1,949 @@
+---
+title: "Taller 1 - Comparador de precios: Ortopedia y rehabilitación"
+author: "Juan Pablo Lara Chaves"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    code_folding: show
+    theme: flatly
+    df_print: paged
+lang: es
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, warning = FALSE,
+  fig.align = "center", fig.width = 9, fig.height = 5.5, dpi = 120
+)
+
+# Lenguaje: R.  (rvest, httr2 y jsonlite los carga scraper.R, no este documento)
+library(DBI)
+library(RSQLite)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(stringi)
+library(purrr)
+library(tibble)
+library(readr)
+library(ggplot2)
+library(scales)
+library(knitr)
+
+# Zona horaria Colombia (sin horario de verano: el desfase es siempre -05:00)
+Sys.setenv(TZ = "America/Bogota")
+```
+
+```{r parametros}
+CATEGORIA <- "Ortopedia y rehabilitación"
+RUTA_DB   <- "comparador_precios.sqlite"
+RUTA_RAW  <- "raw"
+
+# "offline": reprocesa las copias guardadas en raw/ (por defecto, no consulta los sitios)
+# "online" : vuelve a ejecutar el scraping con scraper.R y luego reprocesa raw/
+MODO <- "offline"
+
+COMERCIOS <- c("farmatodo", "locatel", "ortopedicos_futuro")
+
+# Colores consistentes en todos los gráficos
+COLORES <- c(farmatodo = "#1b9e77", locatel = "#d95f02", ortopedicos_futuro = "#7570b3")
+
+# Estado de cada comercio en la ejecución (completa / parcial / fallida) y su justificación
+ESTADO_EJEC <- c(farmatodo = "parcial", locatel = "completa", ortopedicos_futuro = "completa")
+NOTA_EJEC   <- c(
+  farmatodo          = "Sin subcategoría 'muletas' (robots.txt bloquea /buscar*); el sitio no muestra contador por categoría",
+  locatel            = "Paginación ?page=N hasta página vacía",
+  ortopedicos_futuro = "Paginación ?page=N hasta página vacía"
+)
+
+cop <- function(x) paste0("$", format(round(x), big.mark = ".", decimal.mark = ",", scientific = FALSE, trim = TRUE))
+pct <- function(x) paste0(format(x, decimal.mark = ",", trim = TRUE), " %")
+```
+
+# Introducción
+
+## Categoría seleccionada
+
+**Categoría:** Ortopedia y rehabilitación.
+
+**Productos que incluye (según planilla):** rodilleras, tobilleras, muñequeras, fajas de soporte, medias de compresión, bastones, muletas y elementos de rehabilitación.
+
+## Objetivo
+
+Construir un comparador de precios a partir de datos obtenidos por web scraping en tres comercios colombianos con venta en línea (Farmatodo, Locatel y Ortopédicos Futuro). El análisis identifica **8 productos o presentaciones disponibles simultáneamente en los tres comercios**, compara sus precios y orienta al consumidor sobre dónde conviene comprar cada uno. Los datos se organizan en SQLite y se analizan con consultas SQL y gráficos.
+
+# Fuentes y scraping
+
+## Comercios seleccionados
+
+| Comercio | URL base | Tipo | Plataforma |
+|---|---|---|---|
+| Ortopédicos Futuro | https://www.ortopedicosfuturo.com | Tienda especializada | VTEX |
+| Locatel | https://www.locatelcolombia.com | Farmacia y ortopedia | VTEX |
+| Farmatodo | https://www.farmatodo.com.co | Farmacia y cuidado personal | Angular |
+
+**Justificación:**
+
+- Los tres tienen presencia en línea en Colombia y envío nacional.
+- Los tres dedican una sección completa a Ortopedia y rehabilitación.
+- Ortopédicos Futuro es especialista en la categoría, lo que aporta profundidad de catálogo.
+- Locatel y Farmatodo permiten comparar con cadenas de farmacia de amplia cobertura.
+
+## Equivalencia entre la categoría registrada y las secciones de cada comercio
+
+Cada comercio organiza su catálogo de forma distinta, por lo que se identificó qué páginas corresponden a la categoría registrada en la planilla.
+
+### Ortopédicos Futuro
+
+| Sección del sitio | URL | Categoría asignada |
+|---|---|---|
+| Cuidado corporal / Tratamiento de lesiones / Rodilla | `/cuidado-corporal/tratamiento-de-lesiones/rodilla` | Rodilleras |
+| Cuidado corporal / Tratamiento de lesiones / Tobillo | `/cuidado-corporal/tratamiento-de-lesiones/tobillo` | Tobilleras |
+| Cuidado corporal / Tratamiento de lesiones / Brazo y mano | `/cuidado-corporal/tratamiento-de-lesiones/brazo-y-mano` | Muñequeras |
+| Cuidado corporal / Prendas de vestir / Fajas | `/cuidado-corporal/prendas-de-vestir/fajas` | Fajas de soporte |
+| Medias de compresión | `/medias-de-compresion` | Medias de compresión |
+| Bienestar en casa / Movilidad asistida | `/bienestar-en-casa/movilidad-asistida/bastones-y-caminador-y-muletas` | Bastones y movilidad |
+| Deporte y fitness / Terapia física | `/deporte-y-fitness/terapia-fisica` | Elementos de rehabilitación |
+
+### Locatel
+
+| Sección del sitio | URL | Categoría asignada |
+|---|---|---|
+| Ortopedia y traumatología / Extremidades inferiores | `/dispositivos-medicos-en-casa/ortopedia-traumatologia/extremidades-inferiores` | Rodilleras, tobilleras |
+| Ortopedia y traumatología / Extremidades superiores | `/dispositivos-medicos-en-casa/ortopedia-traumatologia/extremidades-superiores` | Muñequeras |
+| Ortopedia y traumatología / Tronco | `/dispositivos-medicos-en-casa/ortopedia-traumatologia/tronco` | Fajas de soporte |
+| Ortopedia y traumatología / Prendas de vestir | `/dispositivos-medicos-en-casa/ortopedia-traumatologia/prendas-vestir` | Medias |
+| Aparatos de movilidad asistida / Bastones | `/dispositivos-medicos-en-casa/aparatos-movilidad-asistida/bastones` | Bastones |
+| Aparatos de movilidad asistida / Muletas | `/dispositivos-medicos-en-casa/aparatos-movilidad-asistida/muletas` | Muletas |
+| Ortopedia y traumatología / Fisioterapia | `/dispositivos-medicos-en-casa/ortopedia-traumatologia/fisioterapia` | Elementos de rehabilitación |
+
+### Farmatodo
+
+| Sección del sitio | URL | Categoría asignada |
+|---|---|---|
+| Rehabilitación y equipos médicos / Rodilleras | `/categorias/salud-y-medicamentos/rehabilitacion-y-equipos-medicos/rodilleras` | Rodilleras |
+| Rehabilitación y equipos médicos / Tobilleras | `/categorias/salud-y-medicamentos/rehabilitacion-y-equipos-medicos/tobilleras` | Tobilleras |
+| Rehabilitación y equipos médicos / Muñequeras | `/categorias/salud-y-medicamentos/rehabilitacion-y-equipos-medicos/munequeras` | Muñequeras |
+| Rehabilitación y equipos médicos / Fajas lumbares y abdominales | `/categorias/salud-y-medicamentos/rehabilitacion-y-equipos-medicos/fajas-lumbares-y-abdominales` | Fajas de soporte |
+| Rehabilitación y equipos médicos / Calcetines y medias terapéuticas | `/categorias/salud-y-medicamentos/rehabilitacion-y-equipos-medicos/calcetines-y-medias-terapeuticas` | Medias de compresión |
+| Rehabilitación y equipos médicos / Andadores | `/categorias/salud-y-medicamentos/rehabilitacion-y-equipos-medicos/andadores` | Movilidad asistida |
+| Rehabilitación y equipos médicos / Productos para rehabilitación | `/categorias/salud-y-medicamentos/rehabilitacion-y-equipos-medicos/productos-para-rehabilitacion` | Elementos de rehabilitación |
+
+## Productos y subcategorías excluidos
+
+### Exclusiones por delimitación de la categoría
+
+Se aplicó la delimitación de la planilla «Categorías de Productos - Estudiantes». Se excluyeron:
+
+| Tipo de producto | Motivo de exclusión |
+|---|---|
+| Equipos de medición (tensiómetros, glucómetros, termómetros) | Pertenecen a "Equipos de medición y monitoreo" |
+| Dispositivos de cuidado en casa (nebulizadores, aspiradores nasales, bolsas de agua caliente) | Pertenecen a "Dispositivos para cuidado en casa" |
+| Medicamentos antiinflamatorios tópicos | Pertenecen a "Medicamentos dermatológicos" |
+| Productos de primeros auxilios (gasas, vendas, curitas) | Pertenecen a "Primeros auxilios y curación" |
+| Órtesis ya listadas por separado (rodilleras, tobilleras, muñequeras, fajas, medias) | Ya tienen su propia subcategoría en la planilla |
+
+### Exclusión específica en Farmatodo: subcategoría "Muletas"
+
+Farmatodo no expone una URL de categoría para muletas; solo una URL de búsqueda:
+
+```
+https://www.farmatodo.com.co/buscar?product=muletas&departamento=Todos&filtros=
+```
+
+Su `robots.txt` bloquea explícitamente las rutas de búsqueda:
+
+```
+User-Agent: *
+Disallow: /buscar*
+Disallow: /busqueda*
+```
+
+Para respetar las condiciones declaradas por el sitio se **excluyó la subcategoría "Muletas"** del scraping de Farmatodo. Las muletas sí se extrajeron en Locatel y Ortopédicos Futuro, donde existen como categoría formal. Por esto la ejecución de Farmatodo se registra como **parcial** (tabla `ejecuciones`).
+
+## Estrategia de extracción
+
+### Tecnología usada
+
+La extracción se hizo en R con `read_html_live()` de `rvest`, que abre un Chrome real y ejecuta el JavaScript de cada sitio, porque los tres comercios cargan productos dinámicamente y no bastaba con `read_html()` estático. Se usó un User-Agent identificable como bot académico (`TallerMineriaDatos-UNAL/1.0`), sin correo personal; los tres sitios respondieron sin bloquear.
+
+### Scroll y paginación por comercio
+
+| Comercio | Contenedor de scroll | Paginación |
+|---|---|---|
+| Ortopédicos Futuro | `window.scrollBy(0, 1000)` | `?page=N` (la primera página va sin parámetro) |
+| Locatel | `window.scrollBy(0, 1000)` | `?page=N` |
+| Farmatodo | `document.querySelector('#app-component-router-outlet').scrollBy(0, 500)` | `?pag=N` (la primera página va sin parámetro) |
+
+### Detección del fin de categoría
+
+La extracción de cada categoría se detiene cuando una página devuelve **0 productos**; no se usan umbrales arbitrarios porque las categorías tienen tamaños distintos.
+
+## Módulo de extracción
+
+El código de scraping vive en `scraper.R`, separado de este documento. Aquí solo se carga el módulo y se llaman sus funciones.
+
+```{r cargar_scraper}
+source("scraper.R")
+```
+
+### Modo en línea
+
+Con `MODO <- "online"` (chunk de parámetros) se ejecuta una recolección completa con una sola llamada. La función registra la hora de cada comercio y guarda una copia por comercio en `raw/<comercio>/`:
+
+```{r scraping_online, eval = (MODO == "online")}
+registro_ejecucion <- ejecutar_recoleccion(comercios = COMERCIOS, raw_dir = RUTA_RAW)
+registro_ejecucion
+```
+
+### Modo sin conexión
+
+Se reprocesan **todas** las copias guardadas en `raw/` (si hay más de una ejecución, se conservan todas), sin volver a consultar los sitios.
+
+```{r modo_offline}
+leer_raw <- function(comercio) {
+  archivos <- list.files(file.path(RUTA_RAW, comercio), pattern = "^productos_.*\\.csv$", full.names = TRUE)
+  if (length(archivos) == 0) stop("No hay CSV en ", file.path(RUTA_RAW, comercio))
+  map_dfr(archivos, function(a) {
+    read_csv(a, col_types = cols(.default = col_character()), show_col_types = FALSE) |>
+      mutate(comercio = comercio, archivo_raw = basename(a))
+  })
+}
+
+raw_por_comercio <- set_names(map(COMERCIOS, leer_raw), COMERCIOS)
+
+tibble(comercio = COMERCIOS,
+       archivos = map_int(COMERCIOS, ~ length(list.files(file.path(RUTA_RAW, .x), pattern = "^productos_.*\\.csv$"))),
+       filas    = map_int(raw_por_comercio, nrow)) |>
+  kable(caption = "Copias crudas leídas (raw/)")
+```
+
+# Preparación de los datos
+
+## Unificación de columnas
+
+Los tres comercios devuelven columnas ligeramente distintas. Se alinean a un esquema común conservando, cuando existen, `marca`, `sku` y `descuento`.
+
+```{r unificar_columnas}
+columnas_comunes     <- c("comercio", "categoria", "nombre", "precio", "precio_lista",
+                          "url", "url_origen", "fecha_hora")
+columnas_opcionales  <- c("marca", "sku", "descuento")
+
+alinear <- function(df) {
+  for (col in setdiff(c(columnas_comunes, columnas_opcionales), names(df))) df[[col]] <- NA_character_
+  df |> select(all_of(c(columnas_comunes, columnas_opcionales)), archivo_raw)
+}
+
+crudo <- map_dfr(raw_por_comercio, alinear)
+cat("Filas crudas:", nrow(crudo), "\n")
+```
+
+## Tipos, fecha y hora
+
+El precio se convierte a numérico (COP). La fecha y hora de consulta llega en el CSV como `2026-10-09 20:45:12`; se interpreta en hora de Colombia y se guarda en SQLite como texto **ISO 8601 con desfase** (`2026-10-09T20:45:12-05:00`)
+
+```{r tipos}
+parse_fecha <- function(x) {
+  x <- x |> str_replace("T", " ") |> str_remove("\\s?(Z|[-+]\\d{2}:?\\d{2})$")
+  as.POSIXct(x, format = "%Y-%m-%d %H:%M:%S", tz = "America/Bogota")
+}
+a_numero <- function(x) suppressWarnings(as.numeric(x))
+
+datos <- crudo |>
+  mutate(
+    precio_num       = a_numero(precio),
+    precio_lista_num = a_numero(precio_lista),
+    fecha            = parse_fecha(fecha_hora)
+  )
+
+# Valores que tenían texto pero no se pudieron convertir (se reportan, no se ocultan)
+cat("Precios no convertibles:      ", sum(!is.na(datos$precio) & is.na(datos$precio_num)), "\n")
+cat("Precios de lista no convert.: ", sum(!is.na(datos$precio_lista) & is.na(datos$precio_lista_num)), "\n")
+cat("Fechas no interpretadas:      ", sum(is.na(datos$fecha)), "\n")
+stopifnot(!any(is.na(datos$fecha)))
+
+datos <- datos |>
+  mutate(
+    precio       = precio_num,
+    precio_lista = precio_lista_num,
+    fecha_hora   = format(fecha, "%Y-%m-%dT%H:%M:%S-05:00"),
+    url_origen   = coalesce(url_origen, url)   # Locatel y Ortopédicos Futuro: la URL es la de la página de listado
+  ) |>
+  select(-precio_num, -precio_lista_num)
+
+datos |>
+  group_by(comercio) |>
+  summarise(primera_consulta = min(fecha_hora), ultima_consulta = max(fecha_hora),
+            n_marcas_de_tiempo = n_distinct(fecha_hora), .groups = "drop") |>
+  kable(caption = "Ventana de captura por comercio")
+```
+
+Los tres comercios se capturaron el mismo día, en ventanas distintas; se considera **una sola ejecución de recolección** (`ejec_AAAAMMDD`), con un registro por comercio en la tabla `ejecuciones`. La marca de tiempo cambia por lote de scroll o página, por eso `fecha_hora` tiene varias marcas por comercio.
+
+## Duplicados
+
+Al hacer scroll y paginar, un mismo producto puede quedar capturado más de una vez **con marca de tiempo distinta**, por lo que `distinct()` sobre todas las columnas no lo elimina. Se considera duplicado un registro con igual comercio, categoría, nombre, precio y URL; se conserva la primera captura.
+
+```{r duplicados}
+antes <- datos |> count(comercio, name = "antes")
+
+datos <- datos |>
+  arrange(fecha) |>
+  distinct(comercio, categoria, nombre, precio, url, .keep_all = TRUE)
+
+despues <- datos |> count(comercio, name = "despues")
+duplicados_removidos <- left_join(antes, despues, by = "comercio") |> mutate(removidos = antes - despues)
+kable(duplicados_removidos, caption = "Duplicados removidos por comercio")
+```
+
+## Variables derivadas
+
+El texto original (`nombre`) **no se modifica**; las versiones estandarizadas van en campos propios.
+
+```{r derivadas}
+normalizar <- function(x) {
+  x |>
+    str_to_lower() |>
+    str_replace_all("[\u00ae\u2122*]", "") |>   # ® y ™ (escapes unicode: funciona en cualquier sistema)
+    stri_trans_general("Latin-ASCII") |>
+    str_replace_all("\\(r\\)", "") |>
+    str_replace_all("no[- ]*varix", "no-varix") |>   # No Varix / NoVarix / No- Varix
+    str_squish()
+}
+
+MARCAS <- tribble(
+  ~patron,            ~marca,
+  "no-varix",         "No-Varix",   "kamex",            "Kamex",
+  "recovery",         "Recovery",   "medivaric",        "Medivaric",
+  "actimove",         "Actimove",   "everlast",         "Everlast",
+  "\\bk6\\b",         "K6",         "trulife",          "Trulife",
+  "vivo\\+",          "Vivo+",      "wilson",           "Wilson",
+  "neoflex",          "Neoflex",    "pura\\+|\\bpura\\b", "Pura+",
+  "kromia",           "Kromia",     "yuwell",           "Yuwell",
+  "plenia",           "Plenia",     "\\bdrive\\b",      "Drive",
+  "konfort",          "Konfort",    "carex",            "Carex",
+  "anne shant?h?el",  "Anne Shantel", "sportiva",       "Sportiva",
+  "scholl",           "Dr. Scholl", "theraband",        "Theraband",
+  "interfisica",      "Interfisica","physio ?trauma",   "Physio Trauma",
+  "\\btme\\b",        "TME",        "impormedical",     "Impormedical",
+  "\\blowe\\b",       "Lowe",       "unimarc",          "Unimarc",
+  "\\bmyd\\b",        "MYD",        "samsara",          "Samsara",
+  "tecnomed",         "Tecnomed",   "\\btulis\\b",      "Tulis",
+  "aspen",            "Aspen",      "maxwell",          "Maxwell"
+)
+
+detectar_marca <- function(x) {
+  map_chr(x, function(n) {
+    i <- which(str_detect(n, MARCAS$patron))
+    if (length(i)) MARCAS$marca[i[1]] else NA_character_
+  })
+}
+
+SUBCATEGORIAS <- tribble(
+  ~patron,                                                              ~subcategoria_std,
+  "\\bmedias?\\b|calcet|pantimedia|leotardo|antiemb",                    "medias de compresión",
+  "tobiller|tobillo|talomotion",                                         "tobilleras",
+  "rodiller|rodilla|genumotion|rotul",                                   "rodilleras",
+  "munequ|muneca|pulgar|rhizo|codera|epimotion|cabestrillo|hombro",      "muñequeras y miembro superior",
+  "faja|lumbar|costillero|corrector|columna|sacro|cinturilla|abdomen|bicicletero|brassier|soporte cardiaco", "fajas y tronco",
+  "baston|muleta|andador|caminador|axilar|canadiense|regaton|manilar",   "bastones, muletas y andadores"
+)
+
+detectar_subcat <- function(x) {
+  map_chr(x, function(n) {
+    i <- which(str_detect(n, SUBCATEGORIAS$patron))
+    if (length(i)) SUBCATEGORIAS$subcategoria_std[i[1]] else "otros de rehabilitación"
+  })
+}
+
+datos <- datos |>
+  mutate(
+    nombre_norm      = normalizar(nombre),
+    marca_std        = coalesce(detectar_marca(nombre_norm), str_to_title(marca)),
+    subcategoria_std = detectar_subcat(nombre_norm),
+    sku              = coalesce(sku, if_else(comercio == "farmatodo",
+                                             str_match(url, "/producto/(\\d+)-")[, 2], NA_character_)),
+    en_promocion     = if_else(!is.na(precio) & !is.na(precio_lista) & precio < precio_lista, 1L, 0L),
+    descuento_pct    = if_else(en_promocion == 1L, round(100 * (precio_lista - precio) / precio_lista, 1), NA_real_),
+    # unidades del empaque solo cuando el anuncio las declara ("x 2 und", "par", "individual x 1")
+    n_unidades       = coalesce(
+      as.integer(str_match(nombre_norm, "\\bx ?(\\d{1,3}) ?(?:und|unid\\w*|pares?)\\b")[, 2]),
+      as.integer(str_match(nombre_norm, "\\bindividual x (\\d{1,3})\\b")[, 2])
+    ),
+    ejecucion_id     = paste0("ejec_", format(fecha, "%Y%m%d"))
+  )
+
+# Identificador del anuncio dentro del comercio: SKU si existe; si no, el nombre normalizado.
+# Si dos filas comparten (comercio, anuncio, fecha_hora) se agrega un sufijo, para que la
+# restricción de unicidad de SQLite no descarte variantes distintas con el mismo nombre.
+datos <- datos |>
+  mutate(producto_comercio0 = coalesce(sku, nombre_norm)) |>
+  group_by(comercio, producto_comercio0, fecha_hora) |>
+  mutate(k = row_number(),
+         producto_comercio = if_else(k == 1, producto_comercio0, paste0(producto_comercio0, "#", k))) |>
+  ungroup() |>
+  select(-producto_comercio0, -k) |>
+  mutate(obs_id = row_number())
+
+cat("Observaciones tras la preparación:", nrow(datos), "\n")
+```
+
+```{r resumen_preparacion}
+datos |>
+  group_by(comercio) |>
+  summarise(
+    observaciones   = n(),
+    categorias_sitio = n_distinct(categoria),
+    precio_ausente  = sum(is.na(precio)),
+    precio_mediano  = median(precio, na.rm = TRUE),
+    en_promocion    = sum(en_promocion),
+    .groups = "drop"
+  ) |>
+  kable(caption = "Resumen de la base por comercio", format.args = list(big.mark = ".", decimal.mark = ","))
+```
+
+## Completitud de la recolección por categoría
+
+Para Locatel y Ortopédicos Futuro la recolección por categoría coincide con el total de productos que reporta la página, para farmatodo no se tiene dicho contador, pero como más adelante se verá, se tuvieron que eliminar duplicados.
+
+## Correspondencia de productos comparables
+
+Se exige mínimo **8 productos o presentaciones** disponibles en los **3 comercios**. Como cada comercio nombra distinto, la correspondencia se hizo con **reglas explícitas** sobre el nombre normalizado (marca + tipo + presentación). Cada regla queda guardada en la base (`reglas_emparejamiento`) con su confianza y una nota.
+
+Normalización del nombre: minúsculas, sin tildes ni símbolos (`®`, `™`, `*`), `No Varix` / `NoVarix` / `No- Varix` unificados como `no-varix`, espacios colapsados.
+
+| producto_id | Criterio |
+|---|---|
+| `NOVARIX_ANTIEMBOLICA_RODILLA_18-22_UNISEX` | No-Varix + antiembólica (T.V.P.) + rodilla + 18-22 mmHg |
+| `NOVARIX_MEDIA_RODILLA_MUJER_8-15` | No-Varix + media de compresión + mujer + 8-15 mmHg |
+| `NOVARIX_MEDIA_HOMBRE_20-30` | No-Varix + media de compresión + hombre + 20-30 mmHg (excluye "clásica") |
+| `NOVARIX_MEDIA_HOMBRE_15-20` | No-Varix + media de compresión + hombre + 15-20 mmHg (excluye jaspeado, algodón, cobre, fibras) |
+| `NOVARIX_MEDIA_MUJER_15-20_DIAMANTE` | No-Varix + mujer + 15-20 mmHg + diseño diamante |
+| `KAMEX_RODILLERA_MAGNETICA` | Rodillera magnética Kamex |
+| `ACTIMOVE_RODILLA_PATELA_ABIERTA_M` | Soporte deportivo de rodilla, patela abierta, Actimove, talla M |
+| `RECOVERY_ANILLO_DINAMICO_SMALL` | Anillo dinámico (Dissan) Recovery, talla Small / Pequeño |
+
+```{r comparables_reglas}
+# y("a", "b") -> regex que exige TODOS los términos, en cualquier orden
+y <- function(...) paste0("^", paste0("(?=.*", c(...), ")", collapse = ""))
+
+reglas <- tribble(
+  ~producto_id, ~comercio, ~patron, ~excluir, ~confianza, ~nota,
+
+  "NOVARIX_ANTIEMBOLICA_RODILLA_18-22_UNISEX", "farmatodo",
+    y("no-varix", "antiemb", "rodilla", "18-22"), NA, "alta", "Antiembólica (T.V.P.) a la rodilla 18-22 mmHg unisex",
+  "NOVARIX_ANTIEMBOLICA_RODILLA_18-22_UNISEX", "ortopedicos_futuro",
+    y("no-varix", "antiemb", "rodilla", "18-22"), NA, "alta", "Mismo texto y precio que Farmatodo",
+  "NOVARIX_ANTIEMBOLICA_RODILLA_18-22_UNISEX", "locatel",
+    y("no-varix", "tvp", "rodilla", "18-22"), NA, "alta", "TVP = antiembólica; Locatel no escribe 'unisex'",
+
+  "NOVARIX_MEDIA_RODILLA_MUJER_8-15", "farmatodo",
+    y("medias? de compresion", "no-varix", "mujer", "8-15"), NA, "media", "Incluye variantes de color/talla de igual precio",
+  "NOVARIX_MEDIA_RODILLA_MUJER_8-15", "ortopedicos_futuro",
+    y("medias? de compresion", "no-varix", "mujer", "8-15"), NA, "media", "",
+  "NOVARIX_MEDIA_RODILLA_MUJER_8-15", "locatel",
+    "^media rodilla 8-15 no-varix$", NA, "media", "Locatel no indica sexo; precio casi igual (40.100 vs 40.900)",
+
+  "NOVARIX_MEDIA_HOMBRE_20-30", "farmatodo",
+    y("medias? de compresion", "no-varix", "hombre", "20-30"), "clasica", "media", "",
+  "NOVARIX_MEDIA_HOMBRE_20-30", "ortopedicos_futuro",
+    y("medias? de compresion", "no-varix", "hombre", "20-30"), "clasica", "media", "Se excluye 'hombre clásica 20-30' (otro modelo y precio)",
+  "NOVARIX_MEDIA_HOMBRE_20-30", "locatel",
+    "^calcetin hombre 20-30 no-varix$", NA, "media", "Locatel la llama 'calcetín'",
+
+  "NOVARIX_MEDIA_HOMBRE_15-20", "farmatodo",
+    y("medias? de compresion", "no-varix", "hombre", "15-20"), "jasped|algodon|cobre|fibras", "media", "",
+  "NOVARIX_MEDIA_HOMBRE_15-20", "ortopedicos_futuro",
+    y("medias? de compresion", "no-varix", "hombre", "15-20"), "jasped|algodon|cobre|fibras", "media", "Se excluyen jaspeado, algodón, cobre y fibras",
+  "NOVARIX_MEDIA_HOMBRE_15-20", "locatel",
+    "^calcetin hombres? (compresion )?15-20 no-varix$", NA, "media", "",
+
+  "NOVARIX_MEDIA_MUJER_15-20_DIAMANTE", "farmatodo",
+    y("no-varix", "mujer", "15-20", "diamante"), NA, "media", "",
+  "NOVARIX_MEDIA_MUJER_15-20_DIAMANTE", "ortopedicos_futuro",
+    y("no-varix", "mujer", "15-20", "diamante"), NA, "media", "Incluye diamante grande y pequeño",
+  "NOVARIX_MEDIA_MUJER_15-20_DIAMANTE", "locatel",
+    "^calcetin no-varix 15-20 diamante$", NA, "media", "Locatel no indica sexo ni tamaño del diamante",
+
+  "KAMEX_RODILLERA_MAGNETICA", "farmatodo",
+    "^rodillera kamex magnetica", NA, "media", "",
+  "KAMEX_RODILLERA_MAGNETICA", "ortopedicos_futuro",
+    "^rodillera kamex magnetica", NA, "media", "",
+  "KAMEX_RODILLERA_MAGNETICA", "locatel",
+    "^rodillera magnetica kamex", NA, "media", "Modelo MG012 talla universal",
+
+  "ACTIMOVE_RODILLA_PATELA_ABIERTA_M", "farmatodo",
+    "soporte deportivo para rodilla patela abierta actimove m ", NA, "alta", "El precio de lista de Ortopédicos Futuro coincide con el precio de Farmatodo (mismo SKU)",
+  "ACTIMOVE_RODILLA_PATELA_ABIERTA_M", "ortopedicos_futuro",
+    "soporte deportivo para rodilla patela abierta actimove m$", NA, "alta", "",
+  "ACTIMOVE_RODILLA_PATELA_ABIERTA_M", "locatel",
+    "^soporte rodilla actimove abierta talla m$", NA, "media", "",
+
+  "RECOVERY_ANILLO_DINAMICO_SMALL", "farmatodo",
+    "^anillo dinamico dissan small", NA, "media", "El precio de lista de Ortopédicos Futuro coincide con el precio de Farmatodo",
+  "RECOVERY_ANILLO_DINAMICO_SMALL", "ortopedicos_futuro",
+    "^anillo dinamico dissan small$", NA, "media", "",
+  "RECOVERY_ANILLO_DINAMICO_SMALL", "locatel",
+    "^anillo dinamico pequeno recovery$", NA, "media", "Pequeño = Small"
+)
+
+buscar <- function(id, com, patron, excluir) {
+  d <- datos |> filter(comercio == com, str_detect(nombre_norm, patron))
+  if (!is.na(excluir)) d <- d |> filter(!str_detect(nombre_norm, excluir))
+  d |> mutate(producto_id = id) |> select(obs_id, producto_id)
+}
+
+emparejados <- pmap_dfr(reglas |> select(id = producto_id, com = comercio, patron, excluir), buscar)
+stopifnot(!anyDuplicated(emparejados$obs_id))   # ninguna observación en dos productos
+
+datos <- datos |>
+  left_join(emparejados, by = "obs_id") |>
+  mutate(comparable = as.integer(!is.na(producto_id)))
+
+catalogo_comparables <- tribble(
+  ~producto_id,                                 ~marca,      ~tipo,                       ~presentacion,
+  "NOVARIX_ANTIEMBOLICA_RODILLA_18-22_UNISEX",  "No-Varix",  "media antiembólica a la rodilla", "18-22 mmHg, unisex",
+  "NOVARIX_MEDIA_RODILLA_MUJER_8-15",           "No-Varix",  "media de compresión",       "8-15 mmHg, mujer",
+  "NOVARIX_MEDIA_HOMBRE_20-30",                 "No-Varix",  "media de compresión",       "20-30 mmHg, hombre",
+  "NOVARIX_MEDIA_HOMBRE_15-20",                 "No-Varix",  "media de compresión",       "15-20 mmHg, hombre",
+  "NOVARIX_MEDIA_MUJER_15-20_DIAMANTE",         "No-Varix",  "media de compresión",       "15-20 mmHg, mujer, diseño diamante",
+  "KAMEX_RODILLERA_MAGNETICA",                  "Kamex",     "rodillera magnética",       "talla universal",
+  "ACTIMOVE_RODILLA_PATELA_ABIERTA_M",          "Actimove",  "soporte de rodilla patela abierta", "talla M",
+  "RECOVERY_ANILLO_DINAMICO_SMALL",             "Recovery",  "anillo dinámico (rehabilitación de mano)", "small / pequeño"
+)
+```
+
+### Cobertura y validación
+
+```{r comparables_cobertura}
+cobertura <- datos |>
+  filter(comparable == 1) |>
+  group_by(producto_id) |>
+  summarise(n_comercios = n_distinct(comercio), n_observaciones = n(), .groups = "drop")
+
+kable(cobertura, caption = "Cobertura por producto comparable")
+
+n_productos    <- n_distinct(cobertura$producto_id)
+n_combinaciones <- datos |> filter(comparable == 1) |> distinct(producto_id, comercio) |> nrow()
+
+stopifnot(n_productos >= 8, all(cobertura$n_comercios == 3), n_combinaciones >= 24)
+cat("Productos comparables:", n_productos, "| combinaciones producto x comercio:", n_combinaciones, "(mínimo 24)\n")
+
+# Tabla pedida (producto_id, comercio, nombre, precio, comparable) y copia de las reglas, como respaldo en CSV
+tabla_comparables <- datos |>
+  filter(comparable == 1) |>
+  distinct(producto_id, comercio, nombre, precio, comparable) |>
+  arrange(producto_id, comercio, nombre)
+write_csv(tabla_comparables, "tabla_comparables.csv")
+write_csv(reglas, "reglas_emparejamiento.csv")
+```
+
+# Base SQLite
+
+## Estructura
+
+La base `comparador_precios.sqlite` no se borra ni se sobrescribe: las tablas se crean con `IF NOT EXISTS` y las observaciones se cargan con `INSERT OR IGNORE`, de modo que una nueva ejecución **agrega** observaciones sin tocar las anteriores.
+
+| Tabla | Contenido |
+|---|---|
+| `comercios` | Los tres comercios, URL base y plataforma. |
+| `productos` | Los productos comparables (identificador común, marca, tipo, presentación). |
+| `observaciones` | Cada precio extraído: comercio, texto original del anuncio, nombre y marca estandarizados, subcategoría, SKU, precio, precio de lista, promoción, URL de extracción, fecha y hora ISO 8601, ejecución, `producto_id` y `comparable`. Restricción de unicidad: `(comercio, producto_comercio, fecha_hora)`. |
+| `ejecuciones` | Una fila por ejecución y comercio: identificador, inicio, fin, número de registros, estado y nota. |
+| `reglas_emparejamiento` | Las reglas usadas para asignar el `producto_id`. |
+
+```{r sqlite_esquema}
+con <- dbConnect(SQLite(), RUTA_DB)
+ejecutar <- function(...) invisible(dbExecute(...))   # igual que dbExecute() pero sin imprimir el conteo
+ejecutar(con, "PRAGMA foreign_keys = ON")
+
+ejecutar(con, "CREATE TABLE IF NOT EXISTS comercios (
+  comercio TEXT PRIMARY KEY, nombre_comercial TEXT, url_base TEXT, plataforma TEXT)")
+
+ejecutar(con, "CREATE TABLE IF NOT EXISTS productos (
+  producto_id TEXT PRIMARY KEY, marca TEXT, tipo TEXT, presentacion TEXT)")
+
+ejecutar(con, "CREATE TABLE IF NOT EXISTS ejecuciones (
+  ejecucion_id TEXT NOT NULL, comercio TEXT NOT NULL,
+  fecha_inicio TEXT NOT NULL, fecha_fin TEXT,
+  n_registros INTEGER, estado TEXT CHECK (estado IN ('completa','parcial','fallida')), nota TEXT,
+  PRIMARY KEY (ejecucion_id, comercio))")
+
+ejecutar(con, "CREATE TABLE IF NOT EXISTS observaciones (
+  obs_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ejecucion_id TEXT NOT NULL,
+  comercio TEXT NOT NULL REFERENCES comercios(comercio),
+  categoria_sitio TEXT, subcategoria_std TEXT,
+  nombre TEXT NOT NULL,            -- texto original del anuncio, sin limpiar
+  nombre_norm TEXT, marca_std TEXT, sku TEXT, n_unidades INTEGER,
+  producto_comercio TEXT NOT NULL,
+  precio REAL,                     -- COP; NULL si no disponible (nunca 0)
+  precio_lista REAL, en_promocion INTEGER,
+  url TEXT, url_origen TEXT,
+  fecha_hora TEXT NOT NULL,        -- ISO 8601, hora de Colombia
+  producto_id TEXT REFERENCES productos(producto_id),
+  comparable INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (comercio, producto_comercio, fecha_hora))")
+
+stopifnot("ejecucion_id" %in% dbListFields(con, "observaciones"))  # si falla: borra el .sqlite de una versión anterior
+```
+
+## Carga
+
+```{r sqlite_carga}
+# Dimensiones
+comercios_tbl <- tibble(
+  comercio = COMERCIOS,
+  nombre_comercial = c("Farmatodo", "Locatel", "Ortopédicos Futuro"),
+  url_base = c("https://www.farmatodo.com.co", "https://www.locatelcolombia.com", "https://www.ortopedicosfuturo.com"),
+  plataforma = c("Angular", "VTEX", "VTEX"))
+dbWriteTable(con, "tmp_comercios", comercios_tbl, temporary = TRUE, overwrite = TRUE)
+ejecutar(con, "INSERT OR IGNORE INTO comercios SELECT * FROM tmp_comercios")
+
+dbWriteTable(con, "tmp_productos", catalogo_comparables, temporary = TRUE, overwrite = TRUE)
+ejecutar(con, "INSERT OR IGNORE INTO productos SELECT * FROM tmp_productos")
+
+# Observaciones (no se sobrescribe nada)
+obs_sql <- datos |>
+  transmute(ejecucion_id, comercio, categoria_sitio = categoria, subcategoria_std,
+            nombre, nombre_norm, marca_std, sku, n_unidades, producto_comercio,
+            precio, precio_lista, en_promocion, url, url_origen, fecha_hora,
+            producto_id, comparable)
+dbWriteTable(con, "tmp_obs", obs_sql, temporary = TRUE, overwrite = TRUE)
+
+n_nuevas <- dbExecute(con, "
+  INSERT OR IGNORE INTO observaciones
+    (ejecucion_id, comercio, categoria_sitio, subcategoria_std, nombre, nombre_norm, marca_std, sku,
+     n_unidades, producto_comercio, precio, precio_lista, en_promocion, url, url_origen, fecha_hora,
+     producto_id, comparable)
+  SELECT ejecucion_id, comercio, categoria_sitio, subcategoria_std, nombre, nombre_norm, marca_std, sku,
+         n_unidades, producto_comercio, precio, precio_lista, en_promocion, url, url_origen, fecha_hora,
+         producto_id, comparable
+  FROM tmp_obs")
+
+# Si las reglas de emparejamiento cambian, se actualizan las marcas en filas ya existentes
+ejecutar(con, "
+  UPDATE observaciones SET
+    producto_id = (SELECT t.producto_id FROM tmp_obs t WHERE t.comercio = observaciones.comercio
+                   AND t.producto_comercio = observaciones.producto_comercio AND t.fecha_hora = observaciones.fecha_hora),
+    comparable  = (SELECT t.comparable  FROM tmp_obs t WHERE t.comercio = observaciones.comercio
+                   AND t.producto_comercio = observaciones.producto_comercio AND t.fecha_hora = observaciones.fecha_hora)
+  WHERE EXISTS (SELECT 1 FROM tmp_obs t WHERE t.comercio = observaciones.comercio
+                AND t.producto_comercio = observaciones.producto_comercio AND t.fecha_hora = observaciones.fecha_hora)")
+
+cat("Observaciones ofrecidas:", nrow(obs_sql), "| nuevas insertadas:", n_nuevas,
+    "| ya existentes (ignoradas):", nrow(obs_sql) - n_nuevas, "\n")
+
+# Registro de ejecuciones
+ejec_tbl <- datos |>
+  group_by(ejecucion_id, comercio) |>
+  summarise(fecha_inicio = min(fecha_hora), fecha_fin = max(fecha_hora), n_registros = n(), .groups = "drop") |>
+  mutate(estado = unname(ESTADO_EJEC[comercio]), nota = unname(NOTA_EJEC[comercio]))
+dbWriteTable(con, "tmp_ejec", ejec_tbl, temporary = TRUE, overwrite = TRUE)
+ejecutar(con, "INSERT OR REPLACE INTO ejecuciones SELECT * FROM tmp_ejec")
+
+# Reglas (tabla derivada: se reescribe)
+dbWriteTable(con, "reglas_emparejamiento", reglas, overwrite = TRUE)
+```
+
+## Validaciones
+
+```{r sqlite_validaciones}
+dbGetQuery(con, "SELECT * FROM ejecuciones") |> kable(caption = "Registro de ejecuciones del scraper")
+
+cat("Filas que violan claves foráneas:", nrow(dbGetQuery(con, "PRAGMA foreign_key_check")), "\n")
+
+dbGetQuery(con, "
+  SELECT COUNT(*) AS sin_fecha_iso FROM observaciones
+  WHERE fecha_hora NOT GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]-05:00'") |>
+  kable(caption = "Observaciones con fecha_hora que NO cumple el formato ISO 8601")
+```
+
+# Consultas SQL
+
+Todas las consultas se ejecutan sobre `comparador_precios.sqlite`. Como un producto comparable puede tener varias variantes (color, talla, diseño) con el mismo nombre de presentación, **el precio de referencia de un producto en un comercio es el precio más bajo observado entre sus variantes equivalentes**; es la definición que usan las consultas 3 a 6.
+
+```{r sql_ref}
+# Vista de apoyo: precio de referencia por producto comparable y comercio
+ejecutar(con, "DROP VIEW IF EXISTS v_precio_ref")
+ejecutar(con, "
+CREATE VIEW v_precio_ref AS
+SELECT producto_id, comercio, precio AS precio_ref, precio_lista, en_promocion
+FROM (SELECT producto_id, comercio, precio, precio_lista, en_promocion,
+             ROW_NUMBER() OVER (PARTITION BY producto_id, comercio ORDER BY precio) AS rn
+      FROM observaciones WHERE comparable = 1 AND precio IS NOT NULL)
+WHERE rn = 1")
+```
+
+## Tamaño de la base
+
+**Pregunta 1.** ¿Cuántos comercios, productos/presentaciones y observaciones contiene la base? ¿Cuántos productos aporta cada comercio?
+
+```{r q1}
+q1 <- dbGetQuery(con, "
+  SELECT comercio,
+         COUNT(*)                          AS observaciones,
+         COUNT(DISTINCT producto_comercio) AS anuncios_distintos,
+         COUNT(DISTINCT categoria_sitio)   AS categorias_del_sitio
+  FROM observaciones GROUP BY comercio ORDER BY observaciones DESC")
+kable(q1, caption = "Contenido de la base por comercio")
+
+dbGetQuery(con, "
+  SELECT COUNT(DISTINCT comercio) AS comercios, COUNT(*) AS observaciones,
+         COUNT(DISTINCT comercio || '|' || producto_comercio) AS anuncios_distintos,
+         COUNT(DISTINCT producto_id) AS productos_comparables
+  FROM observaciones") |> kable(caption = "Totales")
+```
+
+`r q1$comercio[1]` aporta la oferta más amplia (`r q1$observaciones[1]` observaciones) y `r q1$comercio[nrow(q1)]` la más acotada (`r q1$observaciones[nrow(q1)]`). Las cifras son comparables solo en tamaño de catálogo, no en calidad ni en surtido, porque cada sitio organiza sus categorías de manera distinta (por ejemplo, Locatel agrupa por zona anatómica y Ortopédicos Futuro por tipo de lesión).
+
+## Cobertura de comparables
+
+**Pregunta 2.** En una misma ejecución, ¿hay al menos 24 observaciones comparables (8 productos × 3 comercios)? ¿Hay registros repetidos del mismo producto y comercio?
+
+```{r q2}
+q2 <- dbGetQuery(con, "
+  SELECT ejecucion_id,
+         COUNT(*) AS observaciones_comparables,
+         COUNT(DISTINCT producto_id) AS productos,
+         COUNT(DISTINCT producto_id || '|' || comercio) AS combinaciones_producto_comercio,
+         CASE WHEN COUNT(DISTINCT producto_id || '|' || comercio) >= 24 THEN 'cumple' ELSE 'NO cumple' END AS cobertura_24
+  FROM observaciones WHERE comparable = 1 GROUP BY ejecucion_id")
+kable(q2, caption = "Cobertura de comparables por ejecución")
+
+q2b <- dbGetQuery(con, "
+  SELECT producto_id, comercio, COUNT(*) AS observaciones, COUNT(DISTINCT precio) AS precios_distintos
+  FROM observaciones WHERE comparable = 1
+  GROUP BY producto_id, comercio HAVING COUNT(*) > 1 ORDER BY producto_id, comercio")
+kable(q2b, caption = "Producto y comercio con más de una observación en la ejecución")
+```
+
+La ejecución `r q2$ejecucion_id[1]` contiene `r q2$observaciones_comparables[1]` observaciones comparables que cubren `r q2$combinaciones_producto_comercio[1]` combinaciones producto-comercio: el mínimo de 24 `r if (q2$combinaciones_producto_comercio[1] >= 24) "se cumple" else "NO se cumple"`. Hay `r nrow(q2b)` casos con más de una observación; no son capturas duplicadas (esas se eliminaron en la preparación) sino **variantes** de la misma presentación (colores, tallas o diseños) que el sitio lista por separado. Por eso se usa el precio de referencia definido arriba.
+
+## Precio mínimo, máximo, promedio y comercio más barato
+
+**Pregunta 3.** Para cada presentación comparable, ¿cuáles son el precio mínimo, máximo y promedio y qué comercio ofrece el menor precio (con empates)?
+
+```{r q3}
+q3 <- dbGetQuery(con, "
+  WITH st AS (
+    SELECT producto_id, MIN(precio_ref) AS precio_min, MAX(precio_ref) AS precio_max,
+           ROUND(AVG(precio_ref), 0) AS precio_promedio, COUNT(*) AS n_comercios
+    FROM v_precio_ref GROUP BY producto_id)
+  SELECT st.producto_id, precio_min, precio_max, precio_promedio, n_comercios,
+         (SELECT GROUP_CONCAT(r.comercio, ' / ') FROM v_precio_ref r
+          WHERE r.producto_id = st.producto_id AND r.precio_ref = st.precio_min) AS comercio_mas_barato,
+         (SELECT COUNT(*) FROM v_precio_ref r
+          WHERE r.producto_id = st.producto_id AND r.precio_ref = st.precio_min) AS empatados_en_el_minimo
+  FROM st ORDER BY st.producto_id")
+kable(q3, caption = "Precios mínimo, máximo y promedio por presentación (COP)", format.args = list(big.mark = ".", decimal.mark = ","))
+
+ganadores <- q3 |> separate_rows(comercio_mas_barato, sep = " / ") |> count(comercio_mas_barato, name = "productos")
+kable(ganadores, caption = "En cuántas presentaciones es el más barato cada comercio (un empate cuenta para ambos)")
+```
+
+```{r q3_promo}
+q3_promo <- dbGetQuery(con, "
+  SELECT r.producto_id, r.comercio, r.precio_ref, r.precio_lista, r.en_promocion
+  FROM v_precio_ref r JOIN (SELECT producto_id, MIN(precio_ref) AS pmin FROM v_precio_ref GROUP BY producto_id) m
+    ON m.producto_id = r.producto_id AND r.precio_ref = m.pmin
+  WHERE r.en_promocion = 1")
+kable(q3_promo, caption = "Casos donde el precio más bajo es un precio promocional", format.args = list(big.mark = ".", decimal.mark = ","))
+```
+
+`r ganadores$comercio_mas_barato[which.max(ganadores$productos)]` es el más barato en `r max(ganadores$productos)` de las `r nrow(q3)` presentaciones. **Ojo:** en `r nrow(q3_promo)` presentaciones el precio mínimo es un precio **promocional** (el precio de lista es mayor), así que esa ventaja puede desaparecer cuando termine la promoción.
+
+## Ahorro potencial
+
+**Pregunta 4.** ¿Cuál es el ahorro en COP y en porcentaje al elegir la oferta más económica de cada presentación?
+
+```{r q4}
+q4 <- dbGetQuery(con, "
+  SELECT producto_id, MIN(precio_ref) AS precio_min, MAX(precio_ref) AS precio_max,
+         MAX(precio_ref) - MIN(precio_ref) AS ahorro_cop,
+         ROUND(100.0 * (MAX(precio_ref) - MIN(precio_ref)) / MAX(precio_ref), 1) AS ahorro_pct
+  FROM v_precio_ref GROUP BY producto_id ORDER BY producto_id")
+kable(q4, caption = "Ahorro al comprar en el comercio más barato frente al más caro", format.args = list(big.mark = ".", decimal.mark = ","))
+```
+
+## Precio por unidad de contenido
+
+**Pregunta 5.** Si se incluyeron tamaños comparables del mismo producto, ¿qué presentación y comercio tienen el menor precio por unidad?
+
+```{r q5}
+dbGetQuery(con, "
+  SELECT COUNT(*) AS observaciones_comparables,
+         SUM(CASE WHEN n_unidades > 1 THEN 1 ELSE 0 END) AS con_varias_unidades_declaradas
+  FROM observaciones WHERE comparable = 1") |>
+  kable(caption = "Comprobación: ¿algún comparable es un paquete de varias unidades?")
+```
+
+**No aplica.** Los 8 productos comparables son artículos que se venden **por unidad** (una media, una rodillera, un anillo) y se emparejaron con la misma presentación en los tres comercios; ningún comparable es un paquete de varias unidades ni se vende por mL, g o mg. El precio por unidad coincide con el precio del empaque, así que no hay un ranking de precio por unidad que construir y se evita comparar magnitudes que no son equivalentes.
+
+## Mayores diferencias entre comercios
+
+**Pregunta 6.** ¿Cuáles son las mayores diferencias de precio entre comercios? Ordenar por ahorro porcentual.
+
+```{r q6}
+q6 <- q4 |> arrange(desc(ahorro_pct))
+kable(q6, caption = "Presentaciones ordenadas por ahorro porcentual", format.args = list(big.mark = ".", decimal.mark = ","))
+```
+
+La mayor diferencia porcentual está en `r q6$producto_id[1]` (`r pct(q6$ahorro_pct[1])`, es decir `r cop(q6$ahorro_cop[1])`). La menor, en `r q6$producto_id[nrow(q6)]` (`r pct(q6$ahorro_pct[nrow(q6)])`). El porcentaje y el valor en pesos no siempre coinciden: un anillo de unos 10.000 COP puede tener un ahorro porcentual alto con un ahorro en pesos pequeño.
+
+## Datos faltantes e inconsistentes
+
+**Pregunta 7.** ¿Qué datos faltantes o inconsistentes afectan la comparación y cuántos son?
+
+```{r q7}
+q7 <- dbGetQuery(con, "
+  SELECT comercio,
+         COUNT(*) AS total,
+         SUM(precio IS NULL)                                   AS sin_precio,
+         SUM(precio_lista IS NULL)                             AS sin_precio_lista,
+         SUM(precio IS NOT NULL AND precio_lista IS NOT NULL AND precio > precio_lista) AS precio_mayor_que_lista,
+         SUM(precio IS NOT NULL AND precio <= 0)               AS precio_no_positivo,
+         SUM(marca_std IS NULL)                                AS sin_marca_identificada,
+         SUM(sku IS NULL)                                      AS sin_sku
+  FROM observaciones GROUP BY comercio")
+kable(q7, caption = "Faltantes e inconsistencias por comercio")
+
+kable(duplicados_removidos, caption = "Capturas duplicadas eliminadas en la preparación")
+```
+
+Los faltantes más relevantes para la comparación son los **precios ausentes** (`r sum(q7$sin_precio)` observaciones; se dejan como `NULL`, no como cero) y la ausencia de **precio de lista** en `r sum(q7$sin_precio_lista)` observaciones, lo que impide saber si el precio observado es promocional. Los registros sin precio no entran a las comparaciones. Además, Locatel y Ortopédicos Futuro no entregan SKU y su `url` es la de la página de listado, no la del producto; la identificación del anuncio descansa en el nombre.
+
+## Oferta por comercio y calidad de los datos
+
+**Pregunta 8.** ¿Cuántos productos de la categoría se obtuvieron por comercio y ejecución? ¿Qué proporción tiene descripción, marca y contenido identificables?
+
+```{r q8}
+q8 <- dbGetQuery(con, "
+  SELECT ejecucion_id, comercio, COUNT(*) AS productos,
+         ROUND(100.0 * AVG(nombre IS NOT NULL AND nombre <> ''), 1) AS pct_con_descripcion,
+         ROUND(100.0 * AVG(marca_std IS NOT NULL), 1)               AS pct_con_marca,
+         ROUND(100.0 * AVG(n_unidades IS NOT NULL), 1)              AS pct_con_unidades_declaradas
+  FROM observaciones GROUP BY ejecucion_id, comercio ORDER BY productos DESC")
+kable(q8, caption = "Oferta y calidad de la información por comercio y ejecución")
+
+q8b <- dbGetQuery(con, "
+  SELECT comercio, subcategoria_std, COUNT(*) AS productos
+  FROM observaciones GROUP BY comercio, subcategoria_std")
+```
+
+`descripción` se mide solo con el **nombre del anuncio** (no se recolectó ficha técnica). La marca se identifica con un diccionario de marcas conocidas; el contenido solo es identificable cuando el anuncio declara unidades (por ejemplo "x 2 und"), por lo que la proporción es baja y no debe leerse como ausencia de datos en el sitio sino como límite de lo que dice el nombre del producto.
+
+# Visualizaciones
+
+```{r grafico_datos}
+ref <- dbGetQuery(con, "SELECT * FROM v_precio_ref")
+n_dos_iguales <- ref |> group_by(producto_id) |> summarise(iguales = n_distinct(precio_ref) < n()) |> pull(iguales) |> sum()
+ref <- ref |>
+  mutate(producto_label = producto_id |> str_replace_all("_", " ") |> str_wrap(24),
+         promo = if_else(en_promocion == 1, "precio promocional", "precio regular"))
+```
+
+## Mismas presentaciones, precios por comercio
+
+```{r g1, fig.width = 11, fig.height = 7}
+ggplot(ref, aes(comercio, precio_ref, fill = comercio)) +
+  geom_col(width = 0.7) +
+  geom_text(aes(label = cop(precio_ref)), vjust = -0.4, size = 3) +
+  facet_wrap(~ producto_label, scales = "free_y", ncol = 4) +
+  scale_fill_manual(values = COLORES, guide = "none") +
+  scale_y_continuous(labels = label_number(big.mark = ".", decimal.mark = ","), expand = expansion(mult = c(0, 0.18))) +
+  scale_x_discrete(labels = c(farmatodo = "Farm.", locatel = "Loc.", ortopedicos_futuro = "O. Fut.")) +
+  labs(title = "Precio de cada presentación comparable, por comercio",
+       subtitle = "COP; precio más bajo observado entre variantes equivalentes. Cada panel tiene su propia escala vertical.",
+       x = NULL, y = "Precio (COP)") +
+  theme_minimal(base_size = 10)
+```
+
+**Interpretación.** Cada panel compara el mismo producto en los tres comercios; como los productos cuestan de ~10.000 a ~140.000 COP, cada panel tiene su propia escala y **no se deben comparar alturas entre paneles**. En `r sum(q3$empatados_en_el_minimo == 1)` de las `r nrow(q3)` presentaciones hay un único comercio más barato; en `r n_dos_iguales` de ellas los otros dos comercios cobran exactamente lo mismo, lo que podría reflejar un precio sugerido común. **Limitación:** son precios de un solo día y no incluyen envío ni condiciones de compra.
+
+## Ahorro potencial
+
+```{r g2, fig.height = 5}
+g2 <- q4 |>
+  left_join(q3 |> select(producto_id, comercio_mas_barato), by = "producto_id") |>
+  mutate(producto_label = producto_id |> str_replace_all("_", " ") |> str_wrap(34),
+         producto_label = reorder(producto_label, ahorro_pct))
+
+ggplot(g2, aes(producto_label, ahorro_pct)) +
+  geom_col(fill = "#4c78a8", width = 0.65) +
+  geom_text(aes(label = paste0(pct(ahorro_pct), "  (", cop(ahorro_cop), ")")), hjust = -0.05, size = 3.2) +
+  coord_flip() +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.45))) +
+  labs(title = "Ahorro al comprar en el comercio más barato frente al más caro",
+       subtitle = "Porcentaje sobre el precio más alto y ahorro en COP entre paréntesis",
+       x = NULL, y = "Ahorro (%)") +
+  theme_minimal(base_size = 10)
+```
+
+**Interpretación.** La mayor oportunidad de ahorro está en `r str_replace_all(g2$producto_id[which.max(g2$ahorro_pct)], "_", " ")` (`r pct(max(g2$ahorro_pct))`). En `r sum(g2$ahorro_cop < 5000)` de las `r nrow(g2)` presentaciones la diferencia entre el comercio más barato y el más caro es menor de 5.000 COP: ahí elegir comercio importa poco. **Limitación:** el ahorro se calcula solo entre los tres comercios y con precios de referencia; si el precio más bajo es promocional (ver pregunta 3), el ahorro puede ser temporal.
+
+## Tamaño y composición de la oferta
+
+```{r g3, fig.height = 5}
+ggplot(q8b, aes(reorder(subcategoria_std, productos, sum), productos, fill = comercio)) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  scale_fill_manual(values = COLORES, name = "Comercio",
+                    labels = c(farmatodo = "Farmatodo", locatel = "Locatel", ortopedicos_futuro = "Ortopédicos Futuro")) +
+  labs(title = "Oferta recolectada por subcategoría estandarizada",
+       subtitle = "Número de observaciones; la subcategoría se asigna por palabras clave del nombre",
+       x = NULL, y = "Observaciones") +
+  theme_minimal(base_size = 10)
+```
+
+**Interpretación.** El gráfico describe la **oferta** de cada comercio, no sus precios. La subcategoría se infiere del nombre del anuncio, por lo que puede haber errores de clasificación (por ejemplo, productos de fisioterapia o ejercicio quedan en "otros de rehabilitación"). No debe usarse para concluir que un comercio es globalmente más barato: los surtidos son distintos.
+
+**Precio por unidad de contenido.** No se grafica porque ningún comparable es un paquete de distinto tamaño del mismo producto (pregunta 5).
+
+# Limitaciones y conclusiones
+
+## Limitaciones
+
+- **Una sola ejecución** (`r paste(unique(datos$ejecucion_id), collapse = ", ")`): los precios son los del día de captura y no muestran evolución. El diseño de la base permite agregar nuevas ejecuciones sin sobrescribir las anteriores.
+- **Promociones:** en varias presentaciones el menor precio es promocional (pregunta 3). No se conoce la duración de la promoción.
+- **Correspondencia de productos:** las reglas tienen confianza *alta* o *media* (tabla `reglas_emparejamiento`). En varios casos Locatel no indica sexo ni talla y se emparejó por tipo, compresión y precio; "calcetín" de Locatel se trató como equivalente a "media de compresión" de los otros dos. Los precios de la rodillera Kamex y de las medias de diseño difieren bastante entre comercios y conviene confirmar que sea exactamente el mismo modelo.
+- **Variantes:** cuando un producto tiene varias tallas o colores se usó el precio más bajo; si el precio dependiera de la talla, el resultado podría cambiar.
+- **Farmatodo:** extracción **parcial** (sin muletas por `robots.txt`) y sin contador de productos por categoría, por lo que su completitud no se puede verificar contra el sitio.
+- **Precios** no incluyen envío, descuentos por convenio, puntos de fidelización ni disponibilidad en inventario.
+- **Texto del anuncio:** se conserva el nombre del producto; no se recolectó descripción ni ficha técnica.
+- **Conclusión de precio global:** el análisis compara solo 8 presentaciones; **no autoriza** a decir que un comercio es globalmente más barato.
+
+## Conclusión para el consumidor
+
+```{r conclusion_tabla}
+concl <- q3 |>
+  left_join(q4 |> select(producto_id, ahorro_cop, ahorro_pct), by = "producto_id") |>
+  left_join(q3_promo |> distinct(producto_id) |> mutate(promo = "sí"), by = "producto_id") |>
+  transmute(presentacion = str_replace_all(producto_id, "_", " "),
+            comprar_en = comercio_mas_barato,
+            precio_cop = precio_min,
+            ahorro_vs_mas_caro_cop = ahorro_cop,
+            ahorro_pct,
+            precio_es_promocion = coalesce(promo, "no"))
+kable(concl, caption = "Dónde conviene comprar cada presentación según los datos del día de captura", format.args = list(big.mark = ".", decimal.mark = ","))
+```
+
+Según los datos observados, `r ganadores$comercio_mas_barato[which.max(ganadores$productos)]` ofrece el menor precio en más presentaciones (`r max(ganadores$productos)` de `r nrow(q3)`), pero **ningún comercio es el más barato en todas**: conviene mirar presentación por presentación. Hay que distinguir tres cosas:
+
+1. **Ahorro en pesos:** en algunas presentaciones se ahorran decenas de miles de pesos y en otras apenas unos cientos o miles; en estas últimas es razonable comprar donde sea más cómodo.
+2. **Ahorro porcentual:** puede ser alto en artículos baratos (como el anillo dinámico) aunque el desembolso total sea pequeño.
+3. **Condiciones de compra:** el menor precio puede ser promocional o no incluir envío; antes de comprar conviene revisar el precio de lista y el costo de entrega.
+
+Por último, como todas las presentaciones comparadas son por unidad, **no hay un caso en el que una presentación más grande ofrezca un menor precio por unidad** en este análisis.
+
+# Reproducibilidad
+
+Archivos de la entrega: `taller_1.Rmd`, `scraper.R`, `comparador_precios.sqlite`, carpeta `raw/`, `renv.lock` (versiones fijas; se genera con `renv::snapshot()`) y `README.md` con instrucciones en línea y sin conexión.
+
+```{r reproducibilidad}
+dbDisconnect(con)
+sessionInfo()
+```

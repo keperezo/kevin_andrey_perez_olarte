@@ -1,0 +1,43 @@
+/*-- scss:defaults --*/
+$font-family-sans-serif: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+$headings-font-family: "Poppins", "Inter", sans-serif;
+$primary: #4F46E5;
+$body-color: #1f2937;
+$link-color: #4F46E5;
+$font-size-root: 16px;
+
+/*-- scss:rules --*/
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@600;700&display=swap");
+
+body { background: #fafafa; }
+.page-columns .content { max-width: 1100px; }
+h1.title { font-weight: 700; letter-spacing: -0.5px;
+  background: linear-gradient(90deg,#4F46E5,#06B6D4); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.quarto-title-meta { border-bottom: 1px solid #e5e7eb; padding-bottom: .8rem; }
+h2 { margin-top: 3rem; padding-bottom: .35rem; border-bottom: 3px solid #4F46E5; display: inline-block; }
+h3 { margin-top: 2rem; color: #374151; }
+
+/* Tarjetas KPI */
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin: 1.2rem 0 2rem; }
+.kpi { background: #fff; border-radius: 14px; padding: 16px 18px; box-shadow: 0 2px 10px rgba(0,0,0,.07); border-top: 4px solid #4F46E5; }
+.kpi .v { font-size: 2rem; font-weight: 700; color: #111827; line-height: 1.1; }
+.kpi .l { font-size: .82rem; color: #6b7280; text-transform: uppercase; letter-spacing: .5px; }
+
+/* Caja de interpretación */
+.interp { background: #eef2ff; border-left: 5px solid #4F46E5; border-radius: 8px; padding: 12px 16px; margin: 12px 0 28px; }
+.interp strong:first-child { color: #4F46E5; }
+
+/* Tablas (pandas Styler) */
+table { font-size: .86rem; border-collapse: separate; border-spacing: 0; width: 100%;
+  background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 6px rgba(0,0,0,.08); }
+thead th { background: #1f2937 !important; color: #fff !important; font-weight: 600; padding: 9px 10px !important; border: none !important; }
+tbody td { padding: 7px 10px !important; border-top: 1px solid #f1f5f9 !important; }
+tbody tr:nth-child(even) { background: #f8fafc; }
+tbody tr:hover { background: #eef2ff; }
+div.cell-output-display, .cell-output-display { overflow-x: auto; }
+
+/* Código plegado */
+details > summary { color: #6b7280; font-size: .85rem; }
+div.sourceCode { border-radius: 8px; }
+.callout { border-radius: 10px; }
+.js-plotly-plot { border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.06); background: #fff; margin-bottom: .5rem; }

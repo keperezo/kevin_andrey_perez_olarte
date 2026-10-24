@@ -1,0 +1,285 @@
+---
+title: "Taller 11 — Shiny: Saber 11, ¿colegio o estrato?"
+subtitle: "Minería de Datos · Departamento de Estadística, Sede Bogotá"
+output: html_document
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+Este documento contiene todo el taller: (0) el script que genera los datos, (1–2) la app Shiny completa
+(explorador + modelo bajo demanda + historial), (3) la verificación de las cifras de la clave y (4) la respuesta para la secretaría.
+Para ejecutarlo: abrir en RStudio y pulsar **Run Document**, o `rmarkdown::run("taller_11.Rmd")`.
+El mismo código de la app está también en `app.R` (entrega del PR).
+
+## Paso 0 · Datos simulados
+
+```{r datos}
+set.seed(1111); n <- 1500
+dp <- c("Bogotá","Antioquia","Valle del Cauca","Boyacá","Chocó")
+departamento <- sample(dp, n, TRUE, c(.30,.25,.20,.15,.10))
+p_rural <- c(.05,.25,.25,.40,.50)[match(departamento, dp)]
+zona <- ifelse(runif(n) < p_rural, "Rural", "Urbana")
+estrato <- ifelse(zona == "Rural", sample(1:3, n, TRUE, c(.6,.3,.1)), sample(1:6, n, TRUE, c(.15,.30,.28,.15,.07,.05)))
+naturaleza <- ifelse(runif(n) < plogis(-3.2 + .75*estrato), "Privado", "Oficial")
+horas_estudio <- round(pmax(0, rnorm(n, 5 + .5*estrato, 2.5)), 1)
+puntaje <- round(200 + 14*estrato + 12*(naturaleza=="Privado") + 4*horas_estudio - 15*(zona=="Rural") - 20*(departamento=="Chocó") + rnorm(n,0,30))
+horas_estudio[sample(n,60)] <- NA
+write.csv(data.frame(departamento,zona,estrato,naturaleza,horas_estudio,puntaje),"saber11.csv",row.names=FALSE)
+```
+
+## Etapas 1 y 2 · La app
+
+Etapa 1 (pestaña *Explorar*): cuatro filtros, un único `reactive()` (`datos_filtrados`) que alimenta resumen, boxplot y tabla DT, y `validate()` para
+selección vacía o cero filas. Etapa 2 (pestaña *Modelo*): `eventReactive()` atado al botón *Ajustar*, aviso de filas descartadas
+por `lm()`, historial en `reactiveValues()` y descarga en CSV.
+
+```{r app, echo=FALSE}
+library(shiny)
+library(bslib)
+library(DT)
+
+datos <- read.csv("saber11.csv", stringsAsFactors = TRUE)
+deptos <- levels(datos$departamento)
+
+# ---------------------------------------------------------------- UI
+ui <- fluidPage(
+  theme = bs_theme(version = 5, bootswatch = "flatly"),
+  titlePanel("Saber 11: ¿colegio o estrato?"),
+  sidebarLayout(
+    sidebarPanel(
+      width = 3,
+      h5("Filtros"),
+      selectInput("departamento", "Departamento", c("Todos", deptos)),
+      checkboxGroupInput("naturaleza", "Naturaleza del colegio",
+                         c("Oficial", "Privado"), selected = c("Oficial", "Privado")),
+      sliderInput("estrato", "Estrato", min = 1, max = 6, value = c(1, 6), step = 1),
+      radioButtons("zona", "Zona", c("Todas", "Urbana", "Rural"), inline = TRUE)
+    ),
+    mainPanel(
+      tabsetPanel(
+        # ---------------- Etapa 1
+        tabPanel("Explorar",
+          br(),
+          verbatimTextOutput("resumen"),
+          plotOutput("boxplot", height = 320),
+          DTOutput("tabla")
+        ),
+        # ---------------- Etapa 2
+        tabPanel("Modelo",
+          br(),
+          fluidRow(
+            column(5,
+              checkboxGroupInput("predictores", "Predictores del modelo",
+                c("estrato", "naturaleza", "horas_estudio", "zona"),
+                selected = c("estrato", "naturaleza")),
+              actionButton("ajustar", "Ajustar", class = "btn-primary"),
+              actionButton("guardar", "Guardar escenario", class = "btn-outline-secondary")
+            ),
+            column(7, verbatimTextOutput("modelo_txt"), tableOutput("coefs"))
+          ),
+          hr(),
+          h5("Historial de escenarios"),
+          DTOutput("historial"),
+          br(),
+          downloadButton("descargar", "Descargar historial (CSV)")
+        )
+      )
+    )
+  )
+)
+
+# ---------------------------------------------------------------- Server
+server <- function(input, output, session) {
+
+  # Un solo filtro reutilizado por todas las salidas
+  datos_filtrados <- reactive({
+    validate(need(length(input$naturaleza) > 0,
+                  "Selecciona al menos un tipo de colegio (oficial o privado)."))
+    d <- datos[datos$naturaleza %in% input$naturaleza &
+               datos$estrato >= input$estrato[1] &
+               datos$estrato <= input$estrato[2], ]
+    if (input$departamento != "Todos") d <- d[d$departamento == input$departamento, ]
+    if (input$zona != "Todas")         d <- d[d$zona == input$zona, ]
+    validate(need(nrow(d) > 0,
+                  "Ningún estudiante cumple estos filtros (por ejemplo, los colegios rurales solo tienen estratos 1 a 3). Cambia los filtros."))
+    d
+  })
+
+  descripcion_filtro <- function() {
+    paste0("depto=", input$departamento,
+           "; nat=", paste(input$naturaleza, collapse = "+"),
+           "; estrato=", input$estrato[1], "-", input$estrato[2],
+           "; zona=", input$zona)
+  }
+
+  # ---- Etapa 1: salidas
+  output$resumen <- renderPrint({
+    d <- datos_filtrados()
+    cat("n =", nrow(d), "| media =", round(mean(d$puntaje), 1),
+        "| mediana =", median(d$puntaje), "\n\n")
+    res <- do.call(rbind, lapply(split(d, droplevels(d$naturaleza)), function(g)
+      data.frame(naturaleza = g$naturaleza[1], n = nrow(g),
+                 media = round(mean(g$puntaje), 1), mediana = median(g$puntaje))))
+    print(res, row.names = FALSE)
+  })
+
+  output$boxplot <- renderPlot({
+    d <- datos_filtrados()
+    boxplot(puntaje ~ droplevels(naturaleza), data = d, col = c("#93c5fd", "#fca5a5")[seq_len(nlevels(droplevels(d$naturaleza)))],
+            xlab = "Naturaleza del colegio", ylab = "Puntaje global",
+            main = "Puntaje Saber 11 por naturaleza")
+  })
+
+  output$tabla <- renderDT(datatable(datos_filtrados(), rownames = FALSE,
+                                     options = list(pageLength = 8)))
+
+  # ---- Etapa 2: modelo solo cuando se pide (eventReactive, no reactive)
+  modelo <- eventReactive(input$ajustar, {
+    d <- datos_filtrados()
+    validate(need(length(input$predictores) > 0, "Elige al menos un predictor."))
+
+    # Predictores sin variación en los datos filtrados hacen fallar lm()
+    preds <- input$predictores
+    var_ok <- vapply(preds, function(p) length(unique(na.omit(d[[p]]))) >= 2, logical(1))
+    if (any(!var_ok)) {
+      showNotification(paste("Se quitó del modelo (sin variación con este filtro):",
+                             paste(preds[!var_ok], collapse = ", ")),
+                       type = "warning", duration = 8)
+      preds <- preds[var_ok]
+    }
+    validate(need(length(preds) > 0,
+                  "Con estos filtros ningún predictor varía; amplía el filtro."))
+
+    completos <- sum(complete.cases(d[, c("puntaje", preds)]))
+    validate(need(completos > length(preds) + 2,
+                  "Muy pocas filas completas para ajustar este modelo."))
+
+    m <- lm(reformulate(preds, "puntaje"), data = d)
+    descartadas <- nrow(d) - nobs(m)
+    if (descartadas > 0)
+      showNotification(paste0("lm() descartó ", descartadas,
+                              " filas con datos faltantes (horas_estudio sin responder)."),
+                       type = "message", duration = 8)
+    list(m = m, preds = preds, filtro = descripcion_filtro(), descartadas = descartadas)
+  })
+
+  output$modelo_txt <- renderPrint({
+    validate(need(input$ajustar > 0, "Elige predictores y pulsa «Ajustar»."))
+    r <- modelo()
+    cat("Fórmula: ", deparse(formula(r$m)), "\n", sep = "")
+    cat("Filtro:  ", r$filtro, "\n", sep = "")
+    cat("R² = ", round(summary(r$m)$r.squared, 3), " | n usado = ", nobs(r$m),
+        if (r$descartadas > 0) paste0(" (", r$descartadas, " filas descartadas por NA)") else "",
+        "\n", sep = "")
+  })
+
+  output$coefs <- renderTable({
+    validate(need(input$ajustar > 0, ""))
+    cf <- summary(modelo()$m)$coefficients
+    data.frame(término = rownames(cf), coef. = round(cf[, 1], 2),
+               `error est.` = round(cf[, 2], 2), `valor p` = signif(cf[, 4], 3),
+               check.names = FALSE)
+  })
+
+  # ---- Historial acumulado en reactiveValues
+  hist <- reactiveValues(df = data.frame())
+
+  observeEvent(input$guardar, {
+    if (input$ajustar == 0) {
+      showNotification("Primero ajusta un modelo.", type = "error")
+      return()
+    }
+    r <- modelo()
+    cf <- coef(r$m)
+    fila <- data.frame(
+      escenario  = nrow(hist$df) + 1,
+      predictores = paste(r$preds, collapse = " + "),
+      filtro     = r$filtro,
+      privado    = if ("naturalezaPrivado" %in% names(cf)) round(cf[["naturalezaPrivado"]], 1) else NA,
+      R2         = round(summary(r$m)$r.squared, 3),
+      n          = nobs(r$m)
+    )
+    hist$df <- rbind(hist$df, fila)
+    showNotification("Escenario guardado.", type = "message", duration = 3)
+  })
+
+  output$historial <- renderDT({
+    validate(need(nrow(hist$df) > 0, "Aún no hay escenarios guardados."))
+    datatable(hist$df, rownames = FALSE, options = list(dom = "t"))
+  })
+
+  output$descargar <- downloadHandler(
+    filename = function() paste0("historial_saber11_", Sys.Date(), ".csv"),
+    content  = function(file) write.csv(hist$df, file, row.names = FALSE)
+  )
+}
+
+
+shinyApp(ui, server, options = list(height = 900))
+```
+
+## Verificación de la clave
+
+```{r verificacion, eval=TRUE}
+d <- read.csv("saber11.csv")
+c(n = nrow(d), mediana = median(d$puntaje), media = round(mean(d$puntaje), 1))
+tapply(d$puntaje, d$naturaleza, median)
+tapply(d$puntaje, d$departamento, median)[c("Chocó", "Bogotá")]
+
+ajusta <- function(f, datos = d) {
+  m <- lm(as.formula(f), datos)
+  data.frame(modelo = f, privado = round(unname(coef(m)["naturalezaPrivado"]), 1),
+             R2 = round(summary(m)$r.squared, 2), n = nobs(m))
+}
+bog <- subset(d, departamento == "Bogotá")
+tabla <- rbind(
+  cbind(escenario = "1. naturaleza",       ajusta("puntaje ~ naturaleza")),
+  cbind(escenario = "2. + estrato",        ajusta("puntaje ~ naturaleza + estrato")),
+  cbind(escenario = "3. + horas",          ajusta("puntaje ~ naturaleza + estrato + horas_estudio")),
+  cbind(escenario = "4. Bogotá (+ estrato)", ajusta("puntaje ~ naturaleza + estrato", bog)),
+  cbind(escenario = "4b. Bogotá (solo naturaleza)", ajusta("puntaje ~ naturaleza", bog))
+)
+knitr::kable(tabla, row.names = FALSE)
+
+# Detalle fino: misma muestra (1440 filas) para aislar el efecto del cambio de muestra
+ajusta("puntaje ~ naturaleza + estrato", d[complete.cases(d), ])$privado
+# Confusión: % de privados por estrato
+round(100 * prop.table(table(d$estrato, d$naturaleza), 1)[, "Privado"])
+# Modelo con solo zona (valor de verificación de la etapa 2)
+coef(lm(puntaje ~ zona, d)); summary(lm(puntaje ~ zona, d))$r.squared
+```
+
+## Respuestas a las preguntas
+
+1. **¿Cuánto más obtienen los privados?** Sin controlar nada, **+31,8 puntos** (R² = 0,10).
+2. **¿Y a igual estrato?** La brecha cae a **+7,7 puntos** (R² = 0,41): cerca de tres cuartas partes de la brecha se explica porque
+   los colegios privados concentran estudiantes de estratos altos (6 % de privados en estrato 1 frente a 76 % en estrato 6).
+3. **¿Por qué cambia n?** Al agregar `horas_estudio`, `lm()` descarta las 60 filas con NA y n pasa de 1500 a **1440** (privado +8,9; R² = 0,45).
+   Parte del cambio del coeficiente (7,7 → 8,9) se debe a la muestra: con las mismas 1440 filas y solo naturaleza + estrato el coeficiente es 8,0.
+4. **¿Pasa lo mismo en Bogotá?** Sí (n = 455): solo naturaleza **+28,2** (R² = 0,10); con estrato baja a **+9,0** (R² = 0,35).
+
+| Escenario | Privado | R² | n |
+|---|---|---|---|
+| 1. naturaleza | 31,8 | 0,10 | 1500 |
+| 2. + estrato | 7,7 | 0,41 | 1500 |
+| 3. + horas | 8,9 | 0,45 | 1440 |
+| 4. Bogotá (+ estrato) | 9,0 | 0,35 | 455 |
+
+## Respuesta para la secretaría
+
+> Buena parte de la ventaja de los colegios privados es **composición socioeconómica, no efecto del colegio**: al comparar estudiantes del mismo
+> estrato la brecha baja de unos 32 a unos 8 puntos, porque los privados concentran estudiantes de estratos altos.
+> **Límite:** es un modelo observacional; aun controlando por estrato quedan variables omitidas (educación de los padres, selección de estudiantes),
+> así que ni siquiera los ~8 puntos restantes pueden leerse como efecto causal del colegio.
+
+## Prueba de estrés (la app no muestra errores rojos)
+
+| Acción | Comportamiento |
+|---|---|
+| Desmarcar ambas naturalezas | `validate()`: mensaje en lugar de gráfico vacío |
+| Zona Rural, estrato 5 a 6 | `validate()`: explica que hay 0 filas |
+| Solo oficiales, con `naturaleza` como predictor | `naturaleza` se quita del modelo con aviso (evita el error de contrastes) |
+| Mover un filtro sin pulsar *Ajustar* | El modelo no cambia (`eventReactive`) |

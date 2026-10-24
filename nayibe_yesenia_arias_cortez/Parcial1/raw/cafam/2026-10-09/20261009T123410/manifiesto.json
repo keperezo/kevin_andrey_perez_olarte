@@ -1,0 +1,214 @@
+{
+ "comercio": "cafam",
+ "id_ejecucion": "20261009T123410",
+ "inicio": "2026-10-09T12:35:28-05:00",
+ "fin": "2026-10-09T12:35:55-05:00",
+ "user_agent": "TallerMineriaDatos-UNAL/1.0 (curso Mineria de Datos, Universidad Nacional de Colombia; uso academico; +https://github.com/Yesenia-AriasC/dm_2016325_2026_2)",
+ "estado": "completa",
+ "error": null,
+ "ramas": {
+  "cuidado-personal/cuidado-capilar": {
+   "total_sitio": 207,
+   "productos_obtenidos": 207,
+   "peticiones": 18,
+   "nota": null
+  },
+  "dermocosmetica/cuidado-capilar": {
+   "total_sitio": 26,
+   "productos_obtenidos": 26,
+   "peticiones": 3,
+   "nota": null
+  }
+ },
+ "archivos": [
+  {
+   "archivo": "cuidado_personal_cuidado_capilar__p001.html.gz",
+   "rama": "cuidado-personal/cuidado-capilar",
+   "url": "https://www.drogueriascafam.com.co/cuidado-personal/cuidado-capilar?page=1",
+   "status": 200,
+   "fecha_hora_consulta": "2026-10-09T12:35:29-05:00",
+   "recordsFiltered": 207,
+   "productos": 12
+  },
+  {
+   "archivo": "cuidado_personal_cuidado_capilar__p002.html.gz",
+   "rama": "cuidado-personal/cuidado-capilar",
+   "url": "https://www.drogueriascafam.com.co/cuidado-personal/cuidado-capilar?page=2",
+   "status": 200,
+   "fecha_hora_consulta": "2026-10-09T12:35:31-05:00",
+   "recordsFiltered": 207,
+   "productos": 12
+  },
+  {
+   "archivo": "cuidado_personal_cuidado_capilar__p003.html.gz",
+   "rama": "cuidado-personal/cuidado-capilar",
+   "url": "https://www.drogueriascafam.com.co/cuidado-personal/cuidado-capilar?page=3",
+   "status": 200,
+   "fecha_hora_consulta": "2026-10-09T12:35:32-05:00",
+   "recordsFiltered": 207,
+   "productos": 12
+  },
+  {
+   "archivo": "cuidado_personal_cuidado_capilar__p004.html.gz",
+   "rama": "cuidado-personal/cuidado-capilar",
+   "url": "https://www.drogueriascafam.com.co/cuidado-personal/cuidado-capilar?page=4",
+   "status": 200,
+   "fecha_hora_consulta": "2026-10-09T12:35:33-05:00",
+   "recordsFiltered": 207,
+   "productos": 12
+  },
+  {
+   "archivo": "cuidado_personal_cuidado_capilar__p005.html.gz",
+   "rama": "cuidado-personal/cuidado-capilar",
+   "url": "https://www.drogueriascafam.com.co/cuidado-personal/cuidado-capilar?page=5",
+   "status": 200,
+   "fecha_hora_consulta": "2026-10-09T12:35:34-05:00",
+   "recordsFiltered": 207,
+   "productos": 12
+  },
+  {
+   "archivo": "cuidado_personal_cuidado_capilar__p006.html.gz",
+   "rama": "cuidado-personal/cuidado-capilar",
+   "url": "https://www.drogueriascafam.com.co/cuidado-personal/cuidado-capilar?page=6",
+   "status": 200,
+   "fecha_hora_consulta": "2026-10-09T12:35:35-05:00",
+   "recordsFiltered": 207,
+   "productos": 12
+  },
+  {
+   "archivo": "cuidado_personal_cuidado_capilar__p007.html.gz",
+   "rama": "cuidado-personal/cuidado-capilar",
+   "url": "https://www.drogueriascafam.com.co/cuidado-personal/cuidado-capilar?page=7",
+   "status": 200,
+   "fecha_hora_consulta": "2026-10-09T12:35:36-05:00",
+   "recordsFiltered": 207,
+   "productos": 12
+  },
+  {
+   "archivo": "cuidado_personal_cuidado_capilar__p008.html.gz",
+   "rama": "cuidado-personal/cuidado-capilar",
+   "url": "https://www.drogueriascafam.com.co/cuidado-personal/cuidado-capilar?page=8",
+   "status": 200,
+   "fecha_hora_consulta": "2026-10-09T12:35:37-05:00",
+   "recordsFiltered": 207,
+   "productos": 12
+  },
+  {
+   "archivo": "cuidado_personal_cuidado_capilar__p009.html.gz",
+   "rama": "cuidado-personal/cuidado-capilar",
+   "url": "https://www.drogueriascafam.com.co/cuidado-personal/cuidado-capilar?page=9",
+   "status": 200,
+   "fecha_hora_consulta": "2026-10-09T12:35:39-05:00",
+   "recordsFiltered": 207,
+   "productos": 12
+  },
+  {
+   "archivo": "cuidado_personal_cuidado_capilar__p010.html.gz",
+   "rama": "cuidado-personal/cuidado-capilar",
+   "url": "https://www.drogueriascafam.com.co/cuidado-personal/cuidado-capilar?page=10",
+   "status": 200,
+   "fecha_hora_consulta": "2026-10-09T12:35:40-05:00",
+   "recordsFiltered": 207,
+   "productos": 12
+  },
+  {
+   "archivo": "cuidado_personal_cuidado_capilar__p011.html.gz",
+   "rama": "cuidado-personal/cuidado-capilar",
+   "url": "https://www.drogueriascafam.com.co/cuidado-personal/cuidado-capilar?page=11",
+   "status": 200,
+   "fecha_hora_consulta": "2026-10-09T12:35:41-05:00",
+   "recordsFiltered": 207,
+   "productos": 12
+  },
+  {
+   "archivo": "cuidado_personal_cuidado_capilar__p012.html.gz",
+   "rama": "cuidado-personal/cuidado-capilar",
+   "url": "https://www.drogueriascafam.com.co/cuidado-personal/cuidado-capilar?page=12",
+   "status": 200,
+   "fecha_hora_consulta": "2026-10-09T12:35:42-05:00",
+   "recordsFiltered": 207,
+   "productos": 12
+  },
+  {
+   "archivo": "cuidado_personal_cuidado_capilar__p013.html.gz",
+   "rama": "cuidado-personal/cuidado-capilar",
+   "url": "https://www.drogueriascafam.com.co/cuidado-personal/cuidado-capilar?page=13",
+   "status": 200,
+   "fecha_hora_consulta": "2026-10-09T12:35:43-05:00",
+   "recordsFiltered": 207,
+   "productos": 12
+  },
+  {
+   "archivo": "cuidado_personal_cuidado_capilar__p014.html.gz",
+   "rama": "cuidado-personal/cuidado-capilar",
+   "url": "https://www.drogueriascafam.com.co/cuidado-personal/cuidado-capilar?page=14",
+   "status": 200,
+   "fecha_hora_consulta": "2026-10-09T12:35:44-05:00",
+   "recordsFiltered": 207,
+   "productos": 12
+  },
+  {
+   "archivo": "cuidado_personal_cuidado_capilar__p015.html.gz",
+   "rama": "cuidado-personal/cuidado-capilar",
+   "url": "https://www.drogueriascafam.com.co/cuidado-personal/cuidado-capilar?page=15",
+   "status": 200,
+   "fecha_hora_consulta": "2026-10-09T12:35:45-05:00",
+   "recordsFiltered": 207,
+   "productos": 12
+  },
+  {
+   "archivo": "cuidado_personal_cuidado_capilar__p016.html.gz",
+   "rama": "cuidado-personal/cuidado-capilar",
+   "url": "https://www.drogueriascafam.com.co/cuidado-personal/cuidado-capilar?page=16",
+   "status": 200,
+   "fecha_hora_consulta": "2026-10-09T12:35:46-05:00",
+   "recordsFiltered": 207,
+   "productos": 12
+  },
+  {
+   "archivo": "cuidado_personal_cuidado_capilar__p017.html.gz",
+   "rama": "cuidado-personal/cuidado-capilar",
+   "url": "https://www.drogueriascafam.com.co/cuidado-personal/cuidado-capilar?page=17",
+   "status": 200,
+   "fecha_hora_consulta": "2026-10-09T12:35:47-05:00",
+   "recordsFiltered": 207,
+   "productos": 12
+  },
+  {
+   "archivo": "cuidado_personal_cuidado_capilar__p018.html.gz",
+   "rama": "cuidado-personal/cuidado-capilar",
+   "url": "https://www.drogueriascafam.com.co/cuidado-personal/cuidado-capilar?page=18",
+   "status": 200,
+   "fecha_hora_consulta": "2026-10-09T12:35:49-05:00",
+   "recordsFiltered": 207,
+   "productos": 3
+  },
+  {
+   "archivo": "dermocosmetica_cuidado_capilar__p001.html.gz",
+   "rama": "dermocosmetica/cuidado-capilar",
+   "url": "https://www.drogueriascafam.com.co/dermocosmetica/cuidado-capilar?page=1",
+   "status": 200,
+   "fecha_hora_consulta": "2026-10-09T12:35:53-05:00",
+   "recordsFiltered": 26,
+   "productos": 12
+  },
+  {
+   "archivo": "dermocosmetica_cuidado_capilar__p002.html.gz",
+   "rama": "dermocosmetica/cuidado-capilar",
+   "url": "https://www.drogueriascafam.com.co/dermocosmetica/cuidado-capilar?page=2",
+   "status": 200,
+   "fecha_hora_consulta": "2026-10-09T12:35:54-05:00",
+   "recordsFiltered": 26,
+   "productos": 12
+  },
+  {
+   "archivo": "dermocosmetica_cuidado_capilar__p003.html.gz",
+   "rama": "dermocosmetica/cuidado-capilar",
+   "url": "https://www.drogueriascafam.com.co/dermocosmetica/cuidado-capilar?page=3",
+   "status": 200,
+   "fecha_hora_consulta": "2026-10-09T12:35:55-05:00",
+   "recordsFiltered": 26,
+   "productos": 2
+  }
+ ]
+}

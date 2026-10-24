@@ -1,0 +1,394 @@
+---
+title: "Solución de ejercicios: valores faltantes y recipes"
+author: ""
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+# Paquetes requeridos ------------------------------------------------------
+paquetes <- c("tidyverse", "tidymodels", "recipes")
+
+faltantes <- paquetes[!vapply(paquetes, requireNamespace, logical(1), quietly = TRUE)]
+if (length(faltantes) > 0) {
+  install.packages(faltantes, dependencies = TRUE)
+}
+
+library(tidyverse)
+library(tidymodels)
+library(recipes)
+
+theme_set(theme_minimal())
+options(scipen = 999)
+```
+
+# Ejercicio 1. Diagnóstico de valores faltantes
+
+## 1.1 Construcción del conjunto simulado
+
+El diagnóstico del mecanismo de ausencia se hará usando únicamente variables observables de `datos`. Se conserva una copia de los valores completos solo para la sección 1.3, donde el enunciado permite aprovechar la semilla para cuantificar el sesgo de imputación.
+
+```{r datos-simulados}
+set.seed(2024)
+n <- 400
+
+ciudad <- sample(
+  c("Bogotá", "Medellín", "Cali", "Barranquilla"),
+  n,
+  replace = TRUE,
+  prob = c(.35, .25, .25, .15)
+)
+
+edad <- pmax(18, round(rnorm(n, 38, 12)))
+ingreso <- rnorm(n, 2.5e6 + 4e4 * edad, 6e5)
+gasto <- ingreso * runif(n, 0.3, 0.7)
+compra <- rbinom(n, 1, plogis(scale(gasto)[, 1] * 0.8 - 0.5))
+
+# Se guardan los valores reales únicamente para evaluar el sesgo después.
+ingreso_real <- ingreso
+gasto_real <- gasto
+
+riesgo <- ciudad == "Cali" & edad > 42
+
+faltante_ingreso <- rbinom(n, 1, ifelse(riesgo, .55, .06)) == 1
+faltante_gasto <- rbinom(n, 1, plogis(scale(gasto)[, 1] * 1.5 - 1)) == 1
+
+ingreso[faltante_ingreso] <- NA
+gasto[faltante_gasto] <- NA
+
+datos <- data.frame(ciudad, edad, ingreso, gasto, compra)
+
+# Copia de auditoría: no se usa para diagnosticar MAR/MCAR.
+datos_auditoria <- datos |>
+  mutate(
+    ingreso_real = ingreso_real,
+    gasto_real = gasto_real
+  )
+
+glimpse(datos)
+```
+
+## 1.2 Evidencia observable de que la ausencia de `ingreso` es consistente con MAR y no con MCAR
+
+Bajo MCAR, la probabilidad de que `ingreso` esté ausente no debería variar sistemáticamente con variables observadas. Aquí se examina si la tasa de ausencia cambia según `ciudad` y `edad`, sin mirar el código que produjo los faltantes.
+
+```{r evidencia-mar}
+datos_diag <- datos |>
+  mutate(
+    ingreso_na = is.na(ingreso),
+    edad_gt_42 = edad > 42
+  )
+
+# Tasa global de faltantes
+tasa_global_ingreso_na <- mean(datos_diag$ingreso_na)
+tasa_global_ingreso_na
+
+# Tasa por ciudad
+tabla_ciudad <- datos_diag |>
+  group_by(ciudad) |>
+  summarise(
+    n = n(),
+    faltantes = sum(ingreso_na),
+    tasa_faltantes = mean(ingreso_na),
+    .groups = "drop"
+  ) |>
+  arrange(desc(tasa_faltantes))
+
+tabla_ciudad
+
+# Tasa por combinación observable de ciudad y edad > 42
+tabla_ciudad_edad <- datos_diag |>
+  group_by(ciudad, edad_gt_42) |>
+  summarise(
+    n = n(),
+    faltantes = sum(ingreso_na),
+    tasa_faltantes = mean(ingreso_na),
+    .groups = "drop"
+  ) |>
+  arrange(desc(tasa_faltantes))
+
+tabla_ciudad_edad
+
+# Contraste descriptivo: grupo Cali y edad > 42 vs. el resto
+tabla_grupo_riesgo_observable <- datos_diag |>
+  mutate(grupo = if_else(ciudad == "Cali" & edad > 42,
+                         "Cali y edad > 42",
+                         "Resto")) |>
+  group_by(grupo) |>
+  summarise(
+    n = n(),
+    faltantes = sum(ingreso_na),
+    tasa_faltantes = mean(ingreso_na),
+    .groups = "drop"
+  )
+
+tabla_grupo_riesgo_observable
+
+# Modelo auxiliar de ausencia: usa solo información observable.
+modelo_ausencia_ingreso <- glm(
+  ingreso_na ~ ciudad * edad,
+  data = datos_diag,
+  family = binomial()
+)
+
+summary(modelo_ausencia_ingreso)
+```
+
+**Interpretación.** Si la tabla muestra una tasa de ausencia claramente mayor en `Cali` para edades superiores a 42 años, la ausencia no es compatible con MCAR, porque depende de información observada. La evidencia es consistente con un mecanismo **MAR**, condicionado por `ciudad` y `edad` —en particular por su combinación—. Esto no demuestra matemáticamente que sea MAR, pero sí permite descartar la explicación MCAR como razonable para estos datos.
+
+## 1.3 Media global vs. media condicional por `ciudad` y `edad`
+
+La media global ignora la estructura de los datos. Para aproximar la media condicional \(E(ingreso\mid ciudad, edad)\), se ajusta una regresión lineal usando únicamente los casos con ingreso observado y luego se predice sobre los faltantes.
+
+```{r imputaciones-ingreso}
+datos_imp <- datos |>
+  mutate(id = row_number())
+
+# 1) Imputación por media global
+media_global <- mean(datos_imp$ingreso, na.rm = TRUE)
+
+datos_imp <- datos_imp |>
+  mutate(
+    ingreso_imp_global = if_else(
+      is.na(ingreso),
+      media_global,
+      ingreso
+    )
+  )
+
+# 2) Imputación por media condicional estimada con ciudad + edad
+modelo_media_condicional <- lm(
+  ingreso ~ ciudad + edad,
+  data = datos_imp
+)
+
+pred_condicional <- predict(modelo_media_condicional, newdata = datos_imp)
+
+datos_imp <- datos_imp |>
+  mutate(
+    ingreso_imp_condicional = if_else(
+      is.na(ingreso),
+      pred_condicional,
+      ingreso
+    )
+  )
+
+summary(modelo_media_condicional)
+```
+
+### Identificación del subgrupo con mayor tasa de faltantes
+
+```{r subgrupo-mas-faltantes}
+subgrupos <- datos_diag |>
+  group_by(ciudad, edad_gt_42) |>
+  summarise(
+    n = n(),
+    faltantes = sum(ingreso_na),
+    tasa_faltantes = mean(ingreso_na),
+    .groups = "drop"
+  ) |>
+  filter(n > 0) |>
+  arrange(desc(tasa_faltantes), desc(faltantes))
+
+subgrupo_mayor <- subgrupos |>
+  slice(1)
+
+subgrupo_mayor
+```
+
+### Cuantificación del sesgo aprovechando la semilla
+
+Para evaluar la imputación se compara el valor imputado con el `ingreso_real` que se guardó antes de introducir los NA. Esta información **no** se utilizó para diagnosticar el mecanismo; solo se usa como verdad simulada para medir el sesgo.
+
+```{r sesgo-imputaciones}
+evaluacion <- datos_imp |>
+  left_join(
+    datos_auditoria |>
+      mutate(id = row_number()) |>
+      select(id, ingreso_real),
+    by = "id"
+  ) |>
+  mutate(
+    edad_gt_42 = edad > 42,
+    era_faltante = is.na(ingreso)
+  )
+
+ciudad_objetivo <- subgrupo_mayor$ciudad[[1]]
+edad_objetivo <- subgrupo_mayor$edad_gt_42[[1]]
+
+eval_subgrupo <- evaluacion |>
+  filter(
+    ciudad == ciudad_objetivo,
+    edad_gt_42 == edad_objetivo,
+    era_faltante
+  )
+
+resultado_sesgo <- tibble(
+  metodo = c("Media global", "Media condicional: ciudad + edad"),
+  n_faltantes_evaluados = c(nrow(eval_subgrupo), nrow(eval_subgrupo)),
+  media_real = c(
+    mean(eval_subgrupo$ingreso_real),
+    mean(eval_subgrupo$ingreso_real)
+  ),
+  media_imputada = c(
+    mean(eval_subgrupo$ingreso_imp_global),
+    mean(eval_subgrupo$ingreso_imp_condicional)
+  )
+) |>
+  mutate(
+    sesgo = media_imputada - media_real,
+    sesgo_porcentual = 100 * sesgo / media_real,
+    MAE = c(
+      mean(abs(eval_subgrupo$ingreso_imp_global - eval_subgrupo$ingreso_real)),
+      mean(abs(eval_subgrupo$ingreso_imp_condicional - eval_subgrupo$ingreso_real))
+    )
+  )
+
+resultado_sesgo
+```
+
+**Interpretación.** El método con menor valor absoluto de `sesgo` aproxima mejor la media verdadera del subgrupo más afectado por la ausencia. En este escenario se espera que la media global quede más sesgada porque mezcla edades y ciudades, mientras que la imputación condicional conserva la relación entre ingreso y las covariables observadas.
+
+## 1.4 ¿Por qué ninguna imputación estándar corrige el sesgo de `gasto`?
+
+Primero se muestra la evidencia disponible. En los casos observados puede compararse la distribución de `gasto`, pero el valor real de `gasto` precisamente no está disponible cuando falta. Por eso no es posible verificar desde `datos` si los faltantes tienden a corresponder a valores altos de la propia variable.
+
+```{r diagnostico-gasto}
+datos |>
+  summarise(
+    prop_na_gasto = mean(is.na(gasto)),
+    n_na_gasto = sum(is.na(gasto)),
+    n_total = n()
+  )
+
+# Relaciones entre ausencia de gasto y variables observables
+datos |>
+  mutate(gasto_na = is.na(gasto)) |>
+  group_by(ciudad) |>
+  summarise(
+    n = n(),
+    tasa_faltantes_gasto = mean(gasto_na),
+    .groups = "drop"
+  ) |>
+  arrange(desc(tasa_faltantes_gasto))
+```
+
+Si la probabilidad de ausencia depende del **valor no observado del propio `gasto`**, el mecanismo es MNAR. En ese caso, media, mediana, KNN, árboles o imputación múltiple bajo supuestos MAR no pueden recuperar por sí solos la cola alta ausente: todos aprenden principalmente de la distribución observada, que ya está truncada o sesgada.
+
+Una estrategia más defendible es realizar **análisis de sensibilidad MNAR**, por ejemplo imputar bajo distintos desplazamientos plausibles hacia arriba para los valores faltantes y verificar cómo cambian las conclusiones. En un estudio real también sería deseable obtener información externa o una submuestra de validación que permita estimar el mecanismo de selección.
+
+Como demostración —solo porque en la simulación conocemos la verdad— se puede verificar que los valores reales faltantes de `gasto` son más altos:
+
+```{r auditoria-mnar-gasto}
+datos_auditoria |>
+  mutate(gasto_na = is.na(gasto)) |>
+  group_by(gasto_na) |>
+  summarise(
+    n = n(),
+    media_gasto_real = mean(gasto_real),
+    mediana_gasto_real = median(gasto_real),
+    .groups = "drop"
+  )
+```
+
+# Ejercicio 2. Depurar un pipeline con `recipes`
+
+## 2.1 Identificación de los dos errores
+
+Los dos problemas principales son:
+
+1. **Fuga de información:** construir la receta con `bind_rows(train, test)` hace que el preprocesamiento aprenda también del conjunto de prueba. La receta debe definirse y entrenarse únicamente con `train`.
+2. **Orden incorrecto:** `step_dummy()` aparece antes de imputar variables nominales. Los NA nominales deben resolverse antes de generar variables dummy; de lo contrario, pueden propagarse NA a las columnas indicadoras.
+
+Pipeline corregido:
+
+```{r pipeline-corregido}
+set.seed(7)
+
+# Para clasificación, se usa factor como variable objetivo.
+datos_modelo <- datos |>
+  mutate(compra = factor(compra, levels = c(0, 1)))
+
+split <- initial_split(datos_modelo, prop = 0.8, strata = compra)
+train <- training(split)
+test <- testing(split)
+
+receta_corregida <- recipe(compra ~ ., data = train) |>
+  step_impute_median(all_numeric_predictors()) |>
+  step_impute_mode(all_nominal_predictors()) |>
+  step_dummy(all_nominal_predictors()) |>
+  prep(training = train, retain = TRUE)
+
+train_proc <- bake(receta_corregida, new_data = NULL)
+test_proc <- bake(receta_corregida, new_data = test)
+
+# Verificación: no quedan NA en predictores.
+sum(is.na(train_proc))
+sum(is.na(test_proc))
+```
+
+## 2.2 Extensión: indicador de ausencia para `ingreso` + `step_impute_bag()`
+
+El indicador debe crearse **antes** de imputar, porque después de la imputación ya no sería posible distinguir qué registros tenían `ingreso` ausente originalmente.
+
+Además, antes de la imputación bagged de `ingreso`, se imputan otros predictores que pueden contener NA (`gasto` y variables nominales), para que el modelo de imputación de `ingreso` reciba predictores completos. La creación de dummies queda al final.
+
+```{r pipeline-bag}
+receta_bag <- recipe(compra ~ ., data = train) |>
+  # 1. Conservar información sobre la ausencia original de ingreso
+  step_indicate_na(ingreso) |>
+
+  # 2. Completar otros predictores antes de usarlos para imputar ingreso
+  step_impute_mode(all_nominal_predictors()) |>
+  step_impute_median(all_numeric_predictors(), -all_of("ingreso")) |>
+
+  # 3. Imputación flexible de ingreso mediante árboles bagged
+  step_impute_bag(ingreso) |>
+
+  # 4. Codificación final de variables categóricas
+  step_dummy(all_nominal_predictors()) |>
+  prep(training = train, retain = TRUE)
+
+train_bag <- bake(receta_bag, new_data = NULL)
+test_bag <- bake(receta_bag, new_data = test)
+
+# Comprobación final
+sum(is.na(train_bag))
+sum(is.na(test_bag))
+
+names(train_bag)
+```
+
+**Justificación del orden final:**
+
+- `step_indicate_na(ingreso)` va primero para preservar la señal de ausencia original.
+- Se imputan primero los demás predictores incompletos para que `step_impute_bag(ingreso)` pueda usarlos sin NA.
+- `step_impute_bag(ingreso)` aprende exclusivamente con el conjunto de entrenamiento porque toda la receta se prepara con `train`.
+- `step_dummy()` va al final, una vez que las variables nominales ya no contienen NA.
+- El mismo objeto preparado con `train` se aplica luego a `test`, evitando fuga de información.
+
+# Ejercicio 3. Razonamiento conceptual
+
+Datos del caso: 5.000 solicitudes, 22% de ausencia en `ingreso_reportado`, incumplimiento de 31% entre quienes tienen el dato faltante frente a 9% entre quienes no, asociación de la ausencia con `estrato` de aproximadamente 0.52 y casi nula con `edad` (aprox. 0.03).
+
+## 3.1 ¿MAR o MCAR? ¿Por qué no se puede descartar MNAR?
+
+La evidencia es **más consistente con MAR que con MCAR**. Si fuera MCAR, la ausencia de `ingreso_reportado` no debería asociarse de manera marcada con una variable observada como `estrato`. Una asociación cercana a 0.52 indica que la probabilidad de ausencia cambia con información disponible en la base.
+
+Sin embargo, no puede descartarse un componente **MNAR**: aun después de condicionar por `estrato`, la probabilidad de no reportar ingreso podría depender del propio ingreso verdadero, que justamente no se observa cuando falta. Los datos observados no permiten identificar de manera definitiva esa dependencia sin supuestos adicionales, información externa o un diseño específico de validación.
+
+## 3.2 Consecuencia práctica de imputar la mediana global
+
+Imputar la mediana global coloca a todas las personas con ingreso faltante en un mismo valor central y reduce artificialmente la variabilidad. Como el faltante está asociado tanto con `estrato` como con una tasa de incumplimiento mucho mayor, la imputación puede ocultar una señal de riesgo relevante.
+
+La consecuencia práctica es que el puntaje estimado para esos solicitantes puede desplazarse sistemáticamente. Personas que deberían quedar por encima o por debajo de un umbral de aprobación pueden terminar clasificadas de forma distinta únicamente por la estrategia de imputación. Por eso no basta con mirar el AUC: también deben revisarse **calibración, tasas de aprobación/rechazo y errores de decisión** para el grupo con ingreso faltante y por estrato.
+
+## 3.3 Estrategia defendible ante un comité de riesgo, en máximo 3 pasos
+
+1. **Diagnóstico y señal de ausencia.** Mantener un indicador `ingreso_faltante`, documentar su relación con estrato e incumplimiento y separar correctamente entrenamiento/validación antes de cualquier imputación.
+2. **Modelamiento e imputación robusta.** Comparar una imputación condicional/modelada —por ejemplo bagged trees o imputación múltiple— con alternativas simples, siempre aprendidas solo sobre `train`; añadir un análisis de sensibilidad MNAR que desplace los ingresos faltantes bajo varios escenarios plausibles.
+3. **Validación de decisión.** Evaluar no solo discriminación, sino calibración, tasa de aprobación, incumplimiento esperado y diferencias por estrato y por condición de faltante. Elegir el procedimiento que sea estable frente a los escenarios de sensibilidad y dejar documentados supuestos, límites y monitoreo posterior.

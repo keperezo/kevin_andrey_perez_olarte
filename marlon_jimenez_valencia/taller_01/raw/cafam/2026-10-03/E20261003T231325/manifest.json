@@ -1,0 +1,1255 @@
+{
+ "comercio": "cafam",
+ "secciones": [
+  {
+   "fq": "/salud-y-medicamentos/bienestar-natural",
+   "nombre": "Bienestar natural",
+   "total_reportado": 108,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/cuidado-de-los-ojos",
+   "nombre": "Cuidado de los ojos",
+   "total_reportado": 89,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/cuidado-respiratorio",
+   "nombre": "Cuidado respiratorio",
+   "total_reportado": 234,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/dermatologicos",
+   "nombre": "Dermatológicos",
+   "total_reportado": 41,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/dolor-y-malestar",
+   "nombre": "Dolor y malestar",
+   "total_reportado": 140,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/equipos-medicos",
+   "nombre": "Equipos médicos",
+   "total_reportado": 60,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/estomago-y-digestion",
+   "nombre": "Estómago y digestión",
+   "total_reportado": 152,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/medicamentos-rx",
+   "nombre": "Medicamentos RX",
+   "total_reportado": 1967,
+   "vueltas": 2,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/movilidad-y-apoyo-fisico",
+   "nombre": "Movilidad y apoyo físico",
+   "total_reportado": 57,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/preparados-tradicionales",
+   "nombre": "Preparados tradicionales",
+   "total_reportado": 35,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/primeros-auxilios",
+   "nombre": "Primeros auxilios",
+   "total_reportado": 209,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  },
+  {
+   "fq": "/salud-y-medicamentos/productos-hogar",
+   "nombre": "Productos hogar",
+   "total_reportado": 6,
+   "vueltas": 1,
+   "errores_recuperados": 0
+  }
+ ],
+ "paginas": 426,
+ "errores": [
+  {
+   "pagina": 122,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=51",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 123,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=52",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 124,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=53",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 125,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=54",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 126,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=55",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 127,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=56",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 128,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=57",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 129,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=58",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 130,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=59",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 131,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=60",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 132,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=61",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 133,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=62",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 134,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=63",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 135,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=64",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 136,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=65",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 137,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=66",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 138,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=67",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 139,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=68",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 140,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=69",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 141,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=70",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 142,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=71",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 143,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=72",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 144,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=73",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 145,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=74",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 146,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=75",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 147,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=76",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 148,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=77",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 149,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=78",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 150,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=79",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 151,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=80",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 152,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=81",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 153,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=82",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 154,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=83",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 155,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=84",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 156,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=85",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 157,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=86",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 158,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=87",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 159,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=88",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 160,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=89",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 161,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=90",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 162,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=91",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 163,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=92",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 164,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=93",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 165,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=94",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 166,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=95",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 167,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=96",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 168,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=97",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 169,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=98",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 170,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=99",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 171,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=100",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 172,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=101",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 173,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=102",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 174,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=103",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 175,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=104",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 176,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=105",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 177,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=106",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 178,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=107",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 179,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=108",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 180,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=109",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 181,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=110",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 182,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=111",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 183,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=112",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 184,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=113",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 185,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=114",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 186,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=115",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 187,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=116",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 188,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=117",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 189,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=118",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 190,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=119",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 191,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=120",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 192,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=121",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 193,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=122",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 194,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=123",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 195,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=124",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 196,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=125",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 197,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=126",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 198,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=127",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 199,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=128",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 200,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=129",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 201,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=130",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 202,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=131",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 203,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=132",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 204,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=133",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 205,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=134",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 206,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=135",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 207,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=136",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 208,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=137",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 209,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=138",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 210,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=139",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 211,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=140",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 212,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=141",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 213,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=142",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 214,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=143",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 215,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=144",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 216,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=145",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 217,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=146",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 218,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=147",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 219,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=148",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 220,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=149",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 221,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=150",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 222,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=151",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 223,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=152",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 224,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=153",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 225,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=154",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 226,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=155",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 227,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=156",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 228,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=157",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 229,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=158",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 230,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=159",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 231,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=160",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 232,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=161",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 233,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=162",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 234,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=163",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 235,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=164",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 286,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=51",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 287,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=52",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 288,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=53",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 289,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=54",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 290,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=55",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 291,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=56",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 292,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=57",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 293,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=58",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 294,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=59",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 295,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=60",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 296,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=61",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 297,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=62",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 298,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=63",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 299,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=64",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 300,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=65",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 301,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=66",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 302,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=67",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 303,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=68",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 304,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=69",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 305,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=70",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 306,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=71",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 307,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=72",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 308,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=73",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 309,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=74",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 310,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=75",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 311,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=76",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 312,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=77",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 313,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=78",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 314,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=79",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 315,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=80",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 316,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=81",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 317,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=82",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 318,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=83",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 319,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=84",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 320,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=85",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 321,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=86",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 322,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=87",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 323,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=88",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 324,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=89",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 325,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=90",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 326,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=91",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 327,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=92",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 328,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=93",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 329,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=94",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 330,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=95",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 331,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=96",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 332,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=97",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 333,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=98",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 334,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=99",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 335,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=100",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 336,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=101",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 337,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=102",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 338,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=103",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 339,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=104",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 340,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=105",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 341,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=106",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 342,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=107",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 343,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=108",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 344,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=109",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 345,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=110",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 346,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=111",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 347,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=112",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 348,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=113",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 349,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=114",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 350,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=115",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 351,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=116",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 352,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=117",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 353,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=118",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 354,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=119",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 355,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=120",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 356,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=121",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 357,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=122",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 358,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=123",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 359,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=124",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 360,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=125",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 361,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=126",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 362,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=127",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 363,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=128",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 364,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=129",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 365,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=130",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 366,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=131",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 367,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=132",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 368,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=133",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 369,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=134",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 370,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=135",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 371,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=136",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 372,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=137",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 373,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=138",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 374,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=139",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 375,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=140",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 376,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=141",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 377,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=142",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 378,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=143",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 379,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=144",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 380,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=145",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 381,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=146",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 382,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=147",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 383,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=148",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 384,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=149",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 385,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=150",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 386,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=151",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 387,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=152",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 388,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=153",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 389,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=154",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 390,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=155",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 391,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=156",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 392,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=157",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 393,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=158",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 394,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=159",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 395,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=160",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 396,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=161",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 397,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=162",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 398,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=163",
+   "error": "StopIteration()"
+  },
+  {
+   "pagina": 399,
+   "url": "https://www.drogueriascafam.com.co/salud-y-medicamentos/medicamentos-rx?page=164",
+   "error": "StopIteration()"
+  }
+ ],
+ "total_sitio": 3098,
+ "nota": "páginas HTML de categoría (?page=N); en raw/ se guarda el bloque __STATE__ con los productos de cada página",
+ "productos_unicos": 1731,
+ "productos_por_seccion": {
+  "Bienestar natural": 108,
+  "Cuidado de los ojos": 89,
+  "Cuidado respiratorio": 234,
+  "Dermatológicos": 41,
+  "Dolor y malestar": 140,
+  "Equipos médicos": 60,
+  "Estómago y digestión": 152,
+  "Medicamentos RX": 600,
+  "Movilidad y apoyo físico": 57,
+  "Preparados tradicionales": 35,
+  "Primeros auxilios": 209,
+  "Productos hogar": 6
+ },
+ "skus": 1732,
+ "skus_repetidos_descartados": 600,
+ "id_ejecucion": "E20261003T231325",
+ "inicio": "2026-10-03T23:22:15-05:00",
+ "fin": "2026-10-03T23:41:25-05:00",
+ "estado": "parcial"
+}

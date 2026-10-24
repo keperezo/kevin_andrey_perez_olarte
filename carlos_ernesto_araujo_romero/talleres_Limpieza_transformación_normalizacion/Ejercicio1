@@ -1,0 +1,155 @@
+library(tidyverse)
+set.seed(2024)
+
+precios <- read_csv("house_prices.csv", show_col_types = FALSE)
+
+# a) Porcentaje de NA y columnas con > 50% de faltantes
+resumen_na <- precios %>%
+  summarise(across(everything(), ~ mean(is.na(.x)) * 100)) %>%
+  pivot_longer(everything(), names_to = "columna", values_to = "pct_na") %>%
+  arrange(desc(pct_na))
+
+cols_perdidas <- resumen_na %>% filter(pct_na > 50)
+print(cols_perdidas)
+
+# Justificación:
+# Al eliminar 'PoolQC' (>99% NA) se descarta un indicador crítico de extremo lujo.
+# El NA aquí significa "sin piscina", no que el dato se haya extraviado. 
+# Una casa con piscina en calidad excelente ('Ex') suele tener un precio de venta 
+# atípico y muy superior al promedio; borrar la columna elimina ese factor explicativo.
+
+
+# b) Comprobación de hipótesis: Cruce entre variables categóricas y de área
+# 1. Garaje: GarageType vs GarageArea
+g_garaje <- precios %>%
+  filter((is.na(GarageType) & (GarageArea > 0 | is.na(GarageArea))) |
+           (!is.na(GarageType) & GarageArea == 0)) %>%
+  nrow()
+
+# 2. Sótano: BsmtQual vs TotalBsmtSF
+g_bsmt <- precios %>%
+  filter((is.na(BsmtQual) & (TotalBsmtSF > 0 | is.na(TotalBsmtSF))) |
+           (!is.na(BsmtQual) & TotalBsmtSF == 0)) %>%
+  nrow()
+
+# 3. Piscina: PoolQC vs PoolArea
+g_piscina <- precios %>%
+  filter((is.na(PoolQC) & (PoolArea > 0 | is.na(PoolArea))) |
+           (!is.na(PoolQC) & PoolArea == 0)) %>%
+  nrow()
+
+cat("Faltantes reales (discordancias):\n")
+cat(" - Garaje:", g_garaje, "\n")
+cat(" - Sótano:", g_bsmt, "\n")
+cat(" - Piscina:", g_piscina, "\n\n")
+
+# c) Función recodificar_ausencia() aplicada con purrr::reduce
+recodificar_ausencia <- function(df, cols, area_col) {
+  df %>%
+    mutate(across(
+      all_of(cols) & where(is.character),
+      ~ if_else(is.na(.x) & .data[[area_col]] == 0, "Ninguno", .x)
+    ))
+}
+
+specs <- list(
+  list(cols = c("GarageType", "GarageFinish", "GarageQual", "GarageCond"), area = "GarageArea"),
+  list(cols = c("BsmtQual", "BsmtCond", "BsmtExposure", "BsmtFinType1", "BsmtFinType2"), area = "TotalBsmtSF"),
+  list(cols = c("PoolQC"), area = "PoolArea")
+)
+
+precios_recod <- reduce(specs, function(df_actual, sp) {
+  recodificar_ausencia(df_actual, sp$cols, sp$area)
+}, .init = precios)
+
+table(precios_recod$PoolQC, useNA = "always")
+
+# d) Imputación de LotFrontage por Neighborhood vs Mediana Global
+mediana_global <- median(precios$LotFrontage, na.rm = TRUE)
+
+diff_lot <- precios %>%
+  group_by(Neighborhood) %>%
+  summarise(
+    mediana_barrio = median(LotFrontage, na.rm = TRUE),
+    mediana_global = mediana_global,
+    diferencia     = abs(mediana_barrio - mediana_global),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(diferencia))
+
+print(head(diff_lot, 5))
+
+# Gráfico de las diferencias por barrio
+diff_lot %>%
+  ggplot(aes(x = reorder(Neighborhood, diferencia), y = diferencia)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = "Diferencia entre Mediana de LotFrontage por Barrio y Mediana Global",
+    x = "Barrio",
+    y = "| Mediana Barrio - Mediana Global | (pies)"
+  ) +
+  theme_minimal()
+
+# e) Detección y corrección de fechas imposibles
+precios_corregido <- precios_recod %>%
+  mutate(
+    edad_vivienda_raw = YrSold - YearBuilt,
+    
+    # Reglas de decisión:
+    # 1. GarageYrBlt > 2010 
+    # 2. GarageYrBlt > YrSold o YearBuilt > YrSold (incoherencias temporales)
+    dato_corregido = case_when(
+      GarageYrBlt > 2010 ~ TRUE,
+      edad_vivienda_raw < 0 ~ TRUE,
+      GarageYrBlt > YrSold ~ TRUE,
+      TRUE ~ FALSE
+    ),
+    
+    # Correcciones razonadas
+    GarageYrBlt = case_when(
+      GarageYrBlt == 2207 ~ 2007, # Error tipográfico conocido
+      GarageYrBlt > YrSold ~ YrSold, # Asumir año de venta si supera la fecha
+      TRUE ~ GarageYrBlt
+    ),
+    
+    edad_vivienda = pmax(0, edad_vivienda_raw) # Evita edades negativas
+  )
+
+cat("Total de registros corregidos o con inconsistencias:", sum(precios_corregido$dato_corregido, na.rm = TRUE), "\n\n")
+
+# f) Discretización de edad_vivienda: cut() vs ntile() y SalePrice
+precios_corregido <- precios_corregido %>%
+  mutate(
+    grupo_cut = cut(
+      edad_vivienda,
+      breaks = quantile(edad_vivienda, probs = seq(0, 1, 0.25), na.rm = TRUE),
+      include.lowest = TRUE,
+      labels = c("Q1_Nuevo", "Q2_MedioNuevo", "Q3_MedioViejo", "Q4_Viejo")
+    ),
+    grupo_ntile = factor(
+      ntile(edad_vivienda, 4),
+      labels = c("Q1_Nuevo", "Q2_MedioNuevo", "Q3_MedioViejo", "Q4_Viejo")
+    )
+  )
+
+# Tabla de contingencia para comparar métodos
+cat("Comparación cut() vs ntile():\n")
+table(Cut = precios_corregido$grupo_cut, Ntile = precios_corregido$grupo_ntile)
+
+# Explicación de la discrepancia:
+# 'cut()' divide el espacio muestral según cortes fijos de valor (umbrales numéricos de los cuartiles).
+# Por tanto, todas las casas con la misma edad caerán siempre en el mismo grupo.
+# 'ntile()' divide las filas por recuento exacto de registros en 4 partes iguales; si hay muchos empates
+# en el valor límite (por ejemplo, muchas casas con exactamente 35 años), 'ntile' dividirá esas casas 
+# idénticas de forma arbitraria entre dos grupos contiguos para balancear el número de filas.
+
+
+precios_corregido %>%
+  group_by(grupo_cut) %>%
+  summarise(
+    n = n(),
+    mediana_precio = median(SalePrice, na.rm = TRUE),
+    media_precio   = mean(SalePrice, na.rm = TRUE)
+  ) %>%
+  print()

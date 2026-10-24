@@ -1,0 +1,833 @@
+---
+title: "Comparador de precios: cuidado capilar"
+subtitle: "Taller 1 — Minería de Datos (2016325), Universidad Nacional de Colombia"
+author: "Nayibe Yesenia Arias Cortez"
+date: last-modified
+date-format: "YYYY-MM-DD"
+lang: es
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: show
+    code-tools: true
+    embed-resources: true
+jupyter: python3
+execute:
+  echo: true
+  warning: false
+---
+
+::: {.callout-note title="Cómo reproducir este documento"}
+Este documento **no duplica** el código de extracción: llama a `scraper.run_all()` y a
+`comparables.marcar_comparables()`. Con `OFFLINE = True` (valor por defecto) reprocesa las copias crudas de `raw/`
+sin hacer ninguna petición; con `OFFLINE = False` hace una recolección nueva en línea y la agrega a la base sin
+sobrescribir las anteriores. Instrucciones completas en `README.md`.
+:::
+
+
+
+```{python}
+#| label: configuracion
+import sqlite3
+
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
+import pandas as pd
+from IPython.display import Markdown
+
+import comparables
+import scraper
+
+OFFLINE = True   # False: nueva recolección en línea (≈ 2 minutos, ≈ 45 peticiones)
+
+# 1) Extracción (o reprocesamiento sin conexión) e inserción en SQLite
+resultado = scraper.run_all(offline=OFFLINE, verbose=False)
+ID = resultado["id_ejecucion"]
+
+# 2) Correspondencia de productos comparables (marca comparable = 1 e id_producto_comun en la base)
+lado_a_lado = comparables.marcar_comparables(id_ejecucion=ID, mostrar=False)
+
+con = sqlite3.connect(scraper.DB_PATH)
+
+def sql(consulta: str, **parametros) -> pd.DataFrame:
+    """Ejecuta una consulta SQL sobre comparador_precios.sqlite y devuelve un DataFrame."""
+    return pd.read_sql_query(consulta, con, params=parametros)
+
+# Colores fijos por comercio (paleta Okabe-Ito, apta para daltonismo), usados en todos los gráficos
+COLORES = {"La Rebaja": "#D55E00", "Locatel": "#0072B2", "Droguerías Cafam": "#009E73"}
+ORDEN_COMERCIOS = list(COLORES)
+
+def cop(x: float) -> str:
+    return f"${x:,.0f}".replace(",", " ")
+
+def n1(x: float) -> str:
+    """Número con un decimal (para el texto)."""
+    return f"{float(x):.1f}"
+
+def etiqueta(nombre: str, largo: int = 46) -> str:
+    """Nombre corto para gráficos; si se recorta, conserva la última palabra (el tamaño)."""
+    t = nombre.title().replace(" X ", " ").replace(" X", " ").replace("Ml", "mL")
+    if len(t) <= largo:
+        return t
+    cola = t.split()[-1]
+    return t[: largo - len(cola) - 2].rstrip() + "… " + cola
+
+print(f"Ejecución analizada: {ID} ({'sin conexión' if OFFLINE else 'en línea'})")
+```
+
+# Introducción
+
+La categoría registrada es **cuidado capilar**: champús, acondicionadores, mascarillas y tratamientos, tintes y
+productos para peinar, excluyendo medicamentos, productos infantiles y accesorios (delimitación completa en
+`docs/delimitacion_categoria.md`). Se recolectó la categoría completa en tres droguerías con venta en línea en
+Colombia —**La Rebaja**, **Locatel** y **Droguerías Cafam**— y, dentro de esa misma extracción, se identificaron
+las presentaciones idénticas (mismo código de barras EAN) disponibles en las tres para comparar sus precios.
+
+El objetivo es orientar al consumidor sobre **dónde resulta más económico comprar cada presentación** y **qué
+tamaño ofrece el menor precio por mL**, distinguiendo el desembolso total del precio unitario.
+
+```{python}
+#| label: tbl-productos
+#| tbl-cap: "Presentaciones comparables (presentes en los tres comercios en la misma ejecución)"
+productos = sql("""
+    SELECT id_producto_comun AS ean, marca_std AS marca, nombre_std AS presentacion,
+           subcategoria_std AS subcategoria, contenido, unidad, n_unidades, linea
+    FROM productos ORDER BY subcategoria_std, marca_std, nombre_std""")
+productos
+```
+
+# Fuentes y scraping
+
+## Comercios, páginas consultadas y fecha de captura
+
+```{python}
+#| label: tbl-comercios
+#| tbl-cap: "Comercios, método de extracción y páginas consideradas equivalentes a la categoría"
+sql("SELECT nombre AS comercio, dominio, metodo_extraccion, paginas_consideradas FROM comercios")
+```
+
+```{python}
+#| label: tbl-ejecuciones
+#| tbl-cap: "Tabla de ejecuciones: completitud de la recolección frente al total que muestra cada sitio"
+ejecuciones = sql("""
+    SELECT e.id_ejecucion, c.nombre AS comercio, e.fecha_hora_inicio, e.fecha_hora_fin,
+           e.total_sitio, e.n_productos AS productos_obtenidos, e.n_registros AS skus,
+           e.n_incluidos AS en_categoria, e.estado, e.detalle_ramas, e.nota
+    FROM ejecuciones e JOIN comercios c USING (id_comercio)
+    ORDER BY e.id_ejecucion, c.nombre""")
+ejecuciones
+```
+
+Los tres comercios usan la plataforma **VTEX**. La plataforma se identificó por las cabeceras HTTP de cada sitio
+(`x-vtex-product: store`) y los listados de productos se localizaron con la pestaña *Network* del navegador:
+
+| Comercio | Fuente de datos | Paginación | Total del sitio |
+|---|---|---|---|
+| La Rebaja | API pública de catálogo `GET /api/catalog_system/pub/products/search?fq=C:<ruta>&_from=i&_to=j` (JSON). Las rutas de categoría (`C:/5/29/`…) se tomaron de `/api/catalog_system/pub/category/tree/3`. | `_from`/`_to` de 50 en 50 | Cabecera `resources: 0-49/<total>` |
+| Locatel | Igual que La Rebaja | Igual | Igual |
+| Droguerías Cafam | HTML de la página de categoría: el servidor incrusta los productos en un JSON `__STATE__ = {…}` (caché de Apollo GraphQL) dentro de un `<script>`. La página también pide datos a `/_v/segment/…`, pero esa ruta está prohibida en su robots.txt, por eso se usa el HTML. | `?page=N`, 12 productos por página | `recordsFiltered` del objeto `productSearch` |
+
+**Herramientas:** Python 3.12 con `requests` (sesión HTTP con reintentos), `json`, `re`, `gzip`, `pandas` y
+`sqlite3`; `matplotlib` para los gráficos. No se usaron Selenium ni Playwright.
+
+**Estrategia y buenas prácticas:** una función por comercio (`scrape_larebaja`, `scrape_locatel`, `scrape_cafam`)
+que devuelve las mismas 20 columnas; User-Agent identificable con enlace al repositorio; 1 s de pausa entre
+peticiones; *timeout* de 30 s; 4 reintentos con espera exponencial ante errores 429/5xx. Cada respuesta se guarda
+sin modificar y comprimida en `raw/<comercio>/<fecha>/<id_ejecucion>/` con un `manifiesto.json` (URL, fecha y hora
+de cada petición y totales del sitio). El procesamiento **siempre** lee esas copias, por eso el modo sin conexión
+reproduce exactamente la misma extracción. Precio = `Price` del vendedor con existencias; precio antes del
+descuento = `ListPrice` cuando es mayor; un producto agotado queda con `disponible = 0`; un precio no publicado
+queda en `NULL` (nunca 0).
+
+## robots.txt y términos de uso
+
+Revisados el 2026-10-09.
+
+| Comercio | robots.txt | Términos de uso |
+|---|---|---|
+| La Rebaja | No prohíbe `/api/` (solo cuenta, *login*, *checkout*, `/busca/`…). ✅ | Su página «Términos de uso» prohíbe de forma **genérica** la copia, reproducción o distribución de sus «Contenidos» por cualquier medio sin permiso escrito de Copservir Ltda., además del *deeplinking* y el *framing*. No menciona robots ni extracción automatizada. ⚠️ |
+| Locatel | No prohíbe `/api/` (solo `/busca`, `/search`, `/_v/`, *checkout*…). ✅ | Prohíbe copiar o adaptar el código HTML del sitio para generar páginas propias y vulnerar su seguridad. No menciona robots ni extracción. ✅ |
+| Droguerías Cafam | Prohíbe `/api/`, `/_v/segment` y parámetros de orden/búsqueda; **permite** `?page=N`, que es lo único que se usa. ✅ | Sin cláusulas sobre robots, extracción, copia o reproducción. ✅ |
+
+**Uso de los datos y cláusula de La Rebaja.** Los datos se recolectan con fines exclusivamente académicos, sin uso
+comercial, a un ritmo bajo (≈ 45 peticiones por corrida completa) y solo sobre información pública de producto.
+La cláusula de La Rebaja no se refiere a la consulta automatizada sino a la reproducción de sus contenidos; se
+documenta aquí porque el texto original de sus anuncios (que el enunciado exige conservar) queda en un repositorio
+público.
+
+## Comercios descartados
+
+| Comercio | Motivo del descarte |
+|---|---|
+| Éxito | robots.txt con `Disallow: /api/`; los productos solo llegan al navegador por `/api/graphql` (FastStore), el HTML no los trae. |
+| Carulla | Misma plataforma y mismo robots.txt que Éxito (`Disallow: /api/`). |
+| Olímpica | Sus términos y condiciones (§ 2.4.1, «Usos no permitidos») prohíben expresamente utilizar «spiders», «site copiers» o cualquier programa para acceder, copiar o monitorear el contenido del sitio. Se detuvo la recolección al detectarlo y se borraron las copias. |
+| Farmacias Pasteur, Drogas La Economía, Cruz Verde, Farmatodo | Evaluados como reemplazo de Olímpica: robots.txt prohíbe toda URL con `?` (Pasteur) o exige `Crawl-delay: 3600` (La Economía); sin EAN en el listado y precios por zona (Cruz Verde); listado vía Algolia y casi sin EAN comunes (Farmatodo). |
+
+::: {.callout-note title="Nota"}
+Entre los comercios evaluados, La Rebaja, Locatel y Cafam permiten obtener la categoría completa cumpliendo su
+robots.txt y comparten suficientes presentaciones con el mismo EAN. La recolección de la ejecución
+`{python} ID` quedó **completa** en los tres: lo obtenido coincide con el total que reporta cada sitio en todas las
+ramas (@tbl-ejecuciones).
+:::
+
+# Preparación de los datos
+
+## Limpieza y normalización
+
+Reglas aplicadas por `scraper.estandarizar()`; los valores estandarizados se guardan en columnas propias y el texto
+original (nombre + presentación + ficha técnica + descripción) se conserva **sin modificar** en
+`anuncios.texto_original_anuncio`:
+
+* **Precio:** numérico en COP, tal como lo entrega la plataforma; `NULL` si no se publica.
+* **Marca (`marca_std`):** mayúsculas sin tildes y alias unificados (p. ej. «H & S» → «HEAD & SHOULDERS»).
+* **Nombre (`nombre_std`):** mayúsculas sin tildes, sin el sufijo «SKU123» ni la palabra «OFERTA».
+* **Contenido:** se extrae del nombre (`400 ml`, `1 L`, `300 g`, `1.000 ml`, «Litro»…) y, si no aparece, de la
+  ficha técnica del comercio; se convierte a mL o g (1 L = 1000 mL; 1 kg = 1000 g). En paquetes múltiples
+  (`x2 unds`, `pack 2`, `2 x 400 ml`) el contenido total es n × contenido; combos «375 ml + 180 ml» se suman.
+* **Subcategoría (`subcategoria_std`):** la palabra de tipo de producto que aparece primero en el nombre
+  (shampoo, acondicionador, mascarilla/tratamiento, peinado, coloración); si no hay, la ruta de categoría del comercio.
+* **Delimitación:** medicamentos (minoxidil, ketoconazol, ficha con «Producto RX/OTC: SI» o «Requiere prescripción
+  médica: Sí»), productos infantiles, accesorios y productos fuera de la categoría (suplementos orales, barba,
+  bronceadores…) quedan con `incluido = 0` y su `motivo_exclusion`; no se borran.
+* **Duplicados:** el mismo SKU listado en dos ramas de un comercio se conserva una vez; la restricción
+  `UNIQUE(comercio, sku, fecha_hora_consulta)` impide insertar dos veces la misma observación.
+
+```{python}
+#| label: tbl-exclusiones
+#| tbl-cap: "Anuncios incluidos y excluidos por motivo (delimitación de la categoría)"
+excl = sql("""
+    SELECT c.nombre AS comercio, COALESCE(a.motivo_exclusion, 'incluido') AS motivo, COUNT(*) AS n
+    FROM anuncios a JOIN comercios c USING (id_comercio)
+    GROUP BY 1, 2""")
+excl.pivot(index="motivo", columns="comercio", values="n").fillna(0).astype(int)[ORDEN_COMERCIOS]
+```
+
+```{python}
+#| label: tbl-excluidos-muestra
+#| tbl-cap: "Muestra de anuncios excluidos (hasta 3 por motivo)"
+sql("""
+    SELECT motivo_exclusion, comercio, nombre_original FROM (
+        SELECT a.motivo_exclusion, c.nombre AS comercio, a.nombre_original,
+               ROW_NUMBER() OVER (PARTITION BY a.motivo_exclusion ORDER BY a.id_comercio, a.sku_comercio) AS k
+        FROM anuncios a JOIN comercios c USING (id_comercio)
+        WHERE a.incluido = 0)
+    WHERE k <= 3 ORDER BY motivo_exclusion, comercio""")
+```
+
+## Correspondencia de productos
+
+La correspondencia la hace `comparables.py` con una **regla documentada**, dentro de una misma ejecución:
+
+1. mismo **EAN/GTIN-13** normalizado en los tres comercios (identificador común `id_producto_comun`);
+2. producto dentro de la delimitación (`incluido = 1`);
+3. con precio y **disponible** (`disponible = 1`) en esa ejecución;
+4. mismo **contenido** (mL o g, tolerancia 1 %) y **número de unidades** declarados; si dos comercios declaran
+   contenidos distintos, el EAN se descarta. La marca y la variante quedan cubiertas por el EAN; las diferencias de
+   marca estandarizada se anotan.
+
+Además, para la pregunta 5 se agruparon manualmente dos **líneas** de tamaños del mismo producto y formulación
+(tabla `lineas`): Tío Nacho Engrosador (415 mL y 1 L) y Pantene Pro-V Miracles Colágeno (300 mL y 510 mL).
+
+```{python}
+#| label: tbl-correspondencia
+#| tbl-cap: "Tabla de correspondencia: anuncio de cada comercio para cada producto común, con su verificación"
+sql("""
+    SELECT k.id_producto_comun AS ean, c.nombre AS comercio, k.sku_comercio, k.nombre_original,
+           k.contenido, k.unidad, k.n_unidades, k.precio, k.verificacion
+    FROM correspondencia k JOIN comercios c USING (id_comercio)
+    ORDER BY k.id_producto_comun, c.nombre""")
+```
+
+```{python}
+#| label: descartes-verificacion
+# EAN presentes y disponibles en los tres comercios que NO quedaron como comparables (descartados por la regla 4)
+descartados = sql("""
+    WITH d AS (
+        SELECT a.ean_norm FROM anuncios a
+        JOIN observaciones o USING (id_comercio, sku_comercio)
+        WHERE o.id_ejecucion = :id AND a.incluido = 1 AND o.disponible = 1 AND o.precio IS NOT NULL
+          AND a.ean_norm IS NOT NULL
+        GROUP BY a.ean_norm HAVING COUNT(DISTINCT a.id_comercio) = (SELECT COUNT(*) FROM comercios))
+    SELECT d.ean_norm AS ean, MAX(a.nombre_original) AS nombre,
+           GROUP_CONCAT(a.id_comercio || ' = ' || a.contenido || ' ' || a.unidad, '; ') AS contenido_declarado
+    FROM d JOIN anuncios a ON a.ean_norm = d.ean_norm
+    WHERE d.ean_norm NOT IN (SELECT id_producto_comun FROM productos)
+    GROUP BY d.ean_norm""", id=ID)
+descartados
+```
+
+# Base de datos SQLite
+
+## Estructura y relaciones
+
+```{python}
+#| label: tbl-tablas
+#| tbl-cap: "Tablas y vistas de comparador_precios.sqlite"
+objetos = sql("SELECT type AS tipo, name AS nombre FROM sqlite_master "
+              "WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY type, name")
+objetos["filas"] = [con.execute(f"SELECT COUNT(*) FROM {n}").fetchone()[0] for n in objetos["nombre"]]
+objetos
+```
+
+* `comercios` (1) — (n) `anuncios`: cada producto tal como aparece en un comercio (clave: comercio + SKU), con su
+  texto original y los campos estandarizados, `incluido`, `motivo_exclusion`, `comparable` e `id_producto_comun`.
+* `anuncios` (1) — (n) `observaciones`: precio en un momento dado (fecha y hora ISO 8601, ejecución, promoción,
+  disponibilidad, URL, `comparable`, `id_producto_comun`).
+* `productos`: una fila por presentación comparable (`id_producto_comun` = EAN); `correspondencia` enlaza cada
+  producto con el SKU de cada comercio; `lineas` agrupa tamaños de un mismo producto.
+* `ejecuciones`: una fila por corrida y comercio (inicio, fin, registros, total del sitio, estado).
+* La vista `v_observaciones` reúne en una sola consulta todos los campos mínimos de la sección 5 del enunciado.
+
+```{python}
+#| label: esquema
+#| code-fold: true
+print("\n\n".join(sql("SELECT sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")["sql"]))
+```
+
+## Validaciones
+
+```{python}
+#| label: tbl-validaciones
+#| tbl-cap: "Validaciones de integridad de la base"
+validaciones = sql("""
+    SELECT 'Observaciones duplicadas (comercio, SKU, fecha y hora)' AS validacion,
+           (SELECT COUNT(*) FROM (SELECT 1 FROM observaciones
+                                  GROUP BY id_comercio, sku_comercio, fecha_hora_consulta HAVING COUNT(*) > 1)) AS n
+    UNION ALL
+    SELECT 'Observaciones sin fecha y hora ISO 8601 con -05:00',
+           (SELECT COUNT(*) FROM observaciones WHERE fecha_hora_consulta NOT GLOB
+            '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]-05:00')
+    UNION ALL
+    SELECT 'Precios iguales a 0 (deben ser NULL)', (SELECT COUNT(*) FROM observaciones WHERE precio = 0)
+    UNION ALL
+    SELECT 'Observaciones sin anuncio (clave foránea)',
+           (SELECT COUNT(*) FROM observaciones o LEFT JOIN anuncios a USING (id_comercio, sku_comercio)
+            WHERE a.sku_comercio IS NULL)
+    UNION ALL
+    SELECT 'Anuncios sin texto original', (SELECT COUNT(*) FROM anuncios
+                                           WHERE texto_original_anuncio IS NULL OR texto_original_anuncio = '')""")
+validaciones
+```
+
+# Consultas SQL
+
+Las interpretaciones de esta sección y de las conclusiones se redactaron con los datos de la ejecución 20261010T184400. Si el documento se renderiza con una ejecución nueva, las tablas y gráficos se actualizan, pero las cifras citadas en el texto corresponden a esa ejecución.
+
+Todas las comparaciones de precio usan observaciones de **la misma ejecución** (`{python} ID`) con
+`disponible = 1`; los productos agotados se tratan como faltantes (pregunta 7).
+
+## ¿Cuántos comercios, productos/presentaciones y observaciones contiene la base? ¿Cuántos productos aporta cada comercio?
+
+```{python}
+#| label: tbl-p1a
+#| tbl-cap: "Tamaño de la base"
+q1a = """
+SELECT (SELECT COUNT(*) FROM comercios)                                   AS comercios,
+       (SELECT COUNT(*) FROM anuncios WHERE incluido = 1)                 AS productos_en_categoria,
+       (SELECT COUNT(DISTINCT ean_norm) FROM anuncios
+         WHERE incluido = 1 AND ean_norm IS NOT NULL)                     AS presentaciones_distintas_por_ean,
+       (SELECT COUNT(*) FROM productos)                                   AS presentaciones_comparables,
+       (SELECT COUNT(*) FROM observaciones)                               AS observaciones,
+       (SELECT COUNT(*) FROM observaciones WHERE comparable = 1)          AS observaciones_comparables,
+       (SELECT COUNT(DISTINCT id_ejecucion) FROM observaciones)           AS ejecuciones
+"""
+p1a = sql(q1a)
+p1a
+```
+
+```{python}
+#| label: tbl-p1b
+#| tbl-cap: "Productos que aporta cada comercio"
+q1b = """
+SELECT c.nombre                    AS comercio,
+       COUNT(*)                    AS anuncios_extraidos,
+       SUM(a.incluido)             AS en_categoria,
+       SUM(1 - a.incluido)         AS excluidos,
+       SUM(a.comparable)           AS comparables,
+       ROUND(100.0 * SUM(a.incluido) / (SELECT SUM(incluido) FROM anuncios), 1) AS pct_de_la_categoria
+FROM anuncios a JOIN comercios c USING (id_comercio)
+GROUP BY c.nombre
+ORDER BY en_categoria DESC
+"""
+p1b = sql(q1b)
+p1b
+```
+
+::: {.callout-note title="Nota"}
+La base contiene 3 comercios y 1 305 anuncios de productos dentro de la categoría (después de aplicar la delimitación), que corresponden a 918 presentaciones distintas identificadas por EAN. De ellas, 18 son comparables en los tres comercios. Se registraron 4 222 observaciones de precio en 3 ejecuciones (dos el 9 de octubre y una el 10 de octubre), de las cuales 162 son comparables (54 por ejecución). Locatel aporta la mayor parte de la categoría (721 anuncios, 55,2 %), seguido de La Rebaja (366; 28,0 %) y Droguerías Cafam (218; 16,7 %). El número de presentaciones por EAN subestima la oferta real, porque una parte del catálogo de La Rebaja no publica EAN (ver pregunta 7).
+:::
+
+## En una misma ejecución, ¿se obtuvieron al menos 24 observaciones comparables? ¿Hay registros repetidos?
+
+```{python}
+#| label: tbl-p2a
+#| tbl-cap: "Cobertura de observaciones comparables por ejecución"
+q2a = """
+SELECT o.id_ejecucion,
+       COUNT(*)                                            AS observaciones_comparables,
+       COUNT(DISTINCT o.id_producto_comun)                 AS productos_comparables,
+       COUNT(DISTINCT o.id_comercio)                       AS comercios,
+       SUM(o.disponible = 1 AND o.precio IS NOT NULL)      AS con_precio_disponible,
+       CASE WHEN SUM(o.disponible = 1 AND o.precio IS NOT NULL) >= 24 THEN 'sí' ELSE 'no' END AS cumple_minimo_24
+FROM observaciones o
+WHERE o.comparable = 1
+GROUP BY o.id_ejecucion
+"""
+p2a = sql(q2a)
+p2 = p2a[p2a.id_ejecucion == ID].iloc[0]   # fila de la ejecución analizada (para el texto)
+p2a
+```
+
+```{python}
+#| label: tbl-p2b
+#| tbl-cap: "Productos comparables sin precio en algún comercio en la ejecución (debe estar vacía)"
+q2b = """
+SELECT id_producto_comun, COUNT(DISTINCT id_comercio) AS comercios_con_precio
+FROM observaciones
+WHERE comparable = 1 AND id_ejecucion = :id AND disponible = 1 AND precio IS NOT NULL
+GROUP BY id_producto_comun
+HAVING comercios_con_precio < (SELECT COUNT(*) FROM comercios)
+"""
+sql(q2b, id=ID)
+```
+
+```{python}
+#| label: tbl-p2c
+#| tbl-cap: "Registros repetidos del mismo producto y comercio en la ejecución"
+q2c = """
+SELECT 'mismo SKU de un comercio' AS tipo, COUNT(*) AS casos FROM (
+    SELECT 1 FROM observaciones WHERE id_ejecucion = :id
+    GROUP BY id_comercio, sku_comercio HAVING COUNT(*) > 1)
+UNION ALL
+SELECT 'mismo producto comparable en un comercio', COUNT(*) FROM (
+    SELECT 1 FROM observaciones WHERE id_ejecucion = :id AND comparable = 1
+    GROUP BY id_comercio, id_producto_comun HAVING COUNT(*) > 1)
+"""
+p2c = sql(q2c, id=ID)
+p2c
+```
+
+::: {.callout-note title="Nota"}
+Sí: la ejecución `{python} ID` tiene `{python} int(p2.con_precio_disponible)` observaciones comparables con
+precio disponible (`{python} int(p2.productos_comparables)` presentaciones × `{python} int(p2.comercios)`
+comercios), por encima del mínimo de 24. Ningún producto comparable quedó sin precio en algún comercio y no hay
+registros repetidos (`{python} int(p2c.casos.sum())` casos), gracias a la restricción UNIQUE(comercio, sku, fecha_hora_consulta) y a que `comparables.py` exige un único anuncio por producto y comercio.
+
+:::
+
+## Para cada presentación comparable, ¿cuáles son los precios mínimo, máximo y promedio? ¿Qué comercio ofrece el menor precio?
+
+```{python}
+#| label: tbl-p3
+#| tbl-cap: "Precio mínimo, máximo y promedio por presentación; comercio(s) con el menor precio, incluidos empates"
+q3 = """
+WITH p AS (
+    SELECT o.id_producto_comun, pr.nombre_std, c.nombre AS comercio, o.precio, o.es_promocion
+    FROM observaciones o
+    JOIN productos pr USING (id_producto_comun)
+    JOIN comercios c  USING (id_comercio)
+    WHERE o.comparable = 1 AND o.id_ejecucion = :id AND o.disponible = 1 AND o.precio IS NOT NULL
+),
+r AS (
+    SELECT id_producto_comun, MIN(precio) AS pmin, MAX(precio) AS pmax, AVG(precio) AS pprom
+    FROM p GROUP BY id_producto_comun
+)
+SELECT r.id_producto_comun                                             AS ean,
+       MAX(p.nombre_std)                                               AS presentacion,
+       r.pmin                                                          AS precio_min,
+       r.pmax                                                          AS precio_max,
+       ROUND(r.pprom)                                                  AS precio_promedio,
+       GROUP_CONCAT(CASE WHEN p.precio = r.pmin THEN p.comercio END, ' / ') AS comercio_menor_precio,
+       SUM(p.precio = r.pmin)                                          AS n_comercios_en_minimo,
+       MAX(CASE WHEN p.precio = r.pmin THEN p.es_promocion END)        AS minimo_es_promocion
+FROM r JOIN p USING (id_producto_comun)
+GROUP BY r.id_producto_comun
+ORDER BY presentacion
+"""
+p3 = sql(q3, id=ID)
+p3
+```
+
+```{python}
+#| label: p3-resumen
+#| echo: false
+gana = {c: int(p3.comercio_menor_precio.str.contains(c, regex=False).sum()) for c in ORDEN_COMERCIOS}
+n_empates = int((p3.n_comercios_en_minimo > 1).sum())
+gana_txt = ", ".join(f"{c}: {n}" for c, n in sorted(gana.items(), key=lambda x: -x[1]))
+```
+
+::: {.callout-note title="Nota"}
+Ningún comercio domina: Droguerías Cafam ofrece el menor precio en 7 de las 18 presentaciones, La Rebaja en 6 y Locatel en 5. No hubo empates en el precio mínimo; el único empate se dio en el máximo (laca Kleer Lac Invisible, $22 500 en Cafam y La Rebaja). En 10 de las 18 presentaciones el menor precio es promocional, así que el resultado depende de las promociones vigentes el día de la captura. Se observa un patrón por marca: Cafam fue el más barato en tres productos Tío Nacho (Acondicionador Anti Canas, Fortalecimiento y Manzanilla) y en los dos Nutribela, todos con promoción; La Rebaja lo fue en Tío Nacho Anti Canas y Engrosador 415 mL, y en Head & Shoulders y Pantene (estos con promoción); y Locatel en productos sin promoción como Babaria, Elvive Hialurónico y Kleer Lac.
+:::
+
+## ¿Cuál es el ahorro en COP y en porcentaje al elegir la oferta más económica de cada presentación?
+
+```{python}
+#| label: tbl-p4
+#| tbl-cap: "Ahorro al elegir la oferta más económica frente a la más cara (misma presentación, misma ejecución)"
+q4 = """
+WITH p AS (
+    SELECT o.id_producto_comun, pr.nombre_std, c.nombre AS comercio, o.precio, o.es_promocion
+    FROM observaciones o
+    JOIN productos pr USING (id_producto_comun)
+    JOIN comercios c  USING (id_comercio)
+    WHERE o.comparable = 1 AND o.id_ejecucion = :id AND o.disponible = 1 AND o.precio IS NOT NULL
+),
+r AS (SELECT id_producto_comun, MIN(precio) AS pmin, MAX(precio) AS pmax FROM p GROUP BY id_producto_comun)
+SELECT MAX(p.nombre_std)                                                AS presentacion,
+       r.pmin                                                           AS precio_min,
+       r.pmax                                                           AS precio_max,
+       r.pmax - r.pmin                                                  AS ahorro_cop,
+       ROUND(100.0 * (r.pmax - r.pmin) / r.pmax, 1)                     AS ahorro_pct,
+       GROUP_CONCAT(CASE WHEN p.precio = r.pmin THEN p.comercio END, ' / ') AS comercio_mas_barato,
+       GROUP_CONCAT(CASE WHEN p.precio = r.pmax THEN p.comercio END, ' / ') AS comercio_mas_caro,
+       MAX(CASE WHEN p.precio = r.pmin THEN p.es_promocion END)         AS minimo_es_promocion
+FROM r JOIN p USING (id_producto_comun)
+GROUP BY r.id_producto_comun
+ORDER BY presentacion
+"""
+p4 = sql(q4, id=ID)
+p4
+```
+
+::: {.callout-note title="Nota"}
+La mediana del ahorro al elegir la oferta más económica es de $2 900 en pesos y de 14,4 % en porcentaje (calculadas por separado), con un rango entre 1,5 % (Piloskin Plus) y 42,8 % (Nutribela Enzimoterapia). La diferencia depende de las promociones: en las 10 presentaciones cuyo menor precio es promocional, el ahorro mediano es de 27,2 %; en las 8 sin promoción es de 4,9 %. Es decir, fuera de las promociones, los tres comercios cobran precios muy parecidos por la misma presentación.
+:::
+
+## Si se incluyeron tamaños comparables del mismo producto, ¿qué presentación y comercio tienen el menor precio por mL?
+
+```{python}
+#| label: tbl-p5
+#| tbl-cap: "Precio por mL por línea de producto (solo presentaciones en mL; no se mezclan unidades)"
+q5 = """
+SELECT l.linea,
+       l.nota                                       AS presentacion,
+       c.nombre                                     AS comercio,
+       a.contenido, a.unidad,
+       o.precio,
+       ROUND(o.precio / a.contenido, 1)             AS cop_por_ml,
+       o.es_promocion,
+       RANK() OVER (PARTITION BY l.linea ORDER BY o.precio / a.contenido) AS puesto_en_la_linea
+FROM lineas l
+JOIN anuncios a      ON a.ean_norm = l.id_producto_comun AND a.incluido = 1
+JOIN observaciones o ON o.id_comercio = a.id_comercio AND o.sku_comercio = a.sku_comercio
+JOIN comercios c     ON c.id_comercio = a.id_comercio
+WHERE o.id_ejecucion = :id AND o.disponible = 1 AND o.precio IS NOT NULL AND a.unidad = 'ml'
+ORDER BY l.linea, puesto_en_la_linea
+"""
+p5 = sql(q5, id=ID)
+p5
+```
+
+```{python}
+#| label: p5-resumen
+#| echo: false
+p5_res = (p5.groupby(["linea", "presentacion"], sort=False)
+            .agg(contenido=("contenido", "first"), precio_min=("precio", "min"), cop_ml_min=("cop_por_ml", "min"))
+            .reset_index())
+mejor = p5[p5.puesto_en_la_linea == 1]
+mejor_txt = "; ".join(f"{r.linea.title()}: {r.presentacion} en {r.comercio} ({r.cop_por_ml:.1f} COP/mL)"
+                      for r in mejor.itertuples())
+tn = p5_res[p5_res.linea.str.startswith("TIO NACHO")].set_index("presentacion")
+```
+
+::: {.callout-note title="Nota"}
+En Tío Nacho Engrosador, el envase de 1 L tiene el menor precio por mL (Locatel, 49,5 COP/mL): cuesta casi la mitad por mL que el de 415 mL (90,1 COP/mL en La Rebaja), aunque exige un desembolso mayor ($49 500 frente a $37 400). En Pantene Miracles Colágeno el resultado se invierte por una promoción: el menor precio por mL lo tiene el envase de 300 mL en La Rebaja (78,9 COP/mL, con descuento), apenas por debajo del de 510 mL en Locatel (79,7 COP/mL, sin descuento). Dentro de cada comercio que vende ambos tamaños, el envase grande sí es más económico por mL (Locatel: 79,7 frente a 90,7; Cafam: 82,2 frente a 91,7). La presentación de 510 mL no está en La Rebaja, así que en esa línea solo se comparan los comercios donde existe.
+:::
+
+## ¿Cuáles son las mayores diferencias de precio entre comercios?
+
+```{python}
+#| label: tbl-p6a
+#| tbl-cap: "Presentaciones ordenadas por ahorro porcentual (de mayor a menor)"
+q6a = """
+WITH p AS (
+    SELECT o.id_producto_comun, pr.nombre_std, c.nombre AS comercio, o.precio, o.es_promocion
+    FROM observaciones o
+    JOIN productos pr USING (id_producto_comun)
+    JOIN comercios c  USING (id_comercio)
+    WHERE o.comparable = 1 AND o.id_ejecucion = :id AND o.disponible = 1 AND o.precio IS NOT NULL
+),
+r AS (SELECT id_producto_comun, MIN(precio) AS pmin, MAX(precio) AS pmax FROM p GROUP BY id_producto_comun)
+SELECT RANK() OVER (ORDER BY 1.0 * (r.pmax - r.pmin) / r.pmax DESC)    AS puesto,
+       MAX(p.nombre_std)                                                AS presentacion,
+       ROUND(100.0 * (r.pmax - r.pmin) / r.pmax, 1)                     AS ahorro_pct,
+       r.pmax - r.pmin                                                  AS ahorro_cop,
+       GROUP_CONCAT(CASE WHEN p.precio = r.pmin THEN p.comercio END, ' / ') AS comercio_mas_barato,
+       GROUP_CONCAT(CASE WHEN p.precio = r.pmax THEN p.comercio END, ' / ') AS comercio_mas_caro,
+       MAX(CASE WHEN p.precio = r.pmin THEN p.es_promocion END)         AS minimo_es_promocion
+FROM r JOIN p USING (id_producto_comun)
+GROUP BY r.id_producto_comun
+ORDER BY puesto
+"""
+p6a = sql(q6a, id=ID)
+p6a
+```
+
+```{python}
+#| label: tbl-p6b
+#| tbl-cap: "Canasta: suma de precios de las MISMAS presentaciones comparables en cada comercio (misma ejecución, cobertura completa)"
+q6b = """
+SELECT c.nombre                                   AS comercio,
+       COUNT(*)                                   AS presentaciones,
+       SUM(o.precio)                              AS total_canasta,
+       SUM(o.es_promocion)                        AS precios_en_promocion,
+       SUM(COALESCE(o.precio_antes_descuento, o.precio)) AS total_sin_promociones
+FROM observaciones o JOIN comercios c USING (id_comercio)
+WHERE o.comparable = 1 AND o.id_ejecucion = :id AND o.disponible = 1 AND o.precio IS NOT NULL
+GROUP BY c.nombre
+ORDER BY total_canasta
+"""
+p6b = sql(q6b, id=ID)
+p6b
+```
+
+::: {.callout-note title="Nota"}
+La mayor diferencia se da en el tratamiento Nutribela Enzimoterapia 300 mL (42,8 %, $9 370), seguida del gel Ego For Men (36,5 %) y de tres productos Tío Nacho (28 %–30 %); en todos ellos el menor precio es promocional. Con una canasta de exactamente las mismas 18 presentaciones, Droguerías Cafam es la más económica en esta fecha ($582 630), seguida de La Rebaja ($602 720) y Locatel ($606 188), una diferencia de 3,9 % entre el extremo más barato y el más caro. Sin embargo, ese orden se debe a las promociones: Cafam tenía 5 de los 18 precios en promoción, La Rebaja 4 y Locatel solo 1. Si se suman los precios antes del descuento, el orden se invierte: Locatel queda como el más económico ($607 150), luego La Rebaja ($624 600) y Cafam como el más caro ($629 400). Esta canasta no representa el surtido completo de cada comercio.
+:::
+
+## ¿Qué datos faltantes o inconsistentes afectan la comparación y cuántos son?
+
+```{python}
+#| label: tbl-p7a
+#| tbl-cap: "Datos faltantes o inconsistentes en los productos de la categoría, por comercio"
+q7a = """
+WITH base AS (
+    SELECT a.*, o.precio, o.disponible, o.es_promocion
+    FROM anuncios a JOIN observaciones o USING (id_comercio, sku_comercio)
+    WHERE o.id_ejecucion = :id AND a.incluido = 1
+)
+SELECT 'Sin EAN (no se puede emparejar)' AS problema, id_comercio, COUNT(*) AS n FROM base
+ WHERE ean_norm IS NULL GROUP BY id_comercio
+UNION ALL
+SELECT 'Sin contenido en mL o g', id_comercio, COUNT(*) FROM base
+ WHERE contenido IS NULL OR unidad NOT IN ('ml', 'g') GROUP BY id_comercio
+UNION ALL
+SELECT 'Sin precio publicado (NULL)', id_comercio, COUNT(*) FROM base
+ WHERE precio IS NULL GROUP BY id_comercio
+UNION ALL
+SELECT 'Agotado (disponible = 0)', id_comercio, COUNT(*) FROM base
+ WHERE disponible = 0 GROUP BY id_comercio
+UNION ALL
+SELECT 'Precio promocional', id_comercio, COUNT(*) FROM base
+ WHERE es_promocion = 1 GROUP BY id_comercio
+UNION ALL
+SELECT 'Sin descripción publicada', id_comercio, COUNT(*) FROM base
+ WHERE tiene_descripcion = 0 GROUP BY id_comercio
+UNION ALL
+SELECT 'Subcategoría no identificada (otro_capilar)', id_comercio, COUNT(*) FROM base
+ WHERE subcategoria_std = 'otro_capilar' GROUP BY id_comercio
+"""
+p7a = sql(q7a, id=ID)
+p7a.pivot(index="problema", columns="id_comercio", values="n").fillna(0).astype(int)
+```
+
+```{python}
+#| label: tbl-p7b
+#| tbl-cap: "EAN presentes en la categoría de los tres comercios que no quedaron como comparables, y por qué"
+q7b = """
+WITH e AS (
+    SELECT a.ean_norm,
+           COUNT(DISTINCT a.id_comercio)                                           AS comercios,
+           COUNT(DISTINCT CASE WHEN o.disponible = 1 AND o.precio IS NOT NULL
+                               THEN a.id_comercio END)                             AS comercios_disponible,
+           MAX(a.nombre_original)                                                  AS nombre
+    FROM anuncios a JOIN observaciones o USING (id_comercio, sku_comercio)
+    WHERE o.id_ejecucion = :id AND a.incluido = 1 AND a.ean_norm IS NOT NULL
+    GROUP BY a.ean_norm
+)
+SELECT ean_norm AS ean, nombre, comercios_disponible,
+       CASE WHEN comercios_disponible < comercios THEN 'agotado en algún comercio'
+            ELSE 'contenido declarado distinto (regla 4)' END AS motivo
+FROM e
+WHERE comercios = (SELECT COUNT(*) FROM comercios)
+  AND ean_norm NOT IN (SELECT id_producto_comun FROM productos)
+ORDER BY motivo, nombre
+"""
+p7b = sql(q7b, id=ID)
+p7b
+```
+
+::: {.callout-note title="Nota"}
+El faltante que más limita la comparación es el EAN: 122 productos de La Rebaja (un tercio de su categoría) no lo publican y no pueden emparejarse con la regla; Locatel y Cafam lo publican en todos. Los agotados se tratan como faltantes: tienen precio publicado, pero no se usan en las comparaciones. Son 290, concentrados en La Rebaja (187, cerca de la mitad de su categoría) y Locatel (103). Además, 147 productos no declaran contenido en mL o g (63 en La Rebaja, 82 en Locatel y 2 en Cafam), 2 productos de Locatel no publican precio y Cafam no publica descripción en 213 de sus 218 productos. Por último, 17 EAN presentes en los tres comercios no quedaron como comparables, por estar agotados en algún comercio o por declarar contenidos distintos, como el champú Pilofast (280 mL en dos comercios y 250 mL en La Rebaja).
+:::
+
+## ¿Cuántos productos de la categoría se obtuvieron por comercio y ejecución? ¿Qué proporción tiene descripción, marca y contenido identificables?
+
+```{python}
+#| label: tbl-p8a
+#| tbl-cap: "Productos de la categoría por comercio y ejecución, y calidad de la información"
+q8a = """
+SELECT o.id_ejecucion,
+       c.nombre                                                       AS comercio,
+       COUNT(*)                                                       AS productos_categoria,
+       ROUND(AVG(a.tiene_descripcion), 3)                             AS prop_con_descripcion,
+       ROUND(AVG(a.marca_std IS NOT NULL), 3)                         AS prop_con_marca,
+       ROUND(AVG(a.contenido IS NOT NULL AND a.unidad IN ('ml', 'g')), 3) AS prop_con_contenido_ml_g,
+       ROUND(AVG(a.ean_norm IS NOT NULL), 3)                          AS prop_con_ean
+FROM observaciones o
+JOIN anuncios a  USING (id_comercio, sku_comercio)
+JOIN comercios c USING (id_comercio)
+WHERE a.incluido = 1
+GROUP BY o.id_ejecucion, c.nombre
+ORDER BY o.id_ejecucion, productos_categoria DESC
+"""
+p8a = sql(q8a)
+p8 = p8a[p8a.id_ejecucion == ID].reset_index(drop=True)   # ejecución analizada (para el texto)
+p8a
+```
+
+```{python}
+#| label: tbl-p8b
+#| tbl-cap: "Tamaño de la oferta por subcategoría y comercio (última ejecución)"
+q8b = """
+SELECT a.subcategoria_std AS subcategoria, c.nombre AS comercio, COUNT(*) AS productos
+FROM observaciones o
+JOIN anuncios a  USING (id_comercio, sku_comercio)
+JOIN comercios c USING (id_comercio)
+WHERE o.id_ejecucion = :id AND a.incluido = 1
+GROUP BY 1, 2
+"""
+sql(q8b, id=ID).pivot(index="subcategoria", columns="comercio", values="productos").fillna(0).astype(int)[ORDEN_COMERCIOS]
+```
+
+::: {.callout-note title="Nota"}
+El tamaño de la categoría fue estable en las tres ejecuciones: Locatel 721 productos, La Rebaja 366 y Droguerías Cafam 217–218. Locatel tiene la oferta más amplia en todas las subcategorías: casi duplica a La Rebaja en champús (222 frente a 123) y la cuadruplica en mascarillas y tratamientos (200 frente a 58). Cafam no tiene sección de coloración. En cuanto a la calidad de la información, la marca está identificada en el 100 % de los productos de los tres comercios. El contenido en mL o g se identifica en el 99,1 % de Cafam, el 88,6 % de Locatel y el 82,8 % de La Rebaja. La descripción está en todos los productos de La Rebaja y Locatel, pero solo en el 2,3 % de Cafam, que publica sobre todo la ficha técnica. El EAN falta en un tercio de La Rebaja (66,7 % lo tiene). Estas proporciones se calculan sobre los anuncios, por lo que son iguales en las tres ejecuciones.
+:::
+
+# Visualizaciones
+
+## Precio de las mismas presentaciones en cada comercio
+
+```{python}
+#| label: fig-precios
+#| fig-cap: "Precio de cada presentación comparable por comercio (COP, escala logarítmica). Borde negro: precio promocional. La línea gris va del mínimo al máximo."
+d = sql("""
+    SELECT pr.nombre_std, c.nombre AS comercio, o.precio, o.es_promocion
+    FROM observaciones o JOIN productos pr USING (id_producto_comun) JOIN comercios c USING (id_comercio)
+    WHERE o.comparable = 1 AND o.id_ejecucion = :id AND o.disponible = 1 AND o.precio IS NOT NULL""", id=ID)
+d["presentacion"] = d["nombre_std"].map(etiqueta)
+orden = d.groupby("presentacion")["precio"].min().sort_values().index
+y = {p: i for i, p in enumerate(orden)}
+
+fig, ax = plt.subplots(figsize=(9, 0.42 * len(orden) + 1.5))
+for p, g in d.groupby("presentacion"):
+    ax.plot([g.precio.min(), g.precio.max()], [y[p]] * 2, color="#BBBBBB", lw=2, zorder=1)
+desplazamiento = {"La Rebaja": -0.22, "Locatel": 0.0, "Droguerías Cafam": 0.22}  # evita puntos superpuestos
+for comercio in ORDEN_COMERCIOS:
+    g = d[d.comercio == comercio]
+    ax.scatter(g.precio, g.presentacion.map(y) + desplazamiento[comercio], s=50, color=COLORES[comercio], zorder=2,
+               edgecolors=["black" if e else "white" for e in g.es_promocion], linewidths=1.3)
+ax.set_xscale("log")
+ax.xaxis.set_major_locator(mticker.FixedLocator([2000, 5000, 10000, 20000, 50000, 100000]))
+ax.xaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: cop(v)))
+ax.xaxis.set_minor_formatter(mticker.NullFormatter())
+ax.set_yticks(range(len(orden)), orden, fontsize=8)
+ax.set_xlabel("Precio (COP, escala logarítmica)")
+ax.grid(axis="x", alpha=0.3)
+from matplotlib.lines import Line2D
+leyenda = [Line2D([], [], marker="o", ls="", color=COLORES[c], markeredgecolor="white", markersize=7, label=c)
+           for c in ORDEN_COMERCIOS]
+leyenda.append(Line2D([], [], marker="o", ls="", color="white", markeredgecolor="black", markersize=7,
+                      label="precio promocional"))
+ax.legend(handles=leyenda, title="Comercio", loc="lower right", fontsize=8)
+ax.set_ylim(-0.6, len(orden) - 0.4)
+ax.set_title(f"Precio por presentación y comercio — ejecución {ID}", fontsize=10)
+plt.tight_layout()
+plt.show()
+```
+
+::: {.callout-note title="Nota"}
+Para la mayoría de presentaciones los tres precios están muy cerca (líneas grises cortas); las líneas largas
+corresponden a precios promocionales (borde negro). La escala logarítmica permite ver en el mismo gráfico productos
+de $3 000 y de $100 000; las distancias horizontales representan diferencias **porcentuales**.
+:::
+
+## Precio por mL entre tamaños del mismo producto
+
+```{python}
+#| label: fig-precio-ml
+#| fig-cap: "Precio por mL (COP/mL) de cada tamaño, por comercio. Solo presentaciones medidas en mL; un tamaño que no vende un comercio no aparece."
+lineas_ = list(dict.fromkeys(p5.linea))
+fig, axes = plt.subplots(1, len(lineas_), figsize=(10, 4), sharey=True)
+ancho = 0.26
+for ax, linea in zip(axes, lineas_):
+    g = p5[p5.linea == linea]
+    tamanos = list(dict.fromkeys(g.sort_values("contenido").presentacion))
+    for i, comercio in enumerate(ORDEN_COMERCIOS):
+        h = g[g.comercio == comercio].set_index("presentacion")
+        xs = [t for t in range(len(tamanos)) if tamanos[t] in h.index]
+        vals = [h.loc[tamanos[t], "cop_por_ml"] for t in xs]
+        barras = ax.bar([x + (i - 1) * ancho for x in xs], vals, ancho, color=COLORES[comercio], label=comercio)
+        ax.bar_label(barras, fmt="%.0f", fontsize=7)
+    ax.set_xticks(range(len(tamanos)), tamanos)
+    ax.set_title(etiqueta(linea, 70), fontsize=9)
+    ax.grid(axis="y", alpha=0.3)
+axes[0].set_ylabel("COP por mL")
+axes[-1].legend(fontsize=8)
+plt.tight_layout()
+plt.show()
+```
+
+::: {.callout-note title="Nota"}
+En ambas líneas, dentro de cada comercio que vende los dos tamaños, el envase grande tiene menor precio por mL, aunque requiere un desembolso mayor. La ventaja es mucho más marcada en Tío Nacho (1 L frente a 415 mL, casi la mitad por mL) que en Pantene (510 mL frente a 300 mL, entre 10 % y 12 % menos por mL). En Pantene, una promoción en La Rebaja deja su envase de 300 mL con un precio por mL ligeramente inferior al de 510 mL de los otros comercios. Las dos líneas no se comparan entre sí, porque son productos distintos.
+:::
+
+## Oportunidades de ahorro entre comercios
+
+```{python}
+#| label: fig-ahorro
+#| fig-cap: "Ahorro (%) al comprar en el comercio más barato frente al más caro. Color: comercio con el menor precio (gris: empate). * = el menor precio es promocional."
+a = p4.copy()
+a["presentacion"] = a["presentacion"].map(etiqueta)
+a = a.sort_values("ahorro_pct")
+colores = [COLORES.get(c, "#999999") if "/" not in c else "#999999" for c in a.comercio_mas_barato]
+fig, ax = plt.subplots(figsize=(9, 0.42 * len(a) + 1.5))
+barras = ax.barh(a.presentacion, a.ahorro_pct, color=colores)
+for b, r in zip(barras, a.itertuples()):
+    ax.text(b.get_width() + 0.5, b.get_y() + b.get_height() / 2,
+            f"{cop(r.ahorro_cop)}{' *' if r.minimo_es_promocion else ''}", va="center", fontsize=7)
+ax.set_xlabel("Ahorro (%) = 100 × (precio máx − precio mín) / precio máx")
+ax.tick_params(axis="y", labelsize=8)
+ax.set_xlim(0, a.ahorro_pct.max() * 1.25)
+ax.grid(axis="x", alpha=0.3)
+handles = [plt.Rectangle((0, 0), 1, 1, color=COLORES[c]) for c in ORDEN_COMERCIOS]
+ax.legend(handles, ORDEN_COMERCIOS, title="Más barato en", fontsize=8, loc="lower right")
+ax.set_title(f"Ahorro por presentación — ejecución {ID}", fontsize=10)
+plt.tight_layout()
+plt.show()
+sin_promo = p4[p4.minimo_es_promocion == 0]
+```
+
+::: {.callout-note title="Nota"}
+Las mayores oportunidades de ahorro (barras largas) coinciden con promociones (*), sobre todo en Cafam, por lo que son temporales. Cafam muestra un comportamiento polarizado: es el más barato en 7 presentaciones (5 de ellas con promoción), pero es el más caro en 10 de las 18 (en una, empatado con La Rebaja). Cuando el menor precio no es promocional (8 presentaciones), el ahorro máximo es 14,9 % y solo una presentación supera el 10 %: para esos productos, elegir comercio importa poco y pueden pesar más el costo del domicilio o la cercanía.
+:::
+
+# Limitaciones y conclusiones
+
+## Limitaciones
+
+* Los precios corresponden al momento de la captura (`{python} ejecuciones[ejecuciones.id_ejecucion == ID].fecha_hora_inicio.min()`) y a la
+  ciudad o zona por defecto de cada sitio; no son permanentes. La base conserva
+  `{python} int(p1a.ejecuciones[0])` ejecuciones; este análisis usa la más reciente (`{python} ID`).
+* Varias de las diferencias se deben a promociones vigentes ese día (`es_promocion = 1`); no se consideran cupones,
+  descuentos por medio de pago ni el costo de envío.
+* Solo se comparan presentaciones con el mismo EAN disponibles en los tres comercios
+  (`{python} int(p1a.presentaciones_comparables[0])`); no representan todo el surtido, por lo que no se puede
+  concluir que un comercio sea «más barato» en general.
+* La Rebaja no publica EAN en parte de su catálogo y Cafam casi no publica descripciones; Cafam no vende tintes.
+* La Rebaja tenía agotada cerca de la mitad de su categoría el día de la captura, lo que reduce los productos comparables posibles con ese comercio.
+* Dos de las tres ejecuciones son del mismo día (9 de octubre), así que el período observado es corto (dos días) y no permite hablar de tendencias de precio.
+
+## Conclusión para el consumidor
+
+*Dónde comprar cada producto (según esta captura):* Nutribela y tres productos Tío Nacho (Acondicionador Anti Canas, Fortalecimiento y Manzanilla), en Droguerías Cafam, mientras duren sus promociones (ahorros de 12 % a 43 %); Head & Shoulders y Pantene, en La Rebaja, también por promoción; Tío Nacho Shampoo Anti Canas y Engrosador 415 mL, en La Rebaja; Tío Nacho Engrosador 1 L, en Locatel; Babaria, Elvive Hialurónico, Kleer Lac y gel Ego, en Locatel. El detalle por presentación está en la tabla de la pregunta 3.
+
+*Canasta:* para comprar las 18 presentaciones juntas, el menor desembolso fue en Cafam ($582 630), pero solo gracias a sus promociones; a precios normales Locatel sería el más económico y Cafam el más caro. Para una compra que no aproveche promociones, Locatel es la opción más estable.
+
+*Tamaño:* el envase grande conviene claramente en Tío Nacho Engrosador (1 L cuesta casi la mitad por mL que el de 415 mL, aunque exige $12 000 más de desembolso). En Pantene la ventaja del envase de 510 mL es pequeña y una promoción en el de 300 mL puede eliminarla. El envase grande conviene si se va a usar todo el contenido antes de su vencimiento.
+
+*Condiciones de compra:* en los productos sin promoción la diferencia entre comercios suele ser menor al 10 %, por lo que el costo de envío, el pedido mínimo o la cercanía de una sede pueden pesar más que el precio. Los precios son de una fecha y una zona específicas y no son permanentes.

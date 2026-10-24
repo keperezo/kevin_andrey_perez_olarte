@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.10.18">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="Brayan Camilo Moreno Vilallobos">
+<meta name="dcterms.date" content="2026-09-29">
+
+<title>Taller 7: Clase 8: Git, Valores Faltantes e Integración</title>
+<style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: 1.5em;}
+div.column{flex: auto;}
+@media screen {
+div.columns{gap: min(4vw, 1.5em);}
+div.column{overflow-x: auto;}
+}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="Taller_07_files/libs/clipboard/clipboard.min.js"></script>
+<script src="Taller_07_files/libs/quarto-html/quarto.js" type="module"></script>
+<script src="Taller_07_files/libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="Taller_07_files/libs/quarto-html/popper.min.js"></script>
+<script src="Taller_07_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="Taller_07_files/libs/quarto-html/anchor.min.js"></script>
+<link href="Taller_07_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="Taller_07_files/libs/quarto-html/quarto-syntax-highlighting-64a204ab8560d761af7679ceaba22944.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="Taller_07_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="Taller_07_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="Taller_07_files/libs/bootstrap/bootstrap-62e2d20df198e8a01bb734742f2e28cf.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+
+
+</head>
+
+<body class="quarto-light">
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
+<div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+  <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Contenido</h2>
+   
+  <ul>
+  <li><a href="#ejercicio-1-diagnóstico-de-valores-faltantes" id="toc-ejercicio-1-diagnóstico-de-valores-faltantes" class="nav-link active" data-scroll-target="#ejercicio-1-diagnóstico-de-valores-faltantes">Ejercicio 1: Diagnóstico de valores faltantes</a>
+  <ul class="collapse">
+  <li><a href="#configuración-y-simulación-de-datos" id="toc-configuración-y-simulación-de-datos" class="nav-link" data-scroll-target="#configuración-y-simulación-de-datos">Configuración y Simulación de Datos</a></li>
+  <li><a href="#solución-punto-1-evidencia-observacional-de-mar-vs-mcar" id="toc-solución-punto-1-evidencia-observacional-de-mar-vs-mcar" class="nav-link" data-scroll-target="#solución-punto-1-evidencia-observacional-de-mar-vs-mcar">Solución Punto 1: Evidencia observacional de MAR vs MCAR</a></li>
+  <li><a href="#solución-punto-2-comparación-de-imputaciones-y-sesgo" id="toc-solución-punto-2-comparación-de-imputaciones-y-sesgo" class="nav-link" data-scroll-target="#solución-punto-2-comparación-de-imputaciones-y-sesgo">Solución Punto 2: Comparación de Imputaciones y Sesgo</a></li>
+  <li><a href="#solución-punto-3-análisis-del-gasto-mecanismo-mnar" id="toc-solución-punto-3-análisis-del-gasto-mecanismo-mnar" class="nav-link" data-scroll-target="#solución-punto-3-análisis-del-gasto-mecanismo-mnar">Solución Punto 3: Análisis del Gasto (Mecanismo MNAR)</a></li>
+  </ul></li>
+  <li><a href="#ejercicio-2-depurar-un-pipeline-con-recipes" id="toc-ejercicio-2-depurar-un-pipeline-con-recipes" class="nav-link" data-scroll-target="#ejercicio-2-depurar-un-pipeline-con-recipes">Ejercicio 2: Depurar un pipeline con recipes</a>
+  <ul class="collapse">
+  <li><a href="#pipeline-corregido" id="toc-pipeline-corregido" class="nav-link" data-scroll-target="#pipeline-corregido">Pipeline Corregido</a></li>
+  <li><a href="#extensión-y-justificación" id="toc-extensión-y-justificación" class="nav-link" data-scroll-target="#extensión-y-justificación">Extensión y Justificación</a></li>
+  </ul></li>
+  <li><a href="#ejercicio-3-razonamiento-conceptual" id="toc-ejercicio-3-razonamiento-conceptual" class="nav-link" data-scroll-target="#ejercicio-3-razonamiento-conceptual">Ejercicio 3: Razonamiento Conceptual</a></li>
+  </ul>
+</nav>
+</div>
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">Taller 7: Clase 8: Git, Valores Faltantes e Integración</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    <div>
+    <div class="quarto-title-meta-heading">Author</div>
+    <div class="quarto-title-meta-contents">
+             <p>Brayan Camilo Moreno Vilallobos </p>
+          </div>
+  </div>
+    
+    <div>
+    <div class="quarto-title-meta-heading">Published</div>
+    <div class="quarto-title-meta-contents">
+      <p class="date">September 29, 2026</p>
+    </div>
+  </div>
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<section id="ejercicio-1-diagnóstico-de-valores-faltantes" class="level1">
+<h1>Ejercicio 1: Diagnóstico de valores faltantes</h1>
+<section id="configuración-y-simulación-de-datos" class="level2">
+<h2 class="anchored" data-anchor-id="configuración-y-simulación-de-datos">Configuración y Simulación de Datos</h2>
+<p>Primero, recreamos el entorno y los datos originales introduciendo los valores faltantes (<code>NA</code>) según el escenario planteado.</p>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">2024</span>)</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>n <span class="ot">&lt;-</span> <span class="dv">400</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>ciudad <span class="ot">&lt;-</span> <span class="fu">sample</span>(<span class="fu">c</span>(<span class="st">"Bogotá"</span>, <span class="st">"Medellín"</span>, <span class="st">"Cali"</span>, <span class="st">"Barranquilla"</span>), n, <span class="cn">TRUE</span>, <span class="fu">c</span>(.<span class="dv">35</span>, .<span class="dv">25</span>, .<span class="dv">25</span>, .<span class="dv">15</span>))</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>edad <span class="ot">&lt;-</span> <span class="fu">pmax</span>(<span class="dv">18</span>, <span class="fu">round</span>(<span class="fu">rnorm</span>(n, <span class="dv">38</span>, <span class="dv">12</span>)))</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="co"># Guardamos el ingreso real sin perturbar para evaluar el sesgo en el Punto 2</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>ingreso_real <span class="ot">&lt;-</span> <span class="fu">rnorm</span>(n, <span class="fl">2.5e6</span> <span class="sc">+</span> <span class="fl">4e4</span><span class="sc">*</span>edad, <span class="fl">6e5</span>)</span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>ingreso <span class="ot">&lt;-</span> ingreso_real</span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>gasto_real <span class="ot">&lt;-</span> ingreso <span class="sc">*</span> <span class="fu">runif</span>(n, <span class="fl">0.3</span>, <span class="fl">0.7</span>)</span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>gasto <span class="ot">&lt;-</span> gasto_real</span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>compra <span class="ot">&lt;-</span> <span class="fu">rbinom</span>(n, <span class="dv">1</span>, <span class="fu">plogis</span>(<span class="fu">scale</span>(gasto)[,<span class="dv">1</span>]<span class="sc">*</span><span class="fl">0.8</span> <span class="sc">-</span> <span class="fl">0.5</span>))</span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a><span class="co"># Introducción de NA según el código de la imagen</span></span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a>riesgo <span class="ot">&lt;-</span> ciudad <span class="sc">==</span> <span class="st">"Cali"</span> <span class="sc">&amp;</span> edad <span class="sc">&gt;</span> <span class="dv">42</span></span>
+<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a>ingreso[<span class="fu">rbinom</span>(n, <span class="dv">1</span>, <span class="fu">ifelse</span>(riesgo, .<span class="dv">55</span>, .<span class="dv">06</span>)) <span class="sc">==</span> <span class="dv">1</span>] <span class="ot">&lt;-</span> <span class="cn">NA</span></span>
+<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a>gasto[<span class="fu">rbinom</span>(n, <span class="dv">1</span>, <span class="fu">plogis</span>(<span class="fu">scale</span>(gasto)[,<span class="dv">1</span>]<span class="sc">*</span><span class="fl">1.5</span> <span class="sc">-</span> <span class="dv">1</span>)) <span class="sc">==</span> <span class="dv">1</span>] <span class="ot">&lt;-</span> <span class="cn">NA</span></span>
+<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-20"><a href="#cb1-20" aria-hidden="true" tabindex="-1"></a>datos <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(ciudad, edad, ingreso, gasto, compra)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+</section>
+<section id="solución-punto-1-evidencia-observacional-de-mar-vs-mcar" class="level2">
+<h2 class="anchored" data-anchor-id="solución-punto-1-evidencia-observacional-de-mar-vs-mcar">Solución Punto 1: Evidencia observacional de MAR vs MCAR</h2>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb2"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>datos<span class="sc">$</span>ingreso_na <span class="ot">&lt;-</span> <span class="fu">is.na</span>(datos<span class="sc">$</span>ingreso)</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="co"># 1.1 Proporción de valores faltantes por ciudad</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"--- Proporción de NA en 'ingreso' por ciudad ---</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>--- Proporción de NA en 'ingreso' por ciudad ---</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="fu">aggregate</span>(ingreso_na <span class="sc">~</span> ciudad, <span class="at">data =</span> datos, mean)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>        ciudad ingreso_na
+1 Barranquilla 0.07575758
+2       Bogotá 0.07407407
+3         Cali 0.21978022
+4     Medellín 0.01851852</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb6"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 1.2 Diferencia de medias en edad según si falta el ingreso</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">--- Media de 'edad' cuando ingreso es NA vs No NA ---</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+--- Media de 'edad' cuando ingreso es NA vs No NA ---</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb8"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">aggregate</span>(edad <span class="sc">~</span> ingreso_na, <span class="at">data =</span> datos, mean)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>  ingreso_na     edad
+1      FALSE 37.94215
+2       TRUE 44.02703</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb10"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 1.3 Comprobación estadística mediante regresión logística</span></span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>modelo_mar <span class="ot">&lt;-</span> <span class="fu">glm</span>(ingreso_na <span class="sc">~</span> ciudad <span class="sc">+</span> edad, <span class="at">data =</span> datos, <span class="at">family =</span> binomial)</span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">--- Modelo Logístico de Ausencia ---</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+--- Modelo Logístico de Ausencia ---</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb12"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="fu">summary</span>(modelo_mar)<span class="sc">$</span>coefficients</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>                   Estimate Std. Error     z value     Pr(&gt;|z|)
+(Intercept)    -4.518524157 0.87224963 -5.18031080 2.215165e-07
+ciudadBogotá   -0.007792918 0.57774144 -0.01348859 9.892380e-01
+ciudadCali      1.241422805 0.54024502  2.29788846 2.156814e-02
+ciudadMedellín -1.460733558 0.85789303 -1.70269894 8.862442e-02
+edad            0.049027640 0.01651589  2.96851342 2.992440e-03</code></pre>
+</div>
+</div>
+<p><strong>Análisis:</strong> En el análisis exploratorio del conjunto de datos, se hace evidente que los valores <code>NA</code> en la variable ingreso no se distribuyen de manera uniforme ni aleatoria en toda la muestra. La proporción de faltantes es significativamente mayor en las filas donde la variable ciudad es “Cali” y la variable edad es superior a 42 años.</p>
+<p>Debido a que la probabilidad de ausencia depende directamente de otras variables que sí han sido observadas (<code>ciudad</code> y <code>edad</code>), se confirma que el mecanismo es <strong>MAR (Missing At Random)</strong> y se descarta que sea <strong>MCAR (Missing Completely At Random)</strong>, donde la pérdida sería totalmente independiente de cualquier otra característica.</p>
+</section>
+<section id="solución-punto-2-comparación-de-imputaciones-y-sesgo" class="level2">
+<h2 class="anchored" data-anchor-id="solución-punto-2-comparación-de-imputaciones-y-sesgo">Solución Punto 2: Comparación de Imputaciones y Sesgo</h2>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb14"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Identificar el subgrupo afectado (Cali y edad &gt; 42)</span></span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>subgrupo <span class="ot">&lt;-</span> datos<span class="sc">$</span>ciudad <span class="sc">==</span> <span class="st">"Cali"</span> <span class="sc">&amp;</span> datos<span class="sc">$</span>edad <span class="sc">&gt;</span> <span class="dv">42</span></span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Media real (Ground Truth) del subgrupo usando la variable sin NA</span></span>
+<span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a>media_real_subgrupo <span class="ot">&lt;-</span> <span class="fu">mean</span>(ingreso_real[subgrupo])</span>
+<span id="cb14-6"><a href="#cb14-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-7"><a href="#cb14-7" aria-hidden="true" tabindex="-1"></a><span class="co"># A. Imputación por Media Global</span></span>
+<span id="cb14-8"><a href="#cb14-8" aria-hidden="true" tabindex="-1"></a>media_global <span class="ot">&lt;-</span> <span class="fu">mean</span>(datos<span class="sc">$</span>ingreso, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb14-9"><a href="#cb14-9" aria-hidden="true" tabindex="-1"></a>ingreso_imp_global <span class="ot">&lt;-</span> datos<span class="sc">$</span>ingreso</span>
+<span id="cb14-10"><a href="#cb14-10" aria-hidden="true" tabindex="-1"></a>ingreso_imp_global[<span class="fu">is.na</span>(ingreso_imp_global)] <span class="ot">&lt;-</span> media_global</span>
+<span id="cb14-11"><a href="#cb14-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-12"><a href="#cb14-12" aria-hidden="true" tabindex="-1"></a><span class="co"># B. Imputación Condicional (Regresión Lineal sobre ciudad y edad)</span></span>
+<span id="cb14-13"><a href="#cb14-13" aria-hidden="true" tabindex="-1"></a>modelo_imp <span class="ot">&lt;-</span> <span class="fu">lm</span>(ingreso <span class="sc">~</span> ciudad <span class="sc">+</span> edad, <span class="at">data =</span> datos)</span>
+<span id="cb14-14"><a href="#cb14-14" aria-hidden="true" tabindex="-1"></a>ingreso_imp_cond <span class="ot">&lt;-</span> datos<span class="sc">$</span>ingreso</span>
+<span id="cb14-15"><a href="#cb14-15" aria-hidden="true" tabindex="-1"></a>idx_na <span class="ot">&lt;-</span> <span class="fu">is.na</span>(datos<span class="sc">$</span>ingreso)</span>
+<span id="cb14-16"><a href="#cb14-16" aria-hidden="true" tabindex="-1"></a>ingreso_imp_cond[idx_na] <span class="ot">&lt;-</span> <span class="fu">predict</span>(modelo_imp, <span class="at">newdata =</span> datos[idx_na, ])</span>
+<span id="cb14-17"><a href="#cb14-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-18"><a href="#cb14-18" aria-hidden="true" tabindex="-1"></a><span class="co"># Cálculo de sesgos para el subgrupo</span></span>
+<span id="cb14-19"><a href="#cb14-19" aria-hidden="true" tabindex="-1"></a>media_imp_global_subgrupo <span class="ot">&lt;-</span> <span class="fu">mean</span>(ingreso_imp_global[subgrupo])</span>
+<span id="cb14-20"><a href="#cb14-20" aria-hidden="true" tabindex="-1"></a>media_imp_cond_subgrupo <span class="ot">&lt;-</span> <span class="fu">mean</span>(ingreso_imp_cond[subgrupo])</span>
+<span id="cb14-21"><a href="#cb14-21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-22"><a href="#cb14-22" aria-hidden="true" tabindex="-1"></a>sesgo_global <span class="ot">&lt;-</span> media_imp_global_subgrupo <span class="sc">-</span> media_real_subgrupo</span>
+<span id="cb14-23"><a href="#cb14-23" aria-hidden="true" tabindex="-1"></a>sesgo_cond <span class="ot">&lt;-</span> media_imp_cond_subgrupo <span class="sc">-</span> media_real_subgrupo</span>
+<span id="cb14-24"><a href="#cb14-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-25"><a href="#cb14-25" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">--- Cuantificación de Sesgos (Subgrupo: Cali &amp; Edad &gt; 42) ---</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+--- Cuantificación de Sesgos (Subgrupo: Cali &amp; Edad &gt; 42) ---</code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb16"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"Media real del subgrupo:       "</span>, <span class="fu">round</span>(media_real_subgrupo, <span class="dv">2</span>), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Media real del subgrupo:        4473781 </code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb18"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"Sesgo (Media Global):          "</span>, <span class="fu">round</span>(sesgo_global, <span class="dv">2</span>), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Sesgo (Media Global):           -173787.9 </code></pre>
+</div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb20"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"Sesgo (Media Condicional):     "</span>, <span class="fu">round</span>(sesgo_cond, <span class="dv">2</span>), <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Sesgo (Media Condicional):      71742.63 </code></pre>
+</div>
+</div>
+<p><strong>Análisis:</strong> El subgrupo con la mayor tasa de datos faltantes (personas de Cali mayores de 42 años) tiene naturalmente ingresos más altos, dado que el ingreso crece proporcionalmente con la edad.</p>
+<ul>
+<li><strong>Media global:</strong> Imputar con el promedio de toda la muestra inyecta un sesgo negativo severo. Al rellenar los vacíos del subgrupo con el promedio general, se subestima fuertemente su verdadero poder adquisitivo, “arrastrando” sus ingresos hacia abajo.</li>
+<li><strong>Media condicional:</strong> Al imputar basándose en un modelo que incluye ciudad y edad, el sesgo se reduce drásticamente. El modelo reconoce que se trata de individuos mayores en una ciudad específica y proyecta un ingreso superior, ajustándose mucho mejor a la realidad de ese segmento.</li>
+</ul>
+</section>
+<section id="solución-punto-3-análisis-del-gasto-mecanismo-mnar" class="level2">
+<h2 class="anchored" data-anchor-id="solución-punto-3-análisis-del-gasto-mecanismo-mnar">Solución Punto 3: Análisis del Gasto (Mecanismo MNAR)</h2>
+<p>La variable <code>gasto</code> sufre de un mecanismo <strong>MNAR (Missing Not At Random)</strong>, ya que la probabilidad de que falte el dato es mayor precisamente cuando el gasto real es elevado. Ningún método de imputación tradicional (como regresión lineal, K-NN o MICE) puede corregir este sesgo porque estas técnicas operan bajo el supuesto MAR, asumiendo que el comportamiento de los datos faltantes puede deducirse por completo a partir de las variables observadas. Dado que falta sistemáticamente la “cola superior” de los gastos altos, cualquier algoritmo estándar subestimará el gasto total.</p>
+<p><strong>¿Qué hacer en su lugar?</strong> En lugar de forzar una imputación estándar, se debe:</p>
+<ol type="1">
+<li><strong>Utilizar Modelos de Selección de Heckman</strong> si se cuenta con variables instrumentales que afecten la probabilidad de reportar el gasto, pero no el nivel de gasto en sí.</li>
+<li><strong>Aplicar Modelos de Mezcla de Patrones (Pattern-mixture models)</strong> para realizar análisis de sensibilidad, asumiendo diferentes distribuciones para los datos faltantes frente a los observados.</li>
+<li><strong>Recurrir a fuentes de datos auxiliares</strong> (ej. registros administrativos, bases de datos de tarjetas de crédito) para triangular y recuperar la información censurada de los altos consumidores.</li>
+</ol>
+<hr>
+</section>
+</section>
+<section id="ejercicio-2-depurar-un-pipeline-con-recipes" class="level1">
+<h1>Ejercicio 2: Depurar un pipeline con recipes</h1>
+<section id="pipeline-corregido" class="level2">
+<h2 class="anchored" data-anchor-id="pipeline-corregido">Pipeline Corregido</h2>
+<p>Identificamos errores de fuga de información y orden en los pasos. A continuación, el pipeline ajustado:</p>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb22"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="co"># install.packages("tidymodels") # Instalación comentada para evitar ejecución al renderizar</span></span>
+<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tidymodels)</span>
+<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb22-4"><a href="#cb22-4" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">7</span>)</span>
+<span id="cb22-5"><a href="#cb22-5" aria-hidden="true" tabindex="-1"></a>split <span class="ot">&lt;-</span> <span class="fu">initial_split</span>(datos, <span class="at">prop =</span> <span class="fl">0.8</span>, <span class="at">strata =</span> compra)</span>
+<span id="cb22-6"><a href="#cb22-6" aria-hidden="true" tabindex="-1"></a>train <span class="ot">&lt;-</span> <span class="fu">training</span>(split)</span>
+<span id="cb22-7"><a href="#cb22-7" aria-hidden="true" tabindex="-1"></a>test  <span class="ot">&lt;-</span> <span class="fu">testing</span>(split)</span>
+<span id="cb22-8"><a href="#cb22-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb22-9"><a href="#cb22-9" aria-hidden="true" tabindex="-1"></a>receta_corregida <span class="ot">&lt;-</span> <span class="fu">recipe</span>(compra <span class="sc">~</span> ., <span class="at">data =</span> train) <span class="sc">|&gt;</span></span>
+<span id="cb22-10"><a href="#cb22-10" aria-hidden="true" tabindex="-1"></a>  <span class="co"># 1. Imputar primero (numéricas y nominales)</span></span>
+<span id="cb22-11"><a href="#cb22-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">step_impute_mode</span>(<span class="fu">all_nominal_predictors</span>()) <span class="sc">|&gt;</span></span>
+<span id="cb22-12"><a href="#cb22-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">step_impute_median</span>(<span class="fu">all_numeric_predictors</span>()) <span class="sc">|&gt;</span></span>
+<span id="cb22-13"><a href="#cb22-13" aria-hidden="true" tabindex="-1"></a>  <span class="co"># 2. Crear variables dummy después de tener los datos completos</span></span>
+<span id="cb22-14"><a href="#cb22-14" aria-hidden="true" tabindex="-1"></a>  <span class="fu">step_dummy</span>(<span class="fu">all_nominal_predictors</span>()) <span class="sc">|&gt;</span></span>
+<span id="cb22-15"><a href="#cb22-15" aria-hidden="true" tabindex="-1"></a>  <span class="fu">prep</span>()</span>
+<span id="cb22-16"><a href="#cb22-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb22-17"><a href="#cb22-17" aria-hidden="true" tabindex="-1"></a>train_proc <span class="ot">&lt;-</span> <span class="fu">bake</span>(receta_corregida, <span class="at">new_data =</span> <span class="cn">NULL</span>)</span>
+<span id="cb22-18"><a href="#cb22-18" aria-hidden="true" tabindex="-1"></a>test_proc  <span class="ot">&lt;-</span> <span class="fu">bake</span>(receta_corregida, <span class="at">new_data =</span> test)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+</section>
+<section id="extensión-y-justificación" class="level2">
+<h2 class="anchored" data-anchor-id="extensión-y-justificación">Extensión y Justificación</h2>
+<p>Mejoramos el pipeline incorporando indicadores de ausencia y métodos de imputación avanzados (<em>bagging</em>):</p>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb23"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a>receta_extendida <span class="ot">&lt;-</span> <span class="fu">recipe</span>(compra <span class="sc">~</span> ., <span class="at">data =</span> train) <span class="sc">|&gt;</span></span>
+<span id="cb23-2"><a href="#cb23-2" aria-hidden="true" tabindex="-1"></a>  <span class="co"># 1. Indicar NAs antes de que desaparezcan</span></span>
+<span id="cb23-3"><a href="#cb23-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">step_indicate_na</span>(ingreso) <span class="sc">|&gt;</span></span>
+<span id="cb23-4"><a href="#cb23-4" aria-hidden="true" tabindex="-1"></a>  <span class="co"># 2. Imputar variables categóricas</span></span>
+<span id="cb23-5"><a href="#cb23-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">step_impute_mode</span>(<span class="fu">all_nominal_predictors</span>()) <span class="sc">|&gt;</span></span>
+<span id="cb23-6"><a href="#cb23-6" aria-hidden="true" tabindex="-1"></a>  <span class="co"># 3. Imputar variables numéricas usando modelos de árboles (bagging)</span></span>
+<span id="cb23-7"><a href="#cb23-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">step_impute_bag</span>(<span class="fu">all_numeric_predictors</span>()) <span class="sc">|&gt;</span></span>
+<span id="cb23-8"><a href="#cb23-8" aria-hidden="true" tabindex="-1"></a>  <span class="co"># 4. Crear variables dummy al final</span></span>
+<span id="cb23-9"><a href="#cb23-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">step_dummy</span>(<span class="fu">all_nominal_predictors</span>()) <span class="sc">|&gt;</span></span>
+<span id="cb23-10"><a href="#cb23-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">prep</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+<p><strong>Justificación del orden final:</strong></p>
+<ol type="1">
+<li><code>step_indicate_na(ingreso)</code> <strong>debe ir de primero:</strong> Es crucial crear la variable indicadora (que marcará con 1 si había un <code>NA</code> y 0 si no) antes de aplicar cualquier método de imputación. Si se imputa primero, los <code>NA</code> desaparecen y el indicador perdería toda la información.</li>
+<li><code>step_impute_mode()</code> <strong>y</strong> <code>step_impute_bag()</code> <strong>van en el medio:</strong> Las imputaciones deben resolver todos los valores vacíos del conjunto de datos. <code>step_impute_bag()</code> utiliza modelos basados en árboles que pueden manejar predictores categóricos internamente (como factores), por lo que es seguro imputar en esta etapa antes de la transformación <em>dummy</em>.</li>
+<li><code>step_dummy()</code> <strong>debe ir al final:</strong> La creación de variables indicadoras (<em>dummy</em>) requiere que los datos estén completamente limpios y sin valores nulos para garantizar que las matrices de diseño generadas para entrenamiento y prueba tengan exactamente la misma estructura de columnas.</li>
+</ol>
+<hr>
+</section>
+</section>
+<section id="ejercicio-3-razonamiento-conceptual" class="level1">
+<h1>Ejercicio 3: Razonamiento Conceptual</h1>
+<ol type="1">
+<li><p>Evaluación del mecanismo (MAR vs MCAR y componente MNAR) El mecanismo es marcadamente consistente con MAR (Missing At Random) y descarta por completo MCAR (Missing Completely At Random). La ausencia del dato no es un evento puramente aleatorio (MCAR), ya que está sistemáticamente correlacionada con variables observadas como el estrato (correlación de 0.52) y tiene una relación directa con la variable objetivo, reflejada en la drástica diferencia en la tasa de incumplimiento (31% frente al 9%).<br>
+No se puede descartar un componente MNAR (Missing Not At Random) porque, por definición, no tenemos los valores reales para comprobarlo. Es altamente probable en un contexto crediticio que los solicitantes decidan omitir su ingreso precisamente porque es demasiado bajo para calificar o porque proviene de fuentes informales difíciles de reportar. Si la ausencia depende del valor real del ingreso que no estamos viendo, el mecanismo es MNAR.</p></li>
+<li><p>Consecuencia práctica de imputar con la mediana global El grupo con el dato faltante tiene un riesgo de incumplimiento del 31%, mucho mayor que el grupo con datos completos (9%). Si se imputa con la mediana global, se le estará asignando un ingreso “promedio” (y estadísticamente más seguro) a un segmento poblacional que en realidad es de alto riesgo. La consecuencia práctica en el negocio es que el modelo suavizará artificialmente el perfil de riesgo de estos individuos, tratándolos como clientes estándar. Esto derivará en un aumento de falsos negativos en la predicción de riesgo (aprobar créditos a personas que terminarán en impago), incrementando directamente las pérdidas financieras de la entidad.</p></li>
+<li><p>Estrategia de 3 pasos para el comité de riesgo Dado que la ausencia del dato acarrea una fuerte señal predictiva sobre el incumplimiento (31% vs 9%) y no se pueden descartar registros, la estrategia debe capitalizar esa señal en lugar de ocultarla:</p>
+<ol type="1">
+<li><p>Creación de variable indicadora (Missing Indicator): Generar una nueva columna binaria (ej. ingreso_no_reportado) que valga 1 si el dato falta y 0 si está presente. Esto permite que el modelo capture explícitamente el alto riesgo (el salto al 31% de incumplimiento) asociado a la omisión del dato.</p></li>
+<li><p>Imputación condicional (basada en MAR): En lugar de usar la mediana global, imputar los valores faltantes de ingreso_reportado utilizando las variables que sí muestran correlación, como el estrato (y otras covariables disponibles). Se puede usar una regresión, árboles (bagging) o KNN para proyectar un ingreso mucho más realista para ese solicitante específico.</p></li>
+<li><p>Entrenamiento conjunto: Entrenar el modelo de riesgo final (regresión logística, XGBoost, etc.) incluyendo tanto el ingreso imputado condicionalmente como la variable indicadora binaria. El modelo aprenderá a evaluar la capacidad de pago estimada, pero aplicará la penalización correspondiente al descubrir que el dato original fue ocultado.</p></li>
+</ol></li>
+</ol>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp('/' + window.location.host + '/');
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>

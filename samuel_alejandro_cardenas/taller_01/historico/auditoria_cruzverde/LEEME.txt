@@ -1,0 +1,11 @@
+1. Conserva intacta tu carpeta y tu base SQLite.
+2. Copia auditar_cruzverde.R dentro de Taller_1_Mineria_Datos.
+3. En RStudio elige esa carpeta como directorio de trabajo.
+4. Ejecuta una sola instruccion: source("auditar_cruzverde.R")
+5. El programa consulta tres secciones reales de Cruz Verde y guarda en auditoria_cruzverde/<fecha>/ tres archivos: resumen.csv, productos_detectados.csv y enlaces_paginacion.csv, ademas de HTML comprimido.
+6. Mandame el archivo resumen.csv y enlaces_paginacion.csv. NO modifiques datos previos.
+
+LIMITACIONES IMPORTANTES:
+- Esta auditoria NO afirma haber solucionado la paginacion ni extraido la categoria completa.
+- precio_html es un precio presente en metadatos de la pagina y puede no ser el precio de compra por promociones/Club.
+- Los URLs y la disponibilidad pueden cambiar. Si falla HTTP se indica como tal, sin fabricar resultados.

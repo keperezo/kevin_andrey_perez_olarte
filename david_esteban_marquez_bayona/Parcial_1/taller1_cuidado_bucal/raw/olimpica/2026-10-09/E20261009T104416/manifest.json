@@ -1,0 +1,155 @@
+{
+ "ejecucion_id": "E20261009T104416",
+ "comercio_id": "olimpica",
+ "comercio": "Olímpica",
+ "url_base": "https://www.olimpica.com",
+ "inicio": "2026-10-09T10:45:29-05:00",
+ "fin": "2026-10-09T10:45:40-05:00",
+ "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36 TallerMineriaDatosUNAL/1.0 (uso academico)",
+ "secciones": [
+  {
+   "seccion_id": "900110300",
+   "nombre": "Cuidado Oral",
+   "ruta_nombres": "Supermercado > Cuidado Personal y Belleza > Cuidado Oral",
+   "filtro": "/900000000/900110000/900110300/",
+   "url": "https://www.olimpica.com/supermercado/cuidado-personal-y-belleza/cuidado-oral",
+   "api": "catalogo",
+   "total_reportado": 258
+  },
+  {
+   "seccion_id": "901011100",
+   "nombre": "Salud Oral",
+   "ruta_nombres": "Medicamentos > Cuidado De La Salud > Salud Oral",
+   "filtro": "/901000000/901010000/901011100/",
+   "url": "https://www.olimpica.com/medicamentos/cuidado-de-la-salud/salud-oral",
+   "api": "catalogo",
+   "total_reportado": 16
+  }
+ ],
+ "peticiones": [
+  {
+   "archivo": "0000_arbol.json.gz",
+   "tipo": "arbol",
+   "seccion_id": null,
+   "url": "https://www.olimpica.com/api/catalog_system/pub/category/tree/4",
+   "params": null,
+   "fecha_hora_consulta": "2026-10-09T10:45:30-05:00",
+   "status": 200,
+   "resources": null,
+   "bytes": 215681
+  },
+  {
+   "archivo": "0001_productos_s900110300.json.gz",
+   "tipo": "productos",
+   "seccion_id": "900110300",
+   "url": "https://www.olimpica.com/api/catalog_system/pub/products/search?fq=C%3A%2F900000000%2F900110000%2F900110300%2F&_from=0&_to=49&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/900000000/900110000/900110300/",
+    "_from": 0,
+    "_to": 49,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T10:45:31-05:00",
+   "status": 206,
+   "resources": "0-49/258",
+   "bytes": 5396140
+  },
+  {
+   "archivo": "0002_productos_s900110300.json.gz",
+   "tipo": "productos",
+   "seccion_id": "900110300",
+   "url": "https://www.olimpica.com/api/catalog_system/pub/products/search?fq=C%3A%2F900000000%2F900110000%2F900110300%2F&_from=50&_to=99&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/900000000/900110000/900110300/",
+    "_from": 50,
+    "_to": 99,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T10:45:33-05:00",
+   "status": 206,
+   "resources": "50-99/258",
+   "bytes": 5843765
+  },
+  {
+   "archivo": "0003_productos_s900110300.json.gz",
+   "tipo": "productos",
+   "seccion_id": "900110300",
+   "url": "https://www.olimpica.com/api/catalog_system/pub/products/search?fq=C%3A%2F900000000%2F900110000%2F900110300%2F&_from=100&_to=149&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/900000000/900110000/900110300/",
+    "_from": 100,
+    "_to": 149,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T10:45:35-05:00",
+   "status": 206,
+   "resources": "100-149/258",
+   "bytes": 5903459
+  },
+  {
+   "archivo": "0004_productos_s900110300.json.gz",
+   "tipo": "productos",
+   "seccion_id": "900110300",
+   "url": "https://www.olimpica.com/api/catalog_system/pub/products/search?fq=C%3A%2F900000000%2F900110000%2F900110300%2F&_from=150&_to=199&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/900000000/900110000/900110300/",
+    "_from": 150,
+    "_to": 199,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T10:45:36-05:00",
+   "status": 206,
+   "resources": "150-199/258",
+   "bytes": 5701061
+  },
+  {
+   "archivo": "0005_productos_s900110300.json.gz",
+   "tipo": "productos",
+   "seccion_id": "900110300",
+   "url": "https://www.olimpica.com/api/catalog_system/pub/products/search?fq=C%3A%2F900000000%2F900110000%2F900110300%2F&_from=200&_to=249&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/900000000/900110000/900110300/",
+    "_from": 200,
+    "_to": 249,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T10:45:38-05:00",
+   "status": 206,
+   "resources": "200-249/258",
+   "bytes": 5527011
+  },
+  {
+   "archivo": "0006_productos_s900110300.json.gz",
+   "tipo": "productos",
+   "seccion_id": "900110300",
+   "url": "https://www.olimpica.com/api/catalog_system/pub/products/search?fq=C%3A%2F900000000%2F900110000%2F900110300%2F&_from=250&_to=299&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/900000000/900110000/900110300/",
+    "_from": 250,
+    "_to": 299,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T10:45:39-05:00",
+   "status": 200,
+   "resources": "250-299/258",
+   "bytes": 893659
+  },
+  {
+   "archivo": "0007_productos_s901011100.json.gz",
+   "tipo": "productos",
+   "seccion_id": "901011100",
+   "url": "https://www.olimpica.com/api/catalog_system/pub/products/search?fq=C%3A%2F901000000%2F901010000%2F901011100%2F&_from=0&_to=49&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/901000000/901010000/901011100/",
+    "_from": 0,
+    "_to": 49,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T10:45:40-05:00",
+   "status": 200,
+   "resources": "0-49/16",
+   "bytes": 1629704
+  }
+ ],
+ "errores": []
+}

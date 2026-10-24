@@ -1,0 +1,161 @@
+[
+  {
+    "id": "rexona_men_48",
+    "nombre": "Rexona Clinical Men",
+    "marca": "Rexona",
+    "variante": "Men",
+    "presentacion": "1 envase de 48 g",
+    "contenido_total": 48,
+    "unidad": "g",
+    "unidades_empaque": 1,
+    "grupo_formulacion": "rexona_men_48",
+    "ean": "79400052919",
+    "skus": {
+      "colsubsidio": "6151",
+      "cafam": "1679",
+      "larebaja": "4942"
+    },
+    "evidencia": "EAN coincidente en los tres catálogos, con verificación de marca, variante y presentación en nombres y fichas originales.",
+    "incidencias": {}
+  },
+  {
+    "id": "rexona_women_48",
+    "nombre": "Rexona Clinical Women",
+    "marca": "Rexona",
+    "variante": "Women Classic",
+    "presentacion": "1 envase de 48 g",
+    "contenido_total": 48,
+    "unidad": "g",
+    "unidades_empaque": 1,
+    "grupo_formulacion": "rexona_women_48",
+    "ean": "79400052926",
+    "skus": {
+      "colsubsidio": "6064",
+      "cafam": "1680",
+      "larebaja": "4944"
+    },
+    "evidencia": "EAN coincidente en los tres catálogos, con verificación de marca, variante y presentación en nombres y fichas originales.",
+    "incidencias": {}
+  },
+  {
+    "id": "rexona_sport_48",
+    "nombre": "Rexona Clinical Sport Strength Men",
+    "marca": "Rexona",
+    "variante": "Sport Strength Men",
+    "presentacion": "1 envase de 48 g",
+    "contenido_total": 48,
+    "unidad": "g",
+    "unidades_empaque": 1,
+    "grupo_formulacion": "rexona_sport_48",
+    "ean": "79400300546",
+    "skus": {
+      "colsubsidio": "6066",
+      "cafam": "4365",
+      "larebaja": "1817"
+    },
+    "evidencia": "EAN coincidente en los tres catálogos, con verificación de marca, variante y presentación en nombres y fichas originales.",
+    "incidencias": {}
+  },
+  {
+    "id": "protex_avena_330",
+    "nombre": "Protex Avena",
+    "marca": "Protex",
+    "variante": "Avena",
+    "presentacion": "3 barras de 110 g",
+    "contenido_total": 330,
+    "unidad": "g",
+    "unidades_empaque": 3,
+    "grupo_formulacion": "protex_avena_330",
+    "ean": "7702010920615",
+    "skus": {
+      "colsubsidio": "10704",
+      "cafam": "4938",
+      "larebaja": "23647"
+    },
+    "evidencia": "EAN coincidente en los tres catálogos, con verificación de marca, variante y presentación en nombres y fichas originales.",
+    "incidencias": {
+      "cafam": "Unidades por Empaque dice 1, pero nombre y Cantidad por unidad de medida indican 3; contenido de cada barra 110 g. EAN y otras tiendas confirman 330 g."
+    }
+  },
+  {
+    "id": "protex_herbal_330",
+    "nombre": "Protex Herbal",
+    "marca": "Protex",
+    "variante": "Herbal",
+    "presentacion": "3 barras de 110 g",
+    "contenido_total": 330,
+    "unidad": "g",
+    "unidades_empaque": 3,
+    "grupo_formulacion": "protex_herbal_330",
+    "ean": "7702010920660",
+    "skus": {
+      "colsubsidio": "10705",
+      "cafam": "6788",
+      "larebaja": "24070"
+    },
+    "evidencia": "EAN coincidente en los tres catálogos, con verificación de marca, variante y presentación en nombres y fichas originales.",
+    "incidencias": {}
+  },
+  {
+    "id": "protex_men_330",
+    "nombre": "Protex Men Sport",
+    "marca": "Protex",
+    "variante": "Men Sport",
+    "presentacion": "3 barras de 110 g",
+    "contenido_total": 330,
+    "unidad": "g",
+    "unidades_empaque": 3,
+    "grupo_formulacion": "protex_men_330",
+    "ean": "7509546667201",
+    "skus": {
+      "colsubsidio": "10200",
+      "cafam": "6790",
+      "larebaja": "17852"
+    },
+    "evidencia": "EAN coincidente en los tres catálogos, con verificación de marca, variante y presentación en nombres y fichas originales.",
+    "incidencias": {}
+  },
+  {
+    "id": "dove_original_270",
+    "nombre": "Dove Original blanco",
+    "marca": "Dove",
+    "variante": "Original blanco",
+    "presentacion": "3 barras de 90 g",
+    "contenido_total": 270,
+    "unidad": "g",
+    "unidades_empaque": 3,
+    "grupo_formulacion": "dove_original_270",
+    "ean": "7891150046481",
+    "skus": {
+      "colsubsidio": "6657",
+      "cafam": "4118",
+      "larebaja": "6120"
+    },
+    "evidencia": "EAN coincidente en los tres catálogos, con verificación de marca, variante y presentación en nombres y fichas originales. Colsubsidio: encabezado de descripción «Dove Jabon Original 3x90gr» y Unidades=270; Cafam: 3 barras y 90 gramos; La Rebaja: TRIPACK, mismo EAN.",
+    "incidencias": {
+      "colsubsidio": "Presentación dice 90 g por barra; descripción confirma 3x90 g y Unidades=270. Descripción incluye ingredientes ajenos al jabón: no se usa para inferir formulación.",
+      "larebaja": "La ficha expresa 1 unidad de venta; el nombre identifica TRIPACK. Contenido total conciliado por EAN y fichas de las otras tiendas."
+    }
+  },
+  {
+    "id": "yodora_clasico_25",
+    "nombre": "Yodora Clásico crema",
+    "marca": "Yodora",
+    "variante": "Clásico",
+    "presentacion": "1 tubo de 25 g",
+    "contenido_total": 25,
+    "unidad": "g",
+    "unidades_empaque": 1,
+    "grupo_formulacion": "yodora_clasico_25",
+    "ean": "7702057080075",
+    "skus": {
+      "colsubsidio": "12661",
+      "cafam": "4277",
+      "larebaja": "434"
+    },
+    "evidencia": "EAN coincidente en los tres catálogos, con verificación de marca, variante y presentación en nombres y fichas originales. Cafam: EAN 7702057080075 e imagen titulada desodorante-yodora-clasico-en-crema-25-g; Colsubsidio y La Rebaja especifican tubo de 25 g.",
+    "incidencias": {
+      "cafam": "Ficha genérica: 1 unidad/Blíster y registro 000000. Se identifica tubo de 25 g por EAN e imagen; no se usa esta ficha para información sanitaria."
+    }
+  }
+]

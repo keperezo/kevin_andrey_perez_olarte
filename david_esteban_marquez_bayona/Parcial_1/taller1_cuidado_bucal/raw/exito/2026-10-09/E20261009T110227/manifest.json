@@ -1,0 +1,594 @@
+{
+ "ejecucion_id": "E20261009T110227",
+ "comercio_id": "exito",
+ "comercio": "Éxito",
+ "url_base": "https://www.exito.com",
+ "inicio": "2026-10-09T11:02:29-05:00",
+ "fin": "2026-10-09T11:04:29-05:00",
+ "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36 TallerMineriaDatosUNAL/1.0 (uso academico)",
+ "secciones": [
+  {
+   "seccion_id": "34185114",
+   "nombre": "Cuidado oral",
+   "ruta_nombres": "Cuidado personal > Cuidado oral",
+   "filtro": "/34185083/34185114/",
+   "url": "https://tienda.exito.com/cuidado-personal/cuidado-oral",
+   "api": "catalogo",
+   "total_reportado": 1730
+  }
+ ],
+ "peticiones": [
+  {
+   "archivo": "0000_arbol.json.gz",
+   "tipo": "arbol",
+   "seccion_id": null,
+   "url": "https://www.exito.com/io/api/catalog_system/pub/category/tree/4",
+   "params": null,
+   "fecha_hora_consulta": "2026-10-09T11:02:31-05:00",
+   "status": 200,
+   "resources": null,
+   "bytes": 330566
+  },
+  {
+   "archivo": "0001_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=0&_to=49&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 0,
+    "_to": 49,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:02:35-05:00",
+   "status": 206,
+   "resources": "0-49/1730",
+   "bytes": 8974659
+  },
+  {
+   "archivo": "0002_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=50&_to=99&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 50,
+    "_to": 99,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:02:39-05:00",
+   "status": 206,
+   "resources": "50-99/1730",
+   "bytes": 7393651
+  },
+  {
+   "archivo": "0003_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=100&_to=149&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 100,
+    "_to": 149,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:02:44-05:00",
+   "status": 206,
+   "resources": "100-149/1730",
+   "bytes": 7568332
+  },
+  {
+   "archivo": "0004_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=150&_to=199&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 150,
+    "_to": 199,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:02:49-05:00",
+   "status": 206,
+   "resources": "150-199/1730",
+   "bytes": 7326707
+  },
+  {
+   "archivo": "0005_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=200&_to=249&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 200,
+    "_to": 249,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:02:54-05:00",
+   "status": 206,
+   "resources": "200-249/1730",
+   "bytes": 5640971
+  },
+  {
+   "archivo": "0006_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=250&_to=299&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 250,
+    "_to": 299,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:02:58-05:00",
+   "status": 206,
+   "resources": "250-299/1730",
+   "bytes": 2647087
+  },
+  {
+   "archivo": "0007_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=300&_to=349&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 300,
+    "_to": 349,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:03:02-05:00",
+   "status": 206,
+   "resources": "300-349/1730",
+   "bytes": 3598097
+  },
+  {
+   "archivo": "0008_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=350&_to=399&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 350,
+    "_to": 399,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:03:07-05:00",
+   "status": 206,
+   "resources": "350-399/1730",
+   "bytes": 2903972
+  },
+  {
+   "archivo": "0009_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=400&_to=449&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 400,
+    "_to": 449,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:03:10-05:00",
+   "status": 206,
+   "resources": "400-449/1730",
+   "bytes": 3850712
+  },
+  {
+   "archivo": "0010_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=450&_to=499&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 450,
+    "_to": 499,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:03:15-05:00",
+   "status": 206,
+   "resources": "450-499/1730",
+   "bytes": 10513588
+  },
+  {
+   "archivo": "0011_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=500&_to=549&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 500,
+    "_to": 549,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:03:21-05:00",
+   "status": 206,
+   "resources": "500-549/1730",
+   "bytes": 11130925
+  },
+  {
+   "archivo": "0012_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=550&_to=599&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 550,
+    "_to": 599,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:03:25-05:00",
+   "status": 206,
+   "resources": "550-599/1730",
+   "bytes": 4801853
+  },
+  {
+   "archivo": "0013_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=600&_to=649&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 600,
+    "_to": 649,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:03:29-05:00",
+   "status": 206,
+   "resources": "600-649/1730",
+   "bytes": 4863048
+  },
+  {
+   "archivo": "0014_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=650&_to=699&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 650,
+    "_to": 699,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:03:31-05:00",
+   "status": 206,
+   "resources": "650-699/1730",
+   "bytes": 300352
+  },
+  {
+   "archivo": "0015_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=700&_to=749&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 700,
+    "_to": 749,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:03:33-05:00",
+   "status": 206,
+   "resources": "700-749/1730",
+   "bytes": 310189
+  },
+  {
+   "archivo": "0016_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=750&_to=799&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 750,
+    "_to": 799,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:03:36-05:00",
+   "status": 206,
+   "resources": "750-799/1730",
+   "bytes": 299980
+  },
+  {
+   "archivo": "0017_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=800&_to=849&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 800,
+    "_to": 849,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:03:38-05:00",
+   "status": 206,
+   "resources": "800-849/1730",
+   "bytes": 309863
+  },
+  {
+   "archivo": "0018_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=850&_to=899&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 850,
+    "_to": 899,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:03:40-05:00",
+   "status": 206,
+   "resources": "850-899/1730",
+   "bytes": 341800
+  },
+  {
+   "archivo": "0019_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=900&_to=949&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 900,
+    "_to": 949,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:03:43-05:00",
+   "status": 206,
+   "resources": "900-949/1730",
+   "bytes": 338323
+  },
+  {
+   "archivo": "0020_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=950&_to=999&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 950,
+    "_to": 999,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:03:46-05:00",
+   "status": 206,
+   "resources": "950-999/1730",
+   "bytes": 301043
+  },
+  {
+   "archivo": "0021_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=1000&_to=1049&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 1000,
+    "_to": 1049,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:03:47-05:00",
+   "status": 206,
+   "resources": "1000-1049/1730",
+   "bytes": 314797
+  },
+  {
+   "archivo": "0022_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=1050&_to=1099&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 1050,
+    "_to": 1099,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:03:49-05:00",
+   "status": 206,
+   "resources": "1050-1099/1730",
+   "bytes": 332171
+  },
+  {
+   "archivo": "0023_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=1100&_to=1149&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 1100,
+    "_to": 1149,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:03:52-05:00",
+   "status": 206,
+   "resources": "1100-1149/1730",
+   "bytes": 303505
+  },
+  {
+   "archivo": "0024_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=1150&_to=1199&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 1150,
+    "_to": 1199,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:03:54-05:00",
+   "status": 206,
+   "resources": "1150-1199/1730",
+   "bytes": 337683
+  },
+  {
+   "archivo": "0025_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=1200&_to=1249&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 1200,
+    "_to": 1249,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:03:57-05:00",
+   "status": 206,
+   "resources": "1200-1249/1730",
+   "bytes": 313879
+  },
+  {
+   "archivo": "0026_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=1250&_to=1299&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 1250,
+    "_to": 1299,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:04:09-05:00",
+   "status": 206,
+   "resources": "1250-1299/1730",
+   "bytes": 462267
+  },
+  {
+   "archivo": "0027_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=1300&_to=1349&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 1300,
+    "_to": 1349,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:04:12-05:00",
+   "status": 206,
+   "resources": "1300-1349/1730",
+   "bytes": 317678
+  },
+  {
+   "archivo": "0028_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=1350&_to=1399&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 1350,
+    "_to": 1399,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:04:14-05:00",
+   "status": 206,
+   "resources": "1350-1399/1730",
+   "bytes": 405306
+  },
+  {
+   "archivo": "0029_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=1400&_to=1449&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 1400,
+    "_to": 1449,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:04:15-05:00",
+   "status": 206,
+   "resources": "1400-1449/1730",
+   "bytes": 792807
+  },
+  {
+   "archivo": "0030_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=1450&_to=1499&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 1450,
+    "_to": 1499,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:04:18-05:00",
+   "status": 206,
+   "resources": "1450-1499/1730",
+   "bytes": 386363
+  },
+  {
+   "archivo": "0031_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=1500&_to=1549&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 1500,
+    "_to": 1549,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:04:19-05:00",
+   "status": 206,
+   "resources": "1500-1549/1730",
+   "bytes": 297355
+  },
+  {
+   "archivo": "0032_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=1550&_to=1599&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 1550,
+    "_to": 1599,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:04:22-05:00",
+   "status": 206,
+   "resources": "1550-1599/1730",
+   "bytes": 359419
+  },
+  {
+   "archivo": "0033_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=1600&_to=1649&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 1600,
+    "_to": 1649,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:04:24-05:00",
+   "status": 206,
+   "resources": "1600-1649/1730",
+   "bytes": 294986
+  },
+  {
+   "archivo": "0034_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=1650&_to=1699&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 1650,
+    "_to": 1699,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:04:27-05:00",
+   "status": 206,
+   "resources": "1650-1699/1730",
+   "bytes": 278321
+  },
+  {
+   "archivo": "0035_productos_s34185114.json.gz",
+   "tipo": "productos",
+   "seccion_id": "34185114",
+   "url": "https://www.exito.com/io/api/catalog_system/pub/products/search?fq=C%3A%2F34185083%2F34185114%2F&_from=1700&_to=1749&O=OrderByNameASC",
+   "params": {
+    "fq": "C:/34185083/34185114/",
+    "_from": 1700,
+    "_to": 1749,
+    "O": "OrderByNameASC"
+   },
+   "fecha_hora_consulta": "2026-10-09T11:04:29-05:00",
+   "status": 200,
+   "resources": "1700-1749/1730",
+   "bytes": 166619
+  }
+ ],
+ "errores": []
+}

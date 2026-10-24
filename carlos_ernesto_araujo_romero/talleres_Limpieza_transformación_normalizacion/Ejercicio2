@@ -1,0 +1,110 @@
+library(tidyverse)
+
+titanic <- read_csv("titanic.csv", show_col_types = FALSE)
+
+# Funcion auxiliar para criterio IQR
+es_outlier_iqr <- function(x, k = 1.5) {
+  q1  <- quantile(x, 0.25, na.rm = TRUE)
+  q3  <- quantile(x, 0.75, na.rm = TRUE)
+  iqr <- q3 - q1
+  x < (q1 - k * iqr) | x > (q3 + k * iqr)
+}
+
+# a) Criterio IQR global con k = 1.5 y k = 3
+titanic <- titanic %>%
+  mutate(
+    out_iqr_15 = es_outlier_iqr(fare, k = 1.5),
+    out_iqr_30 = es_outlier_iqr(fare, k = 3.0)
+  )
+
+pct_15 <- mean(titanic$out_iqr_15, na.rm = TRUE) * 100
+pct_30 <- mean(titanic$out_iqr_30, na.rm = TRUE) * 100
+
+cat(sprintf("Outliers IQR global k=1.5: %.2f%%\n", pct_15))
+cat(sprintf("Outliers IQR global k=3.0: %.2f%%\n\n", pct_30))
+
+# b) Criterio IQR condicionado por clase (.by = pclass)
+titanic <- titanic %>%
+  mutate(
+    out_iqr_clase = es_outlier_iqr(fare, k = 1.5),
+    .by = pclass
+  )
+
+comparacion_clase1 <- titanic %>%
+  filter(pclass == 1) %>%
+  summarise(
+    outliers_globales = sum(out_iqr_15, na.rm = TRUE),
+    outliers_en_su_clase = sum(out_iqr_clase, na.rm = TRUE),
+    dejan_de_ser_outlier = sum(out_iqr_15 & !out_iqr_clase, na.rm = TRUE)
+  )
+
+print(comparacion_clase1)
+
+# Justificacion:
+# Comparar tarifas de 1ra clase contra la distribucion global es injusto porque 
+# 3ra clase representa la mayoria de la muestra (~54%), arrastrando la mediana y 
+# cuartiles globales hacia valores muy bajos. Un boleto normal de 1ra clase parece 
+# "anomalo" frente al total, pero es comun dentro de su propio subgrupo socioeconomico.
+
+# c) Z-score robusto con mediana y MAD
+z_robusto <- function(x) {
+  med <- median(x, na.rm = TRUE)
+  desv_mad <- mad(x, na.rm = TRUE)
+  (x - med) / desv_mad
+}
+
+titanic <- titanic %>%
+  mutate(
+    z_rob_fare = z_robusto(fare),
+    out_z_rob = abs(z_rob_fare) > 3.5
+  )
+
+cat("Outliers con Z-score robusto (|z| > 3.5):", sum(titanic$out_z_rob, na.rm = TRUE), "\n\n")
+
+# Ventaja teorica:
+# La media y la desviacion estandar clasicas se inflan ante valores extremos masivos 
+# (como tarifas de 512 libras). El z-score clasico subestima anomalias al inflar el 
+# denominador. El estimador MAD y la mediana no son afectados por esos extremos, 
+# evitando el enmascaramiento (masking effect).
+
+# d) Cruce de los tres criterios
+cruce_criterios <- titanic %>%
+  count(out_iqr_15, out_iqr_clase, out_z_rob) %>%
+  arrange(desc(n))
+
+print(cruce_criterios)
+
+# Pasajeros marcados por el IQR global pero no dentro de su clase:
+# Suelen ser pasajeros de primera clase con tarifas estandar de suites ($60-$120), 
+# que son atipicas para el barco en general pero habituales para primera clase.
+
+# e) Analisis de los 17 pasajeros con fare == 0
+pasajeros_cero <- titanic %>%
+  filter(fare == 0) %>%
+  select(name, pclass, ticket, age, sex)
+
+print(head(pasajeros_cero, 6))
+
+# Justificacion y tratamiento:
+# La mayoria eran empleados de los astilleros Harland & Wolff (grupo de garantia), 
+# tripulacion en traslado o cortesias corporativas de la White Star Line (ej. Joseph Ismay). 
+# Tratamiento recomendado:
+# Si el objetivo es predecir supervivencia en funcion del nivel economico de la cabina, 
+# se deben convertir a NA e imputar con la mediana de su respectiva clase, ya que $0 no 
+# refleja su condicion socioeconomica real ni las comodidades recibidas a bordo.
+
+# f) Transformacion logaritmica log1p(fare) y evaluacion de outliers
+titanic <- titanic %>%
+  mutate(
+    fare_log = log1p(fare),
+    out_log_iqr = es_outlier_iqr(fare_log, k = 1.5)
+  )
+
+cat("Outliers restantes tras log1p(fare):", sum(titanic$out_log_iqr, na.rm = TRUE), "\n")
+
+# Discusion:
+# log1p() comprime la cola derecha asimetrica de distribuciones monetarias, reduciendo 
+# el apalancamiento de valores extremos. Sin embargo, no "resuelve" el valor atipico: 
+# matematicamente estabiliza la varianza para modelos lineales, pero oculta la verdadera 
+# disparidad de escala en el mundo real. Ademas, puede generar outliers por la cola 
+# izquierda (valores cercanos a 0 se vuelven anomalos negativos respecto a la media log).

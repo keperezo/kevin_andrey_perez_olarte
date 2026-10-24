@@ -1,0 +1,437 @@
+---
+title: "Comparador de precios de higiene corporal"
+subtitle: "Taller 1 · Minería de Datos · 2016325"
+author: "Thomas Matallana"
+lang: es
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    code-fold: true
+    code-summary: "Ver código Python"
+    embed-resources: true
+    css: estilos.css
+jupyter: python3
+execute:
+  warning: false
+  error: false
+  cache: false
+---
+
+```{python}
+#| label: configuracion
+import os
+import re
+import sqlite3
+from pathlib import Path
+import pandas as pd
+import matplotlib.pyplot as plt
+from IPython.display import display, Markdown, Code
+from scraper import run_collection, validate, load_matches, SOURCES
+
+# Por defecto se reconstruyen las observaciones desde las respuestas originales.
+# HIGIENE_ONLINE=1 hace una nueva captura y conserva el histórico.
+BASE = Path.cwd()
+DB = BASE / "comparador_precios.sqlite"
+RUN = run_collection(offline=os.environ.get("HIGIENE_ONLINE") != "1", db=DB)
+con = sqlite3.connect(DB)
+check = validate(DB, RUN)
+assert not check["faltantes_o_duplicados"], check
+assert check["integridad"] == "ok", check
+
+parts = re.split(r"-- name: ([a-z_]+)\s*\n", Path("consultas.sql").read_text(encoding="utf-8"))
+SQL = {parts[i]: parts[i + 1].strip() for i in range(1, len(parts), 2)}
+def query(name, show=True):
+    frame = pd.read_sql_query(SQL[name], con, params={"run": RUN})
+    if show:
+        display(Code(SQL[name], language="sql"))
+        if frame.empty:
+            display(Markdown("**Resultado:** no se encontraron filas."))
+        else:
+            display(frame)
+    return frame
+
+def text(message):
+    display(Markdown(message))
+
+COLORS = {"colsubsidio": "#2078a5", "cafam": "#ce7540", "larebaja": "#3b8c6e"}
+LABELS = {s: v["nombre"] for s, v in SOURCES.items()}
+plt.rcParams.update({"font.size": 10, "axes.spines.top": False,
+                     "axes.spines.right": False, "figure.dpi": 130})
+pd.set_option("display.max_colwidth", 95)
+```
+
+# Introducción
+
+El objetivo es identificar dónde cuesta menos comprar una **misma presentación**
+de higiene corporal en tres comercios colombianos y describir la oferta de la
+categoría. Se incluyen jabones de tocador, geles de ducha, desodorantes,
+antitranspirantes y talcos; se excluyen higiene íntima e infantil. No se comparan
+como sustitutos productos de distinta marca, variante o formulación.
+
+Los candidatos iniciales fueron Dove Original, Rexona Clinical, Gillette Clear
+Gel, Protex, Dove blanco, Nivea Creme Care, Mexsana y Yodora. La revisión de los
+catálogos no confirmó una misma presentación disponible de cada candidato en
+los tres comercios. Se eligieron ocho presentaciones verificables de Rexona,
+Protex, Dove y Yodora. El enunciado permite varias presentaciones o variantes de
+una marca, siempre que cada una coincida entre comercios.
+
+```{python}
+seleccion = pd.read_sql_query("""
+SELECT nombre AS producto, variante, presentacion, contenido_total, unidad, ean
+FROM productos ORDER BY nombre
+""", con)
+display(seleccion)
+text(f"**Ejecución analizada:** `{RUN}`. "
+     f"**Cobertura comparable:** {check['observaciones_comparables']} precios, "
+     "correspondientes a ocho presentaciones en tres comercios.")
+```
+
+# Fuentes y extracción
+
+## Delimitación de categorías
+
+Se extraen completas las siguientes secciones del catálogo público y después se
+aplican reglas de inclusión. Se consultan también secciones de cuidado de pies
+porque allí aparecen talcos y desodorantes. Cremas reparadoras, antifúngicos,
+apósitos, removedores, pañuelos, jabones faciales y limpiadores específicos de
+manos se conservan en la auditoría de exclusiones, pero no en la vista de higiene
+corporal utilizada para describir la oferta.
+
+| Comercio | Secciones consultadas | Rutas de categoría VTEX |
+|:--|:--|:--|
+| [Colsubsidio](https://www.drogueriascolsubsidio.com/higiene-y-cuidado-personal/aseo-personal) | Desodorantes; jabones y gel antibacterial; cuidado para pies | `5/521/52129`, `5/521/52130`, `5/521/52132` |
+| [Cafam](https://www.drogueriascafam.com.co/cuidado-personal/bano-y-cuerpo) | Desodorantes; jabones; higiene corporal; cuidado de pies | `2/53/59`, `2/53/75`, `2/53/78`, `2/53/58` |
+| [La Rebaja](https://www.larebajavirtual.com/cuidado-personal) | Desodorantes y sus subcategorías; jabones; jabón líquido corporal; cuidado y protección de los pies | `5/31`, `5/28/168`, `5/28/580`, `5/28/166` |
+
+Esta cobertura se refiere a las secciones declaradas, no a todos los departamentos
+del sitio. La taxonomía de cada comercio es distinta; una clasificación errónea
+del propio catálogo podría dejar productos fuera de estas secciones.
+
+## Método reproducible
+
+Se identificó la plataforma VTEX en el HTML público de las tiendas y se verificó
+su árbol de categorías. Se utilizó la
+[API pública de búsqueda del catálogo VTEX](https://developers.vtex.com/docs/api-reference/search-api),
+con el filtro de categoría descrito en la
+[documentación de parámetros](https://developers.vtex.com/docs/guides/how-search-parameters-work).
+No se requieren claves, cuentas ni sesiones autenticadas.
+
+El endpoint es `/api/catalog_system/pub/products/search`. El filtro `fq=C:/ruta/`
+selecciona la categoría; `_from` y `_to` recorren páginas de 50 productos.
+El encabezado `resources` informa el total del catálogo. Si la primera pasada
+omite identificadores por nombres repetidos, una segunda pasada en orden inverso
+recupera registros y se elimina la duplicación por SKU. Solo se marca la sección
+como completa cuando el número de identificadores distintos coincide con el total.
+
+Los campos se extraen de `productName`, `brand`, `description`, las especificaciones,
+`items[].itemId`, `items[].ean` y la oferta de `items[].sellers[]` del vendedor
+principal (`sellerId=1`). El precio es `commertialOffer.Price`, ya expresado en COP,
+y se conserva `ListPrice`. La disponibilidad se toma de `IsAvailable`. Una oferta
+sin precio positivo queda con `NULL`; una oferta no disponible no entra en la
+comparación para el consumidor, aunque su precio publicado se conserve.
+
+`scraper.py` contiene una función por comercio y `run_collection()` coordina las
+tres tiendas bajo el mismo identificador de ejecución. El bloque inicial de este
+informe llama al módulo; no duplica el código de extracción. Se usa `urllib` para
+HTTP, `json` para las respuestas, `gzip` para las copias y `sqlite3` para la base.
+Las dependencias externas del análisis tienen versiones fijadas.
+
+## Copias originales y prácticas de consulta
+
+Cada respuesta se guarda **sin modificar**, comprimida, en
+`raw/comercio/ejecucion/`. Su archivo de metadatos conserva URL, fecha y hora de
+Colombia, estado HTTP, total y hash SHA-256. La carpeta de ejecución incluye un
+manifiesto con páginas, errores y cobertura. El modo sin conexión verifica cada
+hash y repite el procesamiento sin realizar llamadas de red.
+
+La recolección usa pausas de 0,6 segundos, tiempo máximo de respuesta y tres
+intentos como máximo ante fallos transitorios. No accede a datos personales,
+carritos ni áreas privadas. Se archivó `robots.txt` de cada tienda. **Los archivos
+de Colsubsidio y Cafam declaran `Disallow: /api/` para rastreadores generales**:
+la accesibilidad pública del endpoint no equivale a autorización de rastreo.
+Esta restricción es una limitación de las prácticas de la captura realizada,
+y debe revisarse antes de nuevas ejecuciones en línea. Se consultaron también
+los [términos de Colsubsidio](https://www.drogueriascolsubsidio.com/terminos-y-condiciones-pagina-web)
+y los [términos de Cafam](https://www.drogueriascafam.com.co/terminos-y-condiciones).
+No se afirma contar con un permiso especial de los comercios.
+
+# Preparación y correspondencia
+
+1. Se conservan el nombre, la descripción y la ficha original en campos propios.
+   `texto_original` contiene estos elementos sin sustituirlos por texto limpio.
+2. Se normalizan espacios, mayúsculas y tildes en nombres y marcas separados.
+   En Colsubsidio se prefiere «Marca Comercial» al nombre del laboratorio.
+3. Se extrae contenido con reglas conservadoras; ante paquetes ambiguos o regalos
+   no interpretables queda ausente. No se convierten gramos en mililitros.
+4. La correspondencia de los ocho elegidos se registra en `correspondencias.json`:
+   SKU por comercio, EAN, marca, variante, número de unidades, contenido y evidencia.
+   No contiene precios. Los EAN se comparan como texto, ignorando ceros iniciales.
+5. Un mismo EAN es una evidencia de identidad, pero se verifica también la presentación.
+   Si el EAN cambia en otra corrida, el código deja de marcar ese SKU como comparable.
+6. Se eliminan duplicados de un SKU listado en varias secciones dentro de una corrida.
+   Una nueva captura conserva otra observación; reprocesar la misma captura no la duplica.
+
+Las incidencias detectadas se muestran en la pregunta 7. Por ejemplo, Dove es un
+paquete **3 × 90 g = 270 g**, aunque un campo diga solo 90 g. En Cafam, Yodora
+Clásico se identifica como tubo de 25 g por el EAN y la referencia de imagen,
+contrastados con las otras tiendas. Las descripciones pueden contener errores
+comerciales; no se usan para ofrecer información médica.
+
+# Base SQLite y validaciones
+
+La base conserva cinco tablas: `comercios`, `productos`, `ejecuciones`,
+`cobertura` y `observaciones`. La tabla `productos` identifica las ocho
+presentaciones comunes; todos los anuncios recolectados permanecen en
+`observaciones`, incluidos los descartados con su motivo.
+
+La clave compuesta de `ejecuciones` es `(id, comercio)`, por lo que el mismo
+identificador global tiene tres filas de auditoría. `cobertura` registra cada
+sección. Se definen claves foráneas y restricciones de unicidad para
+`(comercio, sku, fecha_hora)` y `(ejecucion, comercio, sku)`.
+La vista `categoria` selecciona los anuncios incluidos y la vista `comparables`
+exige además correspondencia, disponibilidad y precio válido.
+
+```{python}
+estados = pd.read_sql_query("SELECT * FROM ejecuciones ORDER BY id,comercio", con)
+display(estados)
+text(f"Integridad SQLite: **{check['integridad']}**. "
+     f"Cobertura completa de las secciones en la corrida analizada: **{check['cobertura_completa']}**.")
+```
+
+Las dos capturas incluidas son del mismo día: sirven para documentar la corrección
+de paginación y conservar historial. No constituyen una serie temporal diaria.
+
+# Consultas SQL, resultados e interpretación
+
+Las consultas se guardan también en `consultas.sql`. El parámetro `:run` limita
+las comparaciones a una sola ejecución. Los conteos históricos se identifican
+explícitamente; no se mezclan precios de capturas diferentes.
+
+## Pregunta 1. Tamaño de la base y aporte por comercio
+
+```{python}
+resumen = query("resumen")
+aporte = query("por_comercio")
+r = resumen.iloc[0]
+text(f"La categoría reúne **{int(r.observaciones)} observaciones históricas** de "
+     f"**{int(r.anuncios_distintos)} anuncios distintos** en {int(r.comercios)} comercios. "
+     f"Se identificaron {int(r.presentaciones_comparables)} presentaciones comunes. "
+     "Un anuncio se cuenta por comercio y SKU; no equivale a un producto único entre tiendas.")
+```
+
+## Pregunta 2. Ocho presentaciones por tres comercios y duplicados
+
+```{python}
+cobertura = query("cobertura_comparables")
+duplicados = query("duplicados")
+text(f"Se obtuvieron **{int(cobertura.observaciones.sum())} observaciones comparables**. "
+     f"Las {sum(cobertura.cobertura == 'Completa')} presentaciones tienen exactamente tres "
+     "comercios. La consulta de duplicados no devuelve filas. Esta comprobación "
+     "verifica la cobertura producto por producto, además del total de 24.")
+```
+
+## Pregunta 3. Precio mínimo, máximo, promedio y tiendas con el mínimo
+
+```{python}
+precios = query("precios")
+text("El promedio se calcula para una misma presentación en tres comercios. "
+     "La unión con el precio mínimo conserva todos los comercios empatados. "
+     "Estos resultados no permiten comparar el precio promedio de surtidos diferentes.")
+```
+
+## Pregunta 4. Ahorro potencial en COP y porcentaje
+
+Para cada presentación: $Ahorro = P_{max}-P_{min}$ y
+$Ahorro\ (\%) = 100(P_{max}-P_{min})/P_{max}$.
+
+```{python}
+ahorros = query("ahorro")
+mejor = ahorros.loc[ahorros.ahorro_porcentaje.idxmax()]
+text(f"La mayor diferencia porcentual corresponde a **{mejor.producto} "
+     f"({mejor.presentacion})**: {mejor.ahorro_cop:,.0f} COP, equivalentes a "
+     f"{mejor.ahorro_porcentaje:.2f}% del precio más alto observado. "
+     "Se trata de un ahorro potencial antes de transporte y otras condiciones de compra.")
+```
+
+## Pregunta 5. Precio por unidad y tamaños equivalentes
+
+```{python}
+tamanos = query("tamanos_equivalentes")
+text("La selección no contiene dos tamaños verificados de una misma formulación. "
+     "Por tanto, no se concluye que un tamaño mayor sea más conveniente. "
+     "Los 48 g de distintas variantes de Rexona y los 330 g de distintas variantes "
+     "de Protex no autorizan a tratarlas como un único producto. Si se incorporan "
+     "tamaños equivalentes, la consulta los agrupa por formulación y unidad, "
+     "divide precio entre contenido total y conserva los empates mediante DENSE_RANK.")
+```
+
+## Pregunta 6. Mayores diferencias entre comercios
+
+```{python}
+ranking = query("ranking_ahorro")
+text("El orden usa el ahorro porcentual respecto al precio máximo de cada "
+     "presentación. Esto identifica diferencias relativas de precio; no mide "
+     "calidad, preferencia del consumidor ni equivalencia entre variantes.")
+```
+
+## Pregunta 7. Faltantes e inconsistencias
+
+```{python}
+calidad = query("calidad")
+incidencias = query("incidencias")
+text(f"Se documentaron **{int(calidad.incidencias_documentadas.sum())} incidencias** "
+     "en campos de las presentaciones comparables. El contenido desconocido del "
+     "resto de la categoría se mantiene ausente; no se usa cero como reemplazo. "
+     "La presencia de descripción no garantiza su calidad: algunas repiten el "
+     "nombre y otras contienen texto ajeno al producto. Las ofertas no disponibles "
+     "se conservan para describir el catálogo, pero quedan fuera de la recomendación.")
+```
+
+## Pregunta 8. Oferta, cobertura y calidad de información
+
+```{python}
+oferta = query("oferta")
+verificacion = query("cobertura_categoria")
+exclusiones = query("exclusiones")
+actual = oferta[oferta.ejecucion == RUN]
+mayor = actual.loc[actual.presentaciones_sku.idxmax()]
+text(f"En esta captura, **{LABELS[mayor.comercio]}** aporta el mayor número de "
+     f"presentaciones incluidas: **{int(mayor.presentaciones_sku)}**. "
+     "Una oferta más amplia no implica precios menores. Los totales del endpoint "
+     "se comparan antes de las exclusiones; los conteos de la categoría se "
+     "calculan después. Los porcentajes de descripción, marca y contenido usan "
+     "como denominador las observaciones incluidas de cada comercio y ejecución.")
+```
+
+# Visualizaciones
+
+## Precio de la misma presentación
+
+```{python}
+#| label: fig-precios
+#| fig-cap: "Precio por empaque de ocho presentaciones idénticas entre comercios. Una sola ejecución; COP, sin envío."
+#| fig-width: 10
+#| fig-height: 6
+obs = pd.read_sql_query("SELECT * FROM comparables WHERE ejecucion=?", con, params=(RUN,))
+obs["etiqueta"] = obs.producto + " · " + obs.presentacion
+orden = sorted(obs.etiqueta.unique())
+fig, ax = plt.subplots(figsize=(10,6))
+for offset, (store, color) in zip([-.16, 0, .16], COLORS.items()):
+    series = obs[obs.comercio == store].set_index("etiqueta").reindex(orden)
+    ax.scatter(series.precio, [i + offset for i in range(len(orden))], color=color, s=65, label=LABELS[store], zorder=3)
+ax.set_yticks(range(len(orden)), orden)
+ax.set_xlabel("Precio del empaque (COP)")
+ax.grid(axis="x", alpha=.2)
+ax.legend(loc="upper center", bbox_to_anchor=(.5,1.12), ncol=3, frameon=False)
+ax.invert_yaxis()
+fig.tight_layout()
+plt.show()
+```
+
+Cada fila compara exactamente la misma presentación. La separación horizontal
+muestra la diferencia de precio entre tiendas; no se interpreta como una
+comparación de calidad entre productos de filas distintas.
+
+## Oportunidades de ahorro
+
+```{python}
+#| label: fig-ahorro
+#| fig-cap: "Ahorro porcentual al elegir el mínimo frente al máximo de cada presentación."
+#| fig-width: 10
+#| fig-height: 5.5
+fig, ax = plt.subplots(figsize=(10,5.5))
+labels = ranking.producto + " · " + ranking.presentacion
+bars = ax.barh(labels, ranking.ahorro_porcentaje, color="#34566e")
+ax.bar_label(bars, labels=[f"{v:.1f}%" for v in ranking.ahorro_porcentaje], padding=5)
+ax.set_xlabel("Ahorro frente al precio máximo (%)")
+ax.set_xlim(0, max(ranking.ahorro_porcentaje)*1.2)
+ax.invert_yaxis()
+ax.grid(axis="x", alpha=.15)
+fig.tight_layout()
+plt.show()
+```
+
+La mayor barra señala dónde comparar tiendas puede producir un ahorro relativo
+más alto. Para decidir una compra también importa el ahorro en COP: un porcentaje
+grande en un producto económico puede representar menos dinero que otro menor
+en un producto costoso.
+
+## Tamaño de la oferta recolectada
+
+```{python}
+#| label: fig-oferta
+#| fig-cap: "Presentaciones incluidas por comercio después de depuración de la categoría."
+#| fig-width: 8
+#| fig-height: 4
+fig, ax = plt.subplots(figsize=(8,4))
+x = actual.set_index("comercio").reindex(COLORS)
+bars = ax.bar([LABELS[s] for s in COLORS], x.presentaciones_sku, color=list(COLORS.values()))
+ax.bar_label(bars, padding=4)
+ax.set_ylabel("Presentaciones (SKU distintos)")
+ax.set_ylim(0,x.presentaciones_sku.max()*1.18)
+fig.tight_layout()
+plt.show()
+```
+
+El gráfico describe amplitud de catálogo dentro de las secciones declaradas.
+Incluye anuncios con y sin disponibilidad. Las diferencias de surtido y de
+clasificación de cada tienda impiden usar este conteo como medida de calidad.
+
+# Conclusiones para el consumidor
+
+```{python}
+recomendacion = precios[["producto","presentacion","comercios_mas_economicos","minimo"]].copy()
+recomendacion.columns = ["Producto","Presentación","Dónde comprar al mínimo","Precio COP"]
+display(recomendacion)
+canasta = query("canasta")
+if len(canasta) == 3:
+    b = canasta.iloc[0]
+    text(f"Para una canasta de **un empaque de cada una de las ocho presentaciones**, "
+         f"el menor desembolso en una sola tienda es **{LABELS[b.comercio]}**, "
+         f"con **{b.total_cop:,.0f} COP**. Esta afirmación se limita a la canasta "
+         "con cobertura completa en esta ejecución; no significa que esa tienda "
+         "sea más económica para toda la categoría.")
+text(f"Comprar cada presentación donde alcanza su mínimo suma "
+     f"**{precios.minimo.sum():,.0f} COP**, antes de costos adicionales. "
+     "Dividir la compra entre tiendas solo conviene si los gastos y las condiciones "
+     "no superan la diferencia obtenida.")
+```
+
+El informe distingue precio del empaque de precio por contenido: no se demostró
+una ventaja de tamaños mayores porque no se incluyeron tamaños equivalentes
+verificados. Tampoco se recomienda sustituir una variante por otra solamente
+por precio.
+
+# Limitaciones y reproducibilidad
+
+- Se consulta el canal público sin fijar dirección de entrega ni iniciar sesión.
+  Precios, inventario, cobertura y ofertas de afiliación pueden variar por ubicación.
+- Se usa el precio publicado del vendedor principal y se detecta descuento si
+  `Price < ListPrice`. No se incluyen descuentos condicionados a tarjetas, cantidades,
+  cupones o afiliación, ni se simula un pago.
+- La igualdad de códigos y fichas permite la correspondencia comercial, pero no
+  verifica físicamente el empaque ni sus ingredientes. Se documentan discrepancias.
+- Las restricciones de `robots.txt` descritas arriba limitan la valoración de las
+  prácticas de recolección; no se presenta la captura como una autorización de uso.
+- Se probó el código en Windows y en un entorno virtual Python aislado del mismo
+  computador. **No se ha probado en Colab ni en otro computador.**
+- La primera corrida fue parcial en desodorantes de La Rebaja; la segunda añadió
+  la pasada inversa y verificó el total. Se conservan ambas sin mezclar sus precios.
+
+Los 17 bloques Python se ejecutaron con Jupyter sin errores. El renderizador
+Quarto no pudo completar su arranque por permisos del entorno; la vista HTML
+incluida se exportó con `exportar_html.py` (Jupyter y nbconvert), a partir del
+mismo `.qmd`. No se afirma haber completado `quarto render` en este entorno.
+
+Para reproducir: instalar `requirements.txt` y ejecutar
+`python scraper.py --offline`, seguido de `quarto render taller_1.qmd`.
+El documento vuelve a invocar el procesamiento sin conexión. Una nueva captura
+se ejecuta con `python scraper.py`, después de revisar las condiciones de las
+fuentes. `README.md` explica instalación, modo en línea, modo sin conexión y entrega.
+
+```{python}
+con.close()
+```

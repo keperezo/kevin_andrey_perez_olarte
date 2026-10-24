@@ -1,0 +1,2 @@
+ejecucion_id,comercio,fecha_hora_inicio,fecha_hora_fin,modo,productos_reportados_sitio,urls_productos_detectadas,registros_obtenidos,registros_ok,registros_error,registros_incompletos,precios_encontrados,precios_faltantes,paginas_categoria_leidas,estado
+cafam_20261010_092736,Droguerías Cafam,2026-10-10T23:04:01-05:00,2026-10-10T23:04:16-05:00,offline,42,42,42,42,0,0,42,0,4,completa

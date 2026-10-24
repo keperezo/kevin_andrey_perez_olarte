@@ -1,0 +1,121 @@
+# instalar los paquetes
+paquetes <- c("DBI", "RSQLite", "dplyr", "knitr")
+instalados <- rownames(installed.packages())
+pendientes <- setdiff(paquetes, instalados)
+if (length(pendientes) > 0) install.packages(pendientes)
+
+library(DBI)
+library(RSQLite)
+library(dplyr)
+
+# forzamos descargar la base para q no de el error de las tablas vacias otra vez
+download.file("https://raw.githubusercontent.com/lerocha/chinook-database/master/ChinookDatabase/DataSources/Chinook_Sqlite.sqlite", destfile = "chinook.db", mode = "wb")
+
+# abrimos conexion
+con <- dbConnect(RSQLite::SQLite(), "chinook.db")
+print("conexion ok")
+
+
+# ej 1: coleccion musical
+
+# 1 total pistas
+q1 <- dbGetQuery(con, "select count(*) as total_pistas from Track")
+print(q1)
+
+# 2 generos distintos
+q2 <- dbGetQuery(con, "select count(*) as total_generos from Genre")
+print(q2)
+
+# 3 genero y prom
+q3 <- dbGetQuery(con, "
+  select g.Name as genero,
+   count(t.TrackId) as num_pistas,
+    round(avg(t.Milliseconds)/60000.0, 2) as duracion_promedio_min
+  from Genre g
+  left join Track t on g.GenreId = t.GenreId
+   group by g.GenreId
+  order by num_pistas desc
+")
+print(q3)
+
+# 4 top 5 largas
+q4 <- dbGetQuery(con, "
+ select t.Name as pista, a.Title as album, round(t.Milliseconds/60000.0, 2) as duracion_min
+  from Track t
+ left join Album a on t.AlbumId = a.AlbumId
+ order by t.Milliseconds desc
+  limit 5
+")
+print(q4)
+
+# 5 pistas caras
+q5 <- dbGetQuery(con, "
+select count(*) as pistas_caras,
+  round(100.0 * count(*) / (select count(*) from Track), 2) as porcentaje
+ from Track
+where UnitPrice > 0.99
+")
+print(q5)
+
+# 6 estadisticas
+q6 <- dbGetQuery(con, "
+ select round(avg(Milliseconds), 2) as media_ms,
+   min(Milliseconds) as minimo_ms,
+ max(Milliseconds) as maximo_ms,
+  round(avg(Milliseconds * Milliseconds) - avg(Milliseconds) * avg(Milliseconds), 2) as varianza
+ from Track
+")
+print(q6)
+
+
+# ej 2: ventas
+
+# 1 total e ingresos
+q7 <- dbGetQuery(con, "select round(sum(Total), 2) as ingreso_total, round(avg(Total), 2) as promedio_por_factura from Invoice")
+print(q7)
+
+# 2 facturas x año
+q8 <- dbGetQuery(con, "
+ select strftime('%Y', InvoiceDate) as año, count(*) as num_facturas
+from Invoice
+ group by strftime('%Y', InvoiceDate)
+order by año
+")
+print(q8)
+
+# 3 top 5 paises
+q9 <- dbGetQuery(con, "
+  select BillingCountry as pais, count(InvoiceId) as num_facturas,
+   round(sum(Total), 2) as ingreso_total, round(avg(Total), 2) as promedio_factura
+  from Invoice
+  group by BillingCountry
+ order by ingreso_total desc
+limit 5
+")
+print(q9)
+
+# 4 varianza
+q10 <- dbGetQuery(con, "
+select round(avg(Total * Total) - avg(Total) * avg(Total), 4) as varianza from Invoice
+")
+varianza <- q10$varianza[1]
+desv_est <- sqrt(varianza)
+cat("var:", varianza, "\n")
+cat("desv est:", round(desv_est, 4), "\n")
+
+# 5 meses mayor y menor ingreso
+q11 <- dbGetQuery(con, "
+select strftime('%Y-%m', InvoiceDate) as mes, round(avg(Total), 2) as promedio_ingreso
+ from Invoice
+group by strftime('%Y-%m', InvoiceDate)
+ order by promedio_ingreso desc
+")
+
+print("mes con mayor ingreso:")
+print(head(q11, 1))
+
+print("mes con menor ingreso:")
+print(tail(q11, 1))
+
+# cerrar
+dbDisconnect(con)

@@ -1,0 +1,1493 @@
+---
+title: "Comparador de precios de perfumes en tres comercios en línea de Colombia"
+subtitle: "Taller 1 · Minería de Datos (2016325) · Universidad Nacional de Colombia"
+author: "Steven David Alfonso Galindo"
+date: today
+date-format: "DD/MM/YYYY"
+lang: es
+crossref:
+  sec-prefix: sección
+  fig-prefix: figura
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-title: "Contenido"
+    number-sections: true
+    embed-resources: true
+    code-fold: true
+    code-summary: "Ver código"
+    code-tools: true
+    theme: cosmo
+    fig-width: 9
+    fig-height: 6
+    fig-dpi: 150
+execute:
+  echo: true
+  warning: false
+  message: false
+params:
+  recolectar: false          # TRUE: recolecta antes de analizar
+  modo: "en_linea"           # con recolectar = TRUE: "en_linea" o "sin_conexion" (reprocesa raw/)
+  ruta_bd: "comparador_precios.sqlite"
+---
+
+```{r}
+#| label: configuracion
+#| code-summary: "Paquetes, módulos y estilo de los gráficos"
+
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+  library(purrr)
+  library(stringr)
+  library(ggplot2)
+  library(plotly)
+  library(patchwork)
+  library(gt)
+  library(knitr)
+  library(scales)
+  library(DBI)
+  library(RSQLite)
+})
+
+# Los dos módulos solo definen funciones: cargarlos no consulta ningún sitio.
+source("scraper.R", encoding = "UTF-8")        # extracción, copias crudas, ejecuciones y carga en SQLite
+source("procesamiento.R", encoding = "UTF-8")  # estandarización, exclusiones y correspondencia
+
+set.seed(2016325)   # la tabla de ejemplos usa una muestra aleatoria reproducible
+
+# Un color fijo por comercio en todos los gráficos (paleta validada para
+# daltonismo; no se usa la pareja rojo/verde).
+COLORES <- c("La Riviera" = "#2a78d6", "Falabella" = "#eb6834", "Farmatodo" = "#1baf7a")
+
+pesos <- label_number(big.mark = ".", decimal.mark = ",", prefix = "$ ", accuracy = 1)  # espacio que no se parte
+miles <- function(x) paste0("$ ", format(round(x / 1000), big.mark = ".", decimal.mark = ",", trim = TRUE), " mil")
+num   <- label_number(big.mark = ".", decimal.mark = ",", accuracy = 1)
+pct   <- function(x, d = 1) paste0(format(round(x, d), decimal.mark = ",", nsmall = d), " %")
+
+# Ayudas para redactar con los datos.
+# enumerar(c("A", "B", "C")) -> "A, B y C" (sin repetidos).
+enumerar <- function(x) {
+  x <- unique(x[!is.na(x) & x != ""])
+  if (length(x) <= 1) return(paste(x, collapse = ""))
+  paste(paste(x[-length(x)], collapse = ", "), "y", x[length(x)])
+}
+# cuantos(1, "ejecución", "ejecuciones") -> "1 ejecución"; con 2 -> "2 ejecuciones".
+cuantos <- function(n, singular, plural) paste(num(n), if (n == 1) singular else plural)
+
+theme_set(
+  theme_minimal(base_size = 12) +
+    theme(
+      panel.grid.minor = element_blank(),
+      panel.grid.major = element_line(linewidth = 0.3, colour = "#e6e5e1"),
+      plot.title = element_text(face = "bold"),
+      plot.title.position = "plot",
+      plot.caption = element_text(colour = "#6b6a66", hjust = 0, size = 9),
+      plot.caption.position = "plot",
+      legend.position = "top",
+      legend.justification = "left"
+    )
+)
+
+fmt_pesos <- function(g, columnas) fmt(g, columns = {{ columnas }}, fns = pesos)
+
+tabla <- function(df, ...) {
+  df |>
+    gt(...) |>
+    tab_options(table.font.size = px(13), column_labels.font.weight = "bold") |>
+    sub_missing(missing_text = "—")
+}
+```
+
+```{r}
+#| label: recoleccion
+#| code-summary: "Recolección (opcional), base de datos y procesamiento"
+#| output: false
+
+# Por defecto el documento usa la base ya construida. Para recolectar antes de
+# analizar:
+#   quarto render taller_1.qmd -P recolectar:true                       # en línea
+#   quarto render taller_1.qmd -P recolectar:true -P modo:sin_conexion  # desde raw/
+if (isTRUE(params$recolectar)) {
+  resumen_corrida <- ejecutar_recoleccion(modo = params$modo, ruta_bd = params$ruta_bd)
+}
+
+con <- conectar_bd(params$ruta_bd)
+anuncios_std <- procesar_base(con)          # limpieza y correspondencia (idempotente)
+ej <- ejecucion_analisis(con)              # ejecución que se analiza
+if (is.na(ej)) {
+  stop("La base no tiene ninguna ejecución con al menos 8 presentaciones comparables ",
+       "en los tres comercios. Ejecute ejecutar_recoleccion() y vuelva a renderizar.")
+}
+
+ejecuciones <- dbGetQuery(con, "
+  SELECT e.id_ejecucion, c.nombre AS comercio, e.fecha_hora_inicio, e.fecha_hora_fin,
+         e.modo, e.n_registros, e.n_total_sitio, e.estado, e.detalle
+    FROM ejecuciones e JOIN comercios c ON c.comercio_id = e.comercio_id
+   ORDER BY e.id_ejecucion, c.comercio_id")
+corrida <- ejecuciones |> filter(id_ejecucion == ej)
+corrida_completa <- nrow(corrida) == nrow(COMERCIOS) && all(corrida$estado == "completa")
+fecha_corrida <- min(corrida$fecha_hora_inicio)
+dia_corrida <- format(as.Date(substr(fecha_corrida, 1, 10)), "%d/%m/%Y")
+n_ejecuciones <- n_distinct(ejecuciones$id_ejecucion)
+
+# Nombre legible de cada familia de tamaños (mismo perfume y concentración).
+nombres_familia <- dbGetQuery(con, "SELECT DISTINCT familia, marca, linea, concentracion FROM productos") |>
+  mutate(nombre_familia = paste(str_to_title(marca), linea, concentracion))
+
+# Indicador de promoción de cada precio emparejado (para las interpretaciones).
+promo_precio <- dbGetQuery(con, "
+  SELECT a.producto_id, c.nombre AS comercio, o.precio, MAX(o.promocion) AS promocion
+    FROM observaciones o
+    JOIN anuncios a  ON a.anuncio_id = o.anuncio_id
+    JOIN comercios c ON c.comercio_id = o.comercio_id
+   WHERE o.id_ejecucion = ? AND a.producto_id IS NOT NULL AND o.precio IS NOT NULL
+   GROUP BY a.producto_id, c.nombre, o.precio", params = list(ej))
+```
+
+# Introducción {#sec-introduccion}
+
+Este trabajo compara los precios de perfumes en tres comercios colombianos con venta
+en línea: La Riviera, Falabella y Farmatodo. Los datos se recolectaron con *web
+scraping* y se guardaron en una base SQLite, a partir de la cual se responden dos
+preguntas:
+
+1. Para un mismo perfume en la misma presentación, ¿en qué comercio es más barato y
+   cuánto se ahorra frente al más caro?
+2. Cuando un perfume se vende en varios tamaños, ¿cuál tiene el menor precio por
+   mililitro y cuánto cuesta en total?
+
+La categoría registrada en la planilla «Categorías de Productos - Estudiantes» es
+perfumería, delimitada a perfumes de hombre, mujer y unisex en las concentraciones
+Parfum o Extrait, Eau de Parfum (EDP), Eau de Toilette (EDT) y Eau de Cologne (EDC).
+Según esa delimitación quedan por fuera los estuches, sets y kits, los body mist,
+splash y brumas, los desodorantes y las fragancias infantiles. En cada comercio se
+descargó la sección de perfumes completa y luego se aplicaron estas exclusiones
+(@sec-exclusiones).
+
+```{r}
+#| label: cifras-introduccion
+comparables <- dbGetQuery(con, "
+  SELECT COUNT(DISTINCT a.producto_id) AS presentaciones, COUNT(*) AS observaciones
+    FROM observaciones o JOIN anuncios a ON a.anuncio_id = o.anuncio_id
+   WHERE o.comparable = 1 AND o.id_ejecucion = ?", params = list(ej))
+seleccion <- dbGetQuery(con, "
+  SELECT p.marca, p.linea, p.concentracion, p.contenido
+    FROM productos p
+   WHERE p.producto_id IN (SELECT a.producto_id
+                             FROM observaciones o JOIN anuncios a ON a.anuncio_id = o.anuncio_id
+                            WHERE o.comparable = 1 AND o.id_ejecucion = ?)
+   ORDER BY p.marca, p.linea, p.contenido", params = list(ej)) |>
+  mutate(marca = str_to_title(marca),
+         presentacion = paste0(linea, " ", concentracion, " ", contenido, " mL")) |>
+  group_by(marca) |>
+  summarise(texto = paste0(first(marca), " (", enumerar(presentacion), ")"), .groups = "drop")
+```
+
+La base tiene `r cuantos(n_ejecuciones, "ejecución", "ejecuciones")` de recolección.
+El análisis se hace sobre la del `r dia_corrida` (identificador `r ej`), en la que
+`r comparables$presentaciones` presentaciones tienen precio en los tres comercios,
+para un total de `r comparables$observaciones` observaciones comparables; el
+enunciado pide como mínimo 8 presentaciones y 24 observaciones. Estas presentaciones
+se escogieron entre los perfumes que aparecen en los tres sitios con la marca, la
+línea, la concentración y el tamaño escritos en el nombre (@sec-correspondencia).
+Agrupadas por marca, son las siguientes: `r paste(seleccion$texto, collapse = "; ")`.
+
+# Fuentes y scraping {#sec-fuentes}
+
+## Comercios y páginas consultadas {#sec-comercios}
+
+```{r}
+#| label: tabla-comercios
+dbGetQuery(con, "SELECT nombre AS Comercio, url_categoria AS `Página de la categoría`,
+                        metodo_extraccion AS `Método de extracción` FROM comercios ORDER BY comercio_id") |>
+  tabla() |>
+  tab_header(title = "Comercios, páginas consultadas y método")
+```
+
+Los tres sitios se consultaron con peticiones HTTP directas usando `httr2`, sin
+automatizar un navegador. Para entender cómo carga cada uno sus productos se
+revisaron el HTML y la pestaña *Network* de las herramientas de desarrollador el 9 y
+el 10 de octubre de 2026. En cada sitio se recorre la sección completa de perfumes:
+*Fragancias* en La Riviera, *Perfumes* (cat1461053) en Falabella y *Perfumes*
+(clasificación 211) en Farmatodo.
+
+### La Riviera
+
+El sitio entrega los productos en el HTML que genera el
+servidor. La categoría se pagina con `?page=N`, con 30 productos por página; durante
+el reconocimiento había 26 páginas con productos y la 27 salía vacía. Para leer cada
+tarjeta se usaron los atributos `data-hook`, que cambian menos que las clases CSS:
+
+| Campo | Selector |
+|---|---|
+| Tarjeta | `[data-hook="product-item-root"]` (atributo `data-slug` = id) |
+| Nombre | `[data-hook="product-item-name"]` |
+| Precio a pagar | `[data-hook="product-item-price-to-pay"]` |
+| Precio antes del descuento | `[data-hook="product-item-price-before-discount"]` |
+| Etiqueta ("65% OFF", "Producto 2X1") | `[data-hook="RibbonDataHook.RibbonOnImage"]` |
+| Enlace a la ficha | `[data-hook="product-item-product-details-link"]` |
+
+Como el sitio no muestra cuántos productos hay en total, el recorrido sigue hasta
+encontrar una página vacía. Si esa página vacía aparece justo después de una página
+llena, se vuelve a pedir antes de darla por última, para no confundir una falla
+momentánea con el final del catálogo.
+
+### Falabella
+
+Cada página de la categoría incluye un bloque
+`<script id="__NEXT_DATA__">` con un JSON. Ese JSON trae los productos
+(`props.pageProps.results`) y el total que informa el sitio
+(`props.pageProps.pagination.count`). Son los mismos datos que usa la página para
+mostrarse, algo que la sección 3.1 del enunciado acepta como *scraping*.
+
+Al recorrer las 63 páginas con el orden por defecto se obtuvieron 3.003 posiciones,
+pero solo 2.259 productos distintos. El listado cambia de orden entre páginas, de
+modo que algunos productos se repiten y otros no aparecen. Con el orden por precio,
+en 21 páginas hubo apenas 14 repetidos y aparecieron 258 productos nuevos. Por eso el
+scraper recorre la categoría dos veces, de menor a mayor precio y al revés, y une los
+resultados por `skuId`.
+
+### Farmatodo
+
+En el HTML del sitio solo vienen los primeros productos.
+El resto lo trae el botón "Cargar más" con una petición `POST` a
+`https://api-search.farmatodo.com/1/indexes/*/queries`, que se identificó en la
+pestaña *Network*. Ese servicio no pide clave. El scraper le envía el mismo cuerpo y
+las mismas cabeceras que la página, entre ellas `x-custom-city: BOG`, porque los
+precios cambian según la ciudad.
+
+El servicio devuelve como máximo 80 productos por consulta. Para obtener la categoría
+completa se divide por subcategoría (Hombre, Mujer, Fragancias y las demás) y, dentro
+de cada una, se parte el rango de precios a la mitad hasta que ningún tramo llegue a
+80 resultados. El filtro es el mismo de la página: solo productos visibles
+(`outofstore:false`), sin fórmula médica y sin muestras.
+
+En los tres comercios, si una respuesta llega con un formato inesperado (una página
+de bloqueo, un JSON incompleto o un cuerpo vacío), la recolección no se detiene: esa
+página se marca como fallida y la ejecución queda como *parcial*.
+
+## Revisión de las condiciones de uso {#sec-condiciones}
+
+| Comercio | robots.txt | Términos y condiciones | Otros documentos |
+|---|---|---|---|
+| La Riviera | `Allow: /`; solo bloquea `?lightbox=` | Los contenidos son de La Riviera y se prohíbe su reproducción o almacenamiento; no menciona robots ni extracción automática | — |
+| Falabella | Admite a todos los robots; bloquea carrito, cuenta y checkout | Sección 23 (propiedad intelectual): los contenidos, incluidas las "compilaciones de datos", no pueden reproducirse sin autorización; no menciona robots | — |
+| Farmatodo | Permite las categorías; bloquea `/buscar*`, `/busqueda*` y los agentes Scrapy. El dominio del servicio de búsqueda no tiene reglas | No menciona robots ni *scraping*; prohíbe afectar el funcionamiento del sitio | `llms.txt`: permite el uso informativo con atribución, "El scraping intensivo no está autorizado" y pide respetar robots.txt |
+
+Ninguno de los tres sitios prohíbe de forma expresa la recolección automática, pero
+Farmatodo aclara que no autoriza el *scraping* intensivo. Por eso la recolección se
+mantuvo en un volumen bajo: en cada ejecución se piden unas 27 páginas a La Riviera,
+unas 126 a Falabella (por los dos recorridos) y unas 20 consultas a Farmatodo, con
+2 segundos de pausa entre peticiones. Además, el *User-Agent* identifica el proyecto,
+no se inicia sesión ni se usan claves, se respeta robots.txt y el modo sin conexión
+evita repetir consultas.
+
+## Ejecuciones de la recolección {#sec-ejecuciones}
+
+La función `ejecutar_recoleccion()` recorre los tres comercios. Guarda cada respuesta
+comprimida en `raw/<comercio>/<fecha>/` junto con un manifiesto, registra la corrida
+en la tabla `ejecuciones` e inserta los resultados en SQLite sin borrar lo que ya
+había. Si un comercio falla al extraer o al cargar, los demás siguen.
+
+```{r}
+#| label: tabla-ejecuciones
+ejecuciones |>
+  mutate(
+    cobertura = if_else(is.na(n_total_sitio), NA_character_,
+                        pct(100 * n_registros / n_total_sitio)),
+    across(c(n_registros, n_total_sitio), num)
+  ) |>
+  select(id_ejecucion, comercio, fecha_hora_inicio, modo, n_registros, n_total_sitio, cobertura, estado, detalle) |>
+  tabla(groupname_col = "id_ejecucion") |>
+  cols_label(comercio = "Comercio", fecha_hora_inicio = "Inicio", modo = "Modo",
+             n_registros = "Productos obtenidos", n_total_sitio = "Total que informa el sitio",
+             cobertura = "Cobertura", estado = "Estado", detalle = "Detalle") |>
+  tab_header(title = "Ejecuciones registradas")
+```
+
+## Verificación de la recolección completa {#sec-completitud}
+
+```{r}
+#| label: completitud
+# Conteos del reconocimiento previo (notas/fase1_seleccion_comercios.md), como
+# referencia externa a las corridas.
+referencia <- tibble(
+  comercio = c("La Riviera", "Falabella", "Farmatodo"),
+  referencia = c("774 productos al recorrer todas las páginas (9 de octubre)",
+                 "3.003 según el sitio (9 de octubre)",
+                 "485 productos visibles (10 de octubre)")
+)
+control <- c(
+  "La Riviera" = "Recorrido hasta la primera página vacía, con final verificado (última página incompleta o página vacía confirmada)",
+  "Falabella"  = "Todas las páginas de los dos recorridos y al menos 98 % del total que informa el sitio",
+  "Farmatodo"  = "Todas las consultas válidas y cada tramo final con menos de 80 resultados"
+)
+completitud <- corrida |>
+  transmute(comercio, n_registros, n_total_sitio,
+            cobertura = if_else(is.na(n_total_sitio), NA_character_, pct(100 * n_registros / n_total_sitio)),
+            control = unname(control[comercio]), estado) |>
+  left_join(referencia, by = "comercio") |>
+  relocate(referencia, .after = cobertura)
+completitud |>
+  mutate(across(c(n_registros, n_total_sitio), num)) |>
+  tabla() |>
+  cols_label(comercio = "Comercio", n_registros = "Productos obtenidos", n_total_sitio = "Total que informa el sitio",
+             cobertura = "Cobertura", referencia = "Referencia del reconocimiento",
+             control = "Control de completitud", estado = "Estado") |>
+  tab_header(title = "Productos obtenidos frente al total de cada sitio", subtitle = paste("Ejecución", ej))
+cifra <- function(nombre, col) corrida[[col]][corrida$comercio == nombre]
+fal_cob <- 100 * cifra("Falabella", "n_registros") / cifra("Falabella", "n_total_sitio")
+fal_dif <- cifra("Falabella", "n_total_sitio") - cifra("Falabella", "n_registros")
+parciales <- corrida |> filter(estado != "completa")
+```
+
+En la ejecución analizada se obtuvieron `r num(cifra("La Riviera", "n_registros"))`
+productos de La Riviera, `r num(cifra("Falabella", "n_registros"))` de Falabella y
+`r num(cifra("Farmatodo", "n_registros"))` de Farmatodo.
+
+Falabella es el único de los tres que informa un total:
+`r num(cifra("Falabella", "n_total_sitio"))` resultados. Los dos recorridos juntos
+dieron `r num(cifra("Falabella", "n_registros"))` productos distintos, es decir, el
+`r if (length(fal_cob) == 0 || is.na(fal_cob)) "(sin dato)" else pct(fal_cob)` de esa
+cifra`r if (length(fal_dif) == 1 && !is.na(fal_dif) && fal_dif > 0) paste0("; los otros ", num(fal_dif), " no aparecieron en ninguno de los dos recorridos") else if (length(fal_dif) == 1 && !is.na(fal_dif) && fal_dif < 0) paste0(". Se obtuvieron ", num(-fal_dif), " productos más de los que informa el sitio; la cifra del sitio es la de la primera página y el catálogo puede cambiar durante los minutos que toma recorrerlo dos veces, así que la diferencia no indica productos faltantes") else ""`.
+En el detalle de la tabla de ejecuciones están los productos distintos que dio cada
+recorrido.
+
+La Riviera y Farmatodo no muestran un total, así que el control es otro. En La
+Riviera se verifica que el recorrido termine en una página vacía de verdad, y en
+Farmatodo, que ningún tramo final llegue al tope de 80 resultados; si alguno llega, la
+ejecución queda como *parcial*. Como referencia, la tabla incluye los conteos que se
+hicieron durante el reconocimiento de los sitios.
+`r if (nrow(parciales) == 0) "En esta ejecución los tres comercios quedaron en estado completa." else paste0("En esta ejecución, ", enumerar(parciales$comercio), " quedó en estado ", enumerar(parciales$estado), "; en el detalle de la tabla de ejecuciones se explica qué faltó.")`
+
+## Copias crudas y modo sin conexión {#sec-raw}
+
+```{r}
+#| label: copias-crudas
+archivos_raw <- tibble(ruta = list.files(CONFIG$ruta_raw, recursive = TRUE, full.names = TRUE)) |>
+  mutate(comercio = str_split_i(ruta, "/", 2), fecha = str_split_i(ruta, "/", 3),
+         tipo = if_else(str_detect(ruta, "manifiesto"), "manifiesto", "respuesta"),
+         mb = file.size(ruta) / 1e6)
+archivos_raw |>
+  group_by(comercio, fecha) |>
+  summarise(respuestas = sum(tipo == "respuesta"), manifiestos = sum(tipo == "manifiesto"),
+            `MB comprimidos` = round(sum(mb), 1), .groups = "drop") |>
+  tabla() |>
+  tab_header(title = "Contenido de raw/")
+```
+
+Cada archivo `.gz` es la respuesta original, en HTML o JSON, sin ninguna
+modificación. El manifiesto `<id_ejecucion>_manifiesto.csv` registra la URL, los
+parámetros, el estado HTTP y la hora de cada consulta. Con
+`ejecutar_recoleccion(modo = "sin_conexion")` el mismo código de extracción lee estas
+copias en lugar de consultar los sitios, y la restricción de unicidad evita que una
+observación que ya estaba en la base se cargue otra vez. De esta forma la extracción
+se puede revisar aunque más adelante algún sitio cambie o bloquee el acceso.
+
+## Prueba desde otro entorno {#sec-otro-entorno}
+
+```{r}
+#| label: otro-entorno
+ruta_otro <- file.path("datos", "prueba_otro_entorno.csv")
+otro <- if (file.exists(ruta_otro)) utils::read.csv(ruta_otro, encoding = "UTF-8") else NULL
+if (!is.null(otro)) {
+  otro |>
+    select(entorno, inicio, comercio, estado, productos, total_sitio) |>
+    tabla() |>
+    cols_label(entorno = "Entorno", inicio = "Inicio", comercio = "Comercio", estado = "Estado",
+               productos = "Productos", total_sitio = "Total del sitio") |>
+    tab_header(title = "Recolección desde un entorno distinto al computador personal")
+  # ¿Los estados coinciden con los de la ejecución analizada?
+  otro_igual <- all(otro$estado == corrida$estado[match(otro$comercio, corrida$comercio)], na.rm = TRUE)
+  otro_distinto <- otro$comercio[otro$estado != corrida$estado[match(otro$comercio, corrida$comercio)]]
+}
+```
+
+El enunciado sugiere probar el código fuera del computador personal. El script
+`prueba_otro_entorno.R` repite la recolección con una
+base y una carpeta de copias aparte y guarda un resumen en
+`datos/prueba_otro_entorno.csv`; las instrucciones para Google Colab están en el
+README.
+`r if (is.null(otro)) "Por ahora la recolección del análisis se ha ejecutado desde un computador personal." else paste0("La prueba se hizo desde ", enumerar(otro$entorno), " el ", substr(otro$inicio[1], 1, 10), ". Por comercio, el resultado fue: ", paste0(otro$comercio, ", ", otro$estado, " con ", num(otro$productos), " productos", collapse = "; "), ". ", if (otro_igual) "Los estados coinciden con los de la ejecución hecha desde el computador personal." else paste0("En ", enumerar(otro_distinto), " el estado no coincide con el de la ejecución hecha desde el computador personal, lo que sugiere que ese sitio responde distinto a las conexiones desde servidores."))`
+
+# Preparación de los datos {#sec-preparacion}
+
+## Delimitación de la categoría y exclusiones {#sec-exclusiones}
+
+Para aplicar la delimitación, `procesamiento.R` revisa el nombre de cada producto ya
+normalizado (en mayúsculas, sin tildes ni signos) y le aplica las reglas de la tabla
+siguiente, en ese orden. El primer motivo que se cumple queda guardado en
+`anuncios.motivo_exclusion`.
+
+```{r}
+#| label: reglas-exclusion
+REGLAS_EXCLUSION |>
+  select(motivo, palabras) |>
+  tabla() |>
+  cols_label(motivo = "Motivo", palabras = "Qué lo activa (en el nombre normalizado)") |>
+  tab_header(title = "Reglas de exclusión")
+```
+
+Las palabras se buscan completas, de manera que "TEST" no excluye un *tester*, que sí
+es perfume, y "MIST" no afecta un nombre como *Mistral*. La palabra "loción" sola
+tampoco excluye un producto, porque en Colombia así se le dice también al perfume de
+hombre.
+
+```{r}
+#| label: exclusiones
+excl <- dbGetQuery(con, "
+  SELECT c.nombre AS comercio, COALESCE(a.motivo_exclusion, 'Incluido en la categoría') AS motivo,
+         COUNT(*) AS productos
+    FROM anuncios a
+    JOIN comercios c ON c.comercio_id = a.comercio_id
+    JOIN observaciones o ON o.anuncio_id = a.anuncio_id AND o.id_ejecucion = ?
+   GROUP BY c.nombre, motivo", params = list(ej))
+excl |>
+  mutate(comercio = factor(comercio, levels = names(COLORES))) |>
+  arrange(comercio) |>
+  pivot_wider(names_from = comercio, values_from = productos, values_fill = 0) |>
+  arrange(motivo == "Incluido en la categoría", motivo) |>
+  tabla() |>
+  cols_label(motivo = "Motivo") |>
+  tab_header(title = "Productos incluidos y excluidos por comercio", subtitle = paste("Ejecución", ej))
+```
+
+Los productos excluidos no se borran: quedan en la base con su motivo. Esta es la
+lista completa para la ejecución analizada:
+
+```{r}
+#| label: lista-excluidos
+dbGetQuery(con, "
+  SELECT a.motivo_exclusion AS motivo, c.nombre AS comercio, o.nombre_original AS nombre
+    FROM observaciones o
+    JOIN anuncios a  ON a.anuncio_id = o.anuncio_id
+    JOIN comercios c ON c.comercio_id = o.comercio_id
+   WHERE o.id_ejecucion = ? AND a.excluido = 1
+   ORDER BY a.motivo_exclusion, c.comercio_id, o.nombre_original", params = list(ej)) |>
+  tabla(groupname_col = "motivo") |>
+  cols_label(comercio = "Comercio", nombre = "Nombre tal como aparece") |>
+  tab_header(title = "Productos excluidos de la categoría", subtitle = paste("Ejecución", ej)) |>
+  tab_options(container.height = px(420), container.overflow.y = TRUE)
+```
+
+Los probadores, recargas y miniaturas no se excluyen de la categoría, pero tampoco se
+emparejan con la presentación normal del mismo perfume.
+
+## Estandarización {#sec-estandarizacion}
+
+Los textos originales no se modifican. En `observaciones.texto_original` se guarda el
+anuncio tal como apareció: en La Riviera es el texto completo de la tarjeta, y en
+Falabella y Farmatodo, que publican los productos en JSON, es el registro del
+producto tal como llegó, con nombre, marca, precios, vendedor, insignias y
+descripciones. Los valores estandarizados se guardan en columnas aparte de la tabla
+`anuncios`.
+
+En Falabella y Farmatodo la marca viene en un campo propio. En La Riviera hay que
+deducirla del nombre, que suele tener la forma `MARCA, LÍNEA, CÓDIGO, TAMAÑO`, aunque a
+veces la marca aparece en segundo lugar. Se elige entre las dos primeras partes del
+nombre la que coincide con una marca publicada por los otros dos comercios o, si
+ninguna coincide, la que más se repite en el catálogo de La Riviera. Después se
+unifican las variantes de un mismo nombre con una tabla de alias, por ejemplo
+*Gianni Versace* → *Versace* o *Ahmed* → *Ahmed Al Maghribi*.
+
+La concentración se lee del nombre buscando, en este orden, Extrait (incluido "Ext.
+Parfum"), EDP, EDT, EDC y Parfum. El orden importa porque "Eau de Parfum" contiene la
+palabra "Parfum". Cuando el nombre no dice la concentración, el campo queda vacío.
+
+El contenido se toma del tamaño que aparece en el nombre. Las onzas se pasan a
+mililitros (1 fl oz = 29,5735 mL) y se ajustan al tamaño comercial más cercano si la
+diferencia es menor al 2 %; así, 3,4 oz quedan en 100 mL. Las unidades solo se
+cuentan cuando el nombre las indica, como en "4 x 25 ml" o "Unidad x 2", y en esos
+casos se usa el contenido total.
+
+El género se deduce de palabras como Hombre, Men, Homme, Mujer, Women, Femme o Unisex
+y, si el nombre no trae ninguna, de la subcategoría del sitio. Con él se arma la
+subcategoría estandarizada (perfume de hombre, de mujer o unisex); si no hay forma de
+saber el género, la subcategoría queda vacía.
+
+Por último, el precio se convierte a número: se toma el primer valor del texto y se
+quitan los separadores de miles. Si un precio no aparece, queda como `NULL` y no como
+0. La tabla muestra algunos ejemplos.
+
+```{r}
+#| label: ejemplos-estandarizacion
+anuncios_std |>
+  filter(excluido == 0) |>
+  group_by(comercio) |>
+  slice_sample(n = 3) |>
+  ungroup() |>
+  select(comercio, nombre_original, marca_std, concentracion_std, contenido_ml, genero_std) |>
+  tabla() |>
+  cols_label(comercio = "Comercio", nombre_original = "Nombre original", marca_std = "Marca",
+             concentracion_std = "Concentración", contenido_ml = "mL", genero_std = "Género") |>
+  tab_header(title = "Ejemplos de estandarización", subtitle = "Tres productos al azar por comercio")
+```
+
+## Correspondencia de productos {#sec-correspondencia}
+
+Las presentaciones que se comparan están definidas en
+`datos/catalogo_comparables.csv`. Se escogieron entre las marcas que venden los tres
+comercios, y para cada una se escribió una regla de correspondencia. Un anuncio se
+asigna a una presentación solo si cumple todas estas condiciones:
+
+1. No está excluido y no es probador, recarga ni miniatura.
+2. Su marca estandarizada es la del catálogo.
+3. Su nombre contiene la línea y ninguna palabra de otra variante. Hay variantes
+   propias de cada línea (para *Versace Eros EDT* se descartan Flame, Energy, Najim y
+   Femme) y otras que se revisan en todas: Intense, Elixir, Absolu, Extreme, Privé,
+   "inspirado en" y réplica.
+4. La concentración que aparece en el nombre es la del catálogo. Si el nombre no la
+   dice, el anuncio no se empareja.
+5. El contenido en mL y el número de unidades coinciden con los del catálogo.
+6. El género del nombre no contradice el de la línea: un anuncio que dice "Mujer" no
+   se asigna a una línea de hombre. En las líneas unisex se acepta cualquier rótulo,
+   porque cada comercio las clasifica a su manera; *Odyssey Limoni*, por ejemplo,
+   aparece como unisex en Falabella y como de hombre en Farmatodo.
+
+El resultado se guarda en la base: `anuncios.producto_id` es el identificador común,
+`anuncios.regla_correspondencia` describe la regla aplicada y
+`observaciones.comparable` vale 1 cuando la presentación tiene precio en los tres
+comercios en esa misma ejecución.
+
+```{r}
+#| label: tabla-correspondencias
+corresp <- dbGetQuery(con, "
+  SELECT p.descripcion, c.nombre AS comercio, o.nombre_original, o.precio
+    FROM observaciones o
+    JOIN anuncios a  ON a.anuncio_id = o.anuncio_id
+    JOIN productos p ON p.producto_id = a.producto_id
+    JOIN comercios c ON c.comercio_id = o.comercio_id
+   WHERE o.comparable = 1 AND o.id_ejecucion = ?
+   ORDER BY p.marca, p.descripcion, c.comercio_id", params = list(ej))
+corresp |>
+  mutate(precio = pesos(precio)) |>
+  tabla(groupname_col = "descripcion") |>
+  cols_label(comercio = "Comercio", nombre_original = "Nombre tal como aparece", precio = "Precio") |>
+  tab_header(title = "Anuncios emparejados en cada comercio", subtitle = paste("Ejecución", ej)) |>
+  tab_options(container.height = px(520), container.overflow.y = TRUE)
+```
+
+En la siguiente tabla están los anuncios de la misma marca y línea que no se
+emparejaron, junto con la condición que no cumplieron. Sirve para revisar que no se
+dejaron por fuera presentaciones equivalentes y para ver qué casos no se pudieron
+comparar por falta de información.
+
+```{r}
+#| label: casos-dudosos
+dudosos <- diagnostico_correspondencias(con) |>
+  filter(motivo != "Coincide") |>
+  distinct(comercio, nombre_original, motivo, .keep_all = TRUE)
+dudosos |>
+  left_join(dbGetQuery(con, "SELECT producto_id, descripcion FROM productos"), by = "producto_id") |>
+  mutate(descripcion = str_remove(descripcion, " \\(familia de tamaños\\)")) |>
+  select(descripcion, comercio, nombre_original, motivo) |>
+  tabla(groupname_col = "descripcion") |>
+  cols_label(comercio = "Comercio", nombre_original = "Anuncio", motivo = "Por qué no se emparejó") |>
+  tab_header(title = "Anuncios parecidos que no se emparejaron") |>
+  tab_options(container.height = px(420), container.overflow.y = TRUE)
+```
+
+## Normalización de precios y promociones {#sec-precios}
+
+El precio que se compara es el que paga cualquier comprador en línea. En La Riviera
+es el precio de la tarjeta. En Falabella es el menor entre `eventPrice` e
+`internetPrice`, y el precio tachado (`crossed`) se toma como precio antes del
+descuento. En Farmatodo se usa `offerPrice` cuando es menor que el precio de lista de
+Bogotá (`fullPrice`), que en ese caso queda como precio antes del descuento; si no hay
+oferta, se usa el precio de lista. En Farmatodo siempre se usan los precios de Bogotá.
+
+El precio con tarjeta CMR de Falabella y el precio Prime de Farmatodo solo los
+obtienen algunos compradores, así que se guardan aparte, en `precio_condicionado`, y
+no entran en la comparación.
+
+Una observación se considera promocional si el precio tachado es mayor que el precio
+a pagar, si tiene una etiqueta de descuento o si Falabella muestra un precio de
+evento. La etiqueta "Producto 2X1" de La Riviera no cambia el precio de la tarjeta:
+se registra como promoción, pero el ahorro del 2x1 no se resta del precio unitario.
+Cuando el precio tachado es menor o igual al precio vigente, se deja tal como aparece
+y se cuenta como inconsistencia (@sec-q7).
+
+# Base de datos SQLite {#sec-base}
+
+## Estructura y relaciones
+
+```{r}
+#| label: esquema
+#| class-output: sql
+cat(readLines(CONFIG$ruta_esquema, encoding = "UTF-8"), sep = "\n")
+```
+
+Las tablas se relacionan así:
+
+- `comercios` 1—N `anuncios`.
+- `anuncios` 1—N `observaciones`, con un precio por cada consulta.
+- `ejecuciones` 1—N `observaciones`, mediante la llave compuesta (`id_ejecucion`,
+  `comercio_id`).
+- `productos` 1—N `anuncios`; `productos` guarda el identificador común de cada
+  presentación comparable.
+
+La restricción `UNIQUE (comercio_id, anuncio_id, fecha_hora_consulta)` impide guardar
+dos veces la misma observación. La carga usa `ON CONFLICT ... DO NOTHING` sobre esa
+restricción, de modo que solo se omiten los duplicados. Las filas que no cumplirían
+alguna otra regla de la base se descartan antes de cargar, y el motivo queda anotado
+en el detalle de la ejecución.
+
+## Carga y validaciones
+
+Después de cargar los datos se hicieron las siguientes comprobaciones sobre la base:
+
+```{r}
+#| label: validaciones
+n_tabla <- function(t) dbGetQuery(con, paste("SELECT COUNT(*) AS n FROM", t))$n
+validaciones <- tibble(
+  `Validación` = c(
+    "Filas en comercios / productos / anuncios / observaciones / ejecuciones",
+    "Violaciones de llaves foráneas (PRAGMA foreign_key_check)",
+    "Observaciones duplicadas (mismo anuncio y fecha-hora)",
+    "Fechas que no cumplen ISO 8601 con -05:00",
+    "Precios en cero o negativos",
+    "Observaciones sin texto original",
+    "Ejecuciones en estado completa / parcial / fallida",
+    "Ejecución analizada completa en los tres comercios"
+  ),
+  Resultado = c(
+    paste(map_int(c("comercios", "productos", "anuncios", "observaciones", "ejecuciones"), n_tabla), collapse = " / "),
+    nrow(dbGetQuery(con, "PRAGMA foreign_key_check")),
+    dbGetQuery(con, "SELECT COUNT(*) - COUNT(DISTINCT anuncio_id || '|' || fecha_hora_consulta) AS n FROM observaciones")$n,
+    dbGetQuery(con, "SELECT COUNT(*) AS n FROM observaciones WHERE fecha_hora_consulta NOT LIKE '____-__-__T__:__:__-05:00'")$n,
+    dbGetQuery(con, "SELECT COUNT(*) AS n FROM observaciones WHERE precio <= 0")$n,
+    dbGetQuery(con, "SELECT COUNT(*) AS n FROM observaciones WHERE texto_original IS NULL OR texto_original = ''")$n,
+    with(ejecuciones, paste(sum(estado == "completa"), sum(estado == "parcial"), sum(estado == "fallida"), sep = " / ")),
+    if (corrida_completa) "Sí" else "No"
+  )
+)
+tabla(validaciones) |> tab_header(title = "Validaciones de la base")
+```
+
+# Consultas SQL {#sec-consultas}
+
+Las consultas se ejecutan desde R sobre la conexión de `DBI`; en cada bloque SQL,
+`knitr` usa `dbGetQuery()`. Donde aparece `?ej` se reemplaza por el identificador de la
+ejecución analizada (`r ej`). Un comercio puede publicar la misma presentación más de
+una vez, por ejemplo vendida por Falabella y por un vendedor de su *marketplace*; en
+esos casos se toma el menor precio, que es el que pagaría el consumidor.
+
+## ¿Cuántos comercios, presentaciones y observaciones contiene la base? {#sec-q1}
+
+```{sql}
+--| connection: con
+--| code-fold: false
+--| output.var: q1_total
+SELECT (SELECT COUNT(*) FROM comercios)                         AS comercios,
+       (SELECT COUNT(*) FROM anuncios)                          AS productos_anunciados,
+       (SELECT COUNT(*) FROM anuncios WHERE excluido = 0)       AS productos_en_categoria,
+       (SELECT COUNT(DISTINCT a.producto_id)
+          FROM observaciones o JOIN anuncios a ON a.anuncio_id = o.anuncio_id
+         WHERE o.comparable = 1)                                AS presentaciones_comparables,
+       (SELECT COUNT(*) FROM observaciones)                     AS observaciones,
+       (SELECT COUNT(DISTINCT id_ejecucion) FROM ejecuciones)   AS ejecuciones;
+```
+
+```{sql}
+--| connection: con
+--| code-fold: false
+--| output.var: q1_comercio
+SELECT c.nombre                                                    AS comercio,
+       COUNT(DISTINCT a.anuncio_id)                                AS productos_anunciados,
+       COUNT(DISTINCT CASE WHEN a.excluido = 0 THEN a.anuncio_id END) AS productos_en_categoria,
+       COUNT(DISTINCT CASE WHEN o.comparable = 1 THEN a.producto_id END) AS presentaciones_comparables,
+       COUNT(o.observacion_id)                                     AS observaciones
+  FROM comercios c
+  LEFT JOIN anuncios a      ON a.comercio_id = c.comercio_id
+  LEFT JOIN observaciones o ON o.anuncio_id = a.anuncio_id
+ GROUP BY c.nombre
+ ORDER BY productos_en_categoria DESC;
+```
+
+```{r}
+#| label: q1-resultado
+tabla(q1_total) |>
+  tab_header(title = "Contenido de la base") |>
+  fmt_number(everything(), decimals = 0, sep_mark = ".") |>
+  cols_label(comercios = "Comercios", productos_anunciados = "Productos anunciados",
+             productos_en_categoria = "En la categoría", presentaciones_comparables = "Presentaciones comparables",
+             observaciones = "Observaciones", ejecuciones = "Ejecuciones")
+tabla(q1_comercio) |>
+  tab_header(title = "Aporte de cada comercio (todas las ejecuciones)") |>
+  fmt_number(-comercio, decimals = 0, sep_mark = ".") |>
+  cols_label(comercio = "Comercio", productos_anunciados = "Productos anunciados",
+             productos_en_categoria = "En la categoría", presentaciones_comparables = "Presentaciones comparables",
+             observaciones = "Observaciones")
+mayor <- q1_comercio[1, ]
+```
+
+La base tiene `r q1_total$comercios` comercios,
+`r num(q1_total$productos_anunciados)` productos anunciados y
+`r num(q1_total$observaciones)` observaciones de precio en
+`r cuantos(q1_total$ejecuciones, "ejecución", "ejecuciones")`. Después de aplicar las
+exclusiones quedan `r num(q1_total$productos_en_categoria)` productos dentro de la
+categoría. Sumando todas las ejecuciones, el comercio con más perfumes en la
+categoría es `r mayor$comercio`, con `r num(mayor$productos_en_categoria)`. Las
+`r q1_total$presentaciones_comparables` presentaciones comparables son pocas frente al
+tamaño de la categoría, porque solo se emparejaron las del catálogo y únicamente
+cuando el nombre tenía la información completa en los tres comercios. Como el resto
+de productos no se emparejó, este trabajo no estima cuántos perfumes venden los tres
+comercios a la vez.
+
+## ¿Se obtuvieron al menos 24 observaciones comparables en una misma ejecución? ¿Hay repetidos? {#sec-q2}
+
+```{sql}
+--| connection: con
+--| code-fold: false
+--| output.var: q2_cobertura
+SELECT o.id_ejecucion,
+       COUNT(*)                      AS observaciones_comparables,
+       COUNT(DISTINCT a.producto_id) AS presentaciones,
+       COUNT(DISTINCT o.comercio_id) AS comercios,
+       CASE WHEN COUNT(DISTINCT a.producto_id) >= 8 AND COUNT(*) >= 24
+            THEN 'Cumple' ELSE 'No cumple' END AS minimo_8_por_3
+  FROM observaciones o
+  JOIN anuncios a ON a.anuncio_id = o.anuncio_id
+ WHERE o.comparable = 1
+ GROUP BY o.id_ejecucion
+ ORDER BY o.id_ejecucion;
+```
+
+```{sql}
+--| connection: con
+--| code-fold: false
+--| output.var: q2_repetidos
+-- Misma presentación y comercio con más de un registro en la misma ejecución
+SELECT o.id_ejecucion, a.producto_id, c.nombre AS comercio, COUNT(*) AS registros,
+       GROUP_CONCAT(o.vendedor, ' / ') AS vendedores
+  FROM observaciones o
+  JOIN anuncios a  ON a.anuncio_id = o.anuncio_id
+  JOIN comercios c ON c.comercio_id = o.comercio_id
+ WHERE o.comparable = 1
+ GROUP BY o.id_ejecucion, a.producto_id, c.nombre
+HAVING COUNT(*) > 1;
+```
+
+```{sql}
+--| connection: con
+--| code-fold: false
+--| output.var: q2_duplicados
+-- Mismo anuncio registrado dos veces en una ejecución (debe ser 0)
+SELECT COUNT(*) AS observaciones,
+       COUNT(DISTINCT id_ejecucion || '|' || anuncio_id) AS anuncio_ejecucion_distintos,
+       COUNT(*) - COUNT(DISTINCT id_ejecucion || '|' || anuncio_id) AS repetidos
+  FROM observaciones;
+```
+
+```{r}
+#| label: q2-resultado
+tabla(q2_cobertura) |> tab_header(title = "Cobertura de las presentaciones comparables por ejecución")
+if (nrow(q2_repetidos) > 0) tabla(q2_repetidos) |> tab_header(title = "Presentaciones con más de un anuncio en un comercio")
+tabla(q2_duplicados) |> tab_header(title = "Duplicados del mismo anuncio")
+fila_ej <- q2_cobertura |> filter(id_ejecucion == ej)
+```
+
+En la ejecución `r ej` hay `r fila_ej$observaciones_comparables` observaciones
+comparables de `r fila_ej$presentaciones` presentaciones en `r fila_ej$comercios`
+comercios, así que `r if (fila_ej$minimo_8_por_3 == "Cumple") "se cumple" else "no se cumple"`
+el mínimo de 8 × 3 = 24.
+`r if (nrow(q2_repetidos) == 0) "Ninguna presentación tiene más de un anuncio en el mismo comercio." else paste0("En ", nrow(q2_repetidos), " casos una misma presentación aparece más de una vez en un comercio, con distintos vendedores, y se usa el menor precio.")`
+`r if (q2_duplicados$repetidos == 0) "Tampoco hay anuncios repetidos dentro de una misma ejecución, porque los productos que el sitio repite entre páginas se depuran antes de cargar y la restricción UNIQUE impide duplicar observaciones." else paste0("Hay ", q2_duplicados$repetidos, " anuncios repetidos dentro de una misma ejecución, que deben revisarse.")`
+
+## Precio mínimo, máximo y promedio por presentación, con el comercio más barato {#sec-q3}
+
+```{sql}
+--| connection: con
+--| code-fold: false
+--| output.var: q3
+WITH por_comercio AS (
+       SELECT a.producto_id, c.nombre AS comercio, MIN(o.precio) AS precio
+         FROM observaciones o
+         JOIN anuncios a  ON a.anuncio_id = o.anuncio_id
+         JOIN comercios c ON c.comercio_id = o.comercio_id
+        WHERE o.comparable = 1 AND o.id_ejecucion = ?ej
+        GROUP BY a.producto_id, c.nombre),
+     ranking AS (
+       SELECT producto_id, comercio, precio,
+              RANK() OVER (PARTITION BY producto_id ORDER BY precio) AS puesto,
+              MIN(precio) OVER (PARTITION BY producto_id) AS precio_min,
+              MAX(precio) OVER (PARTITION BY producto_id) AS precio_max,
+              AVG(precio) OVER (PARTITION BY producto_id) AS precio_promedio
+         FROM por_comercio)
+SELECT r.producto_id, p.descripcion,
+       r.precio_min, r.precio_max, ROUND(r.precio_promedio) AS precio_promedio,
+       GROUP_CONCAT(r.comercio, ', ') AS comercio_menor_precio,   -- incluye empates
+       COUNT(*) AS comercios_empatados
+  FROM ranking r
+  JOIN productos p ON p.producto_id = r.producto_id
+ WHERE r.puesto = 1
+ GROUP BY r.producto_id
+ ORDER BY p.marca, p.linea;
+```
+
+```{r}
+#| label: q3-resultado
+tabla(q3 |> select(-producto_id)) |>
+  fmt_pesos(c(precio_min, precio_max, precio_promedio)) |>
+  cols_label(descripcion = "Presentación", precio_min = "Mínimo", precio_max = "Máximo",
+             precio_promedio = "Promedio", comercio_menor_precio = "Comercio con el menor precio",
+             comercios_empatados = "Empatados") |>
+  tab_header(title = "Precio por presentación comparable", subtitle = paste("Ejecución", ej))
+gana <- q3 |> separate_longer_delim(comercio_menor_precio, ", ") |> count(comercio_menor_precio, sort = TRUE)
+empates <- sum(q3$comercios_empatados > 1)
+frase_gana <- paste0(
+  gana$comercio_menor_precio[1], " tiene el menor precio en ", gana$n[1], " de las ", nrow(q3), " presentaciones",
+  if (nrow(gana) > 1) paste0(", ", enumerar(paste(gana$comercio_menor_precio[-1], "en", gana$n[-1]))) else "",
+  if (sum(gana$n) > nrow(q3)) paste0("; la suma pasa de ", nrow(q3), " porque se cuentan los empates") else ""
+)
+```
+
+`RANK()` le asigna el puesto 1 a todos los comercios que tienen el precio mínimo, así
+que los empates aparecen juntos en la columna del comercio más barato. `r frase_gana`.
+`r if (empates == 0) "No hubo empates en el precio mínimo." else paste0("Hubo empate en el precio mínimo en ", cuantos(empates, "presentación", "presentaciones"), ".")`
+
+## Ahorro al elegir la oferta más económica {#sec-q4}
+
+```{sql}
+--| connection: con
+--| code-fold: false
+--| output.var: q4
+WITH por_comercio AS (
+       SELECT a.producto_id, o.comercio_id, MIN(o.precio) AS precio
+         FROM observaciones o
+         JOIN anuncios a ON a.anuncio_id = o.anuncio_id
+        WHERE o.comparable = 1 AND o.id_ejecucion = ?ej
+        GROUP BY a.producto_id, o.comercio_id)
+SELECT p.producto_id, p.descripcion,
+       MAX(pc.precio)                  AS precio_max,
+       MIN(pc.precio)                  AS precio_min,
+       MAX(pc.precio) - MIN(pc.precio) AS ahorro_cop,
+       ROUND(100.0 * (MAX(pc.precio) - MIN(pc.precio)) / MAX(pc.precio), 1) AS ahorro_pct
+  FROM por_comercio pc
+  JOIN productos p ON p.producto_id = pc.producto_id
+ GROUP BY p.producto_id
+ ORDER BY ahorro_cop DESC;
+```
+
+```{r}
+#| label: q4-resultado
+tabla(q4 |> select(-producto_id)) |>
+  fmt_pesos(c(precio_max, precio_min, ahorro_cop)) |>
+  fmt_number(ahorro_pct, decimals = 1, dec_mark = ",", pattern = "{x} %") |>
+  cols_label(descripcion = "Presentación", precio_max = "Precio más alto", precio_min = "Precio más bajo",
+             ahorro_cop = "Ahorro (COP)", ahorro_pct = "Ahorro (%)") |>
+  tab_header(title = "Ahorro potencial por presentación", subtitle = "Ahorro = Pmáx − Pmín; Ahorro % = 100 × (Pmáx − Pmín) / Pmáx")
+canasta <- dbGetQuery(con, "
+  WITH por_comercio AS (
+         SELECT a.producto_id, c.nombre AS comercio, MIN(o.precio) AS precio
+           FROM observaciones o JOIN anuncios a ON a.anuncio_id = o.anuncio_id
+           JOIN comercios c ON c.comercio_id = o.comercio_id
+          WHERE o.comparable = 1 AND o.id_ejecucion = ?
+          GROUP BY a.producto_id, c.nombre)
+  SELECT comercio, SUM(precio) AS total, COUNT(*) AS presentaciones FROM por_comercio GROUP BY comercio
+  UNION ALL
+  SELECT 'Mejor oferta de cada presentación', SUM(pmin), COUNT(*) FROM (
+         SELECT producto_id, MIN(precio) AS pmin FROM por_comercio GROUP BY producto_id)",
+  params = list(ej))
+total_canasta <- function(x) pesos(canasta$total[canasta$comercio == x])
+canasta_barata <- canasta |> filter(!str_starts(comercio, "Mejor")) |> slice_min(total, n = 1, with_ties = FALSE)
+iguales <- sum(q4$ahorro_cop == 0)
+```
+
+El mayor ahorro en pesos está en `r q4$descripcion[1]`: `r pesos(q4$ahorro_cop[1])`
+entre el comercio más caro y el más barato, que equivalen al
+`r pct(q4$ahorro_pct[1])` del precio más alto. La mediana del ahorro es
+`r pesos(median(q4$ahorro_cop))`, y
+`r if (iguales == 0) "ninguna presentación cuesta lo mismo en los tres comercios" else if (iguales == 1) "una presentación cuesta lo mismo en los tres comercios" else paste(iguales, "presentaciones cuestan lo mismo en los tres comercios")`.
+
+Si se compra una unidad de cada presentación comparable en un solo comercio, el total
+es `r total_canasta("La Riviera")` en La Riviera, `r total_canasta("Falabella")` en
+Falabella y `r total_canasta("Farmatodo")` en Farmatodo, de modo que la canasta más
+barata es la de `r canasta_barata$comercio`. Comprando cada presentación donde está
+más barata, la misma canasta cuesta
+`r pesos(canasta$total[str_starts(canasta$comercio, "Mejor")])`. En esta comparación
+se usan las mismas presentaciones en los tres comercios y precios de una sola
+ejecución, como pide el enunciado para comparar canastas.
+
+## Menor precio por mL entre tamaños del mismo perfume {#sec-q5}
+
+```{sql}
+--| connection: con
+--| code-fold: false
+--| output.var: q5
+WITH obs AS (
+       SELECT p.familia, p.producto_id, p.descripcion, p.contenido AS ml, c.nombre AS comercio,
+              MIN(o.precio) AS precio
+         FROM observaciones o
+         JOIN anuncios a  ON a.anuncio_id = o.anuncio_id
+         JOIN productos p ON p.producto_id = a.producto_id
+         JOIN comercios c ON c.comercio_id = o.comercio_id
+        WHERE o.id_ejecucion = ?ej AND o.precio IS NOT NULL
+        GROUP BY p.familia, p.producto_id, p.descripcion, p.contenido, c.nombre),
+     familias AS (                       -- perfumes con al menos dos tamaños
+       SELECT familia FROM obs GROUP BY familia HAVING COUNT(DISTINCT ml) >= 2)
+SELECT o.familia, o.producto_id, o.descripcion, o.ml, o.comercio, o.precio,
+       ROUND(o.precio / o.ml, 1) AS cop_por_ml,
+       RANK() OVER (PARTITION BY o.familia ORDER BY o.precio / o.ml) AS puesto
+  FROM obs o
+  JOIN familias f ON f.familia = o.familia
+ ORDER BY o.familia, cop_por_ml;
+```
+
+```{r}
+#| label: q5-resultado
+if (nrow(q5) > 0) {
+  q5 |>
+    left_join(nombres_familia |> select(familia, nombre_familia), by = "familia") |>
+    mutate(descripcion = str_remove(descripcion, " \\(familia de tamaños\\)")) |>
+    select(nombre_familia, descripcion, ml, comercio, precio, cop_por_ml, puesto) |>
+    tabla(groupname_col = "nombre_familia") |>
+    fmt_pesos(c(precio, cop_por_ml)) |>
+    cols_label(descripcion = "Presentación", ml = "mL", comercio = "Comercio", precio = "Precio",
+               cop_por_ml = "COP por mL", puesto = "Puesto") |>
+    tab_header(title = "Precio por mililitro entre tamaños del mismo perfume",
+               subtitle = "COP por mL = precio del envase / contenido en mL")
+}
+# Para cada familia y tamaño, el comercio más barato; con eso se distingue el
+# desembolso total (precio del envase) del ahorro unitario (precio por mL).
+tamanos <- q5 |>
+  left_join(promo_precio, by = c("producto_id", "comercio", "precio")) |>
+  group_by(familia, ml) |>
+  slice_min(precio, n = 1, with_ties = FALSE) |>
+  ungroup() |>
+  left_join(nombres_familia |> select(familia, nombre_familia), by = "familia")
+frase_tamanos <- function(d) {
+  d <- arrange(d, ml)
+  ch <- d[1, ]
+  gr <- d[nrow(d), ]
+  donde <- function(x) paste0(x$comercio, if (isTRUE(x$promocion == 1)) ", en promoción" else "")
+  conclusion <- if (gr$precio > ch$precio && gr$cop_por_ml < ch$cop_por_ml) {
+    "El envase grande cuesta más en total, pero cada mililitro sale más barato, así que solo conviene si se va a usar todo."
+  } else if (gr$precio <= ch$precio) {
+    "El envase grande cuesta menos incluso en total, así que es más barato en los dos sentidos."
+  } else {
+    "El envase grande cuesta más y tampoco es más barato por mililitro."
+  }
+  sprintf("En %s, el envase de %s mL cuesta como mínimo %s (%s) y el de %s mL, %s (%s), lo que da %s por mL frente a %s. %s",
+          gr$nombre_familia, num(gr$ml), pesos(gr$precio), donde(gr),
+          num(ch$ml), pesos(ch$precio), donde(ch),
+          pesos(gr$cop_por_ml), pesos(ch$cop_por_ml), conclusion)
+}
+frases_ml <- if (nrow(tamanos) > 0) map_chr(split(tamanos, tamanos$familia), frase_tamanos) else character(0)
+```
+
+Esta pregunta no compara presentaciones idénticas, sino tamaños distintos del mismo
+perfume con la misma concentración, por eso se usa el precio por mL: el precio del
+envase dividido por su contenido. Se incluyen todas las observaciones emparejadas con
+el catálogo en la ejecución, aunque algún tamaño no esté en los tres comercios, y para
+cada tamaño se toma el comercio más barato.
+`r if (length(frases_ml) == 0) "En la ejecución analizada ningún perfume del catálogo apareció en dos tamaños, así que esta comparación no se pudo hacer." else paste(frases_ml, collapse = " ")`
+
+## Mayores diferencias de precio entre comercios {#sec-q6}
+
+```{sql}
+--| connection: con
+--| code-fold: false
+--| output.var: q6
+WITH por_comercio AS (
+       SELECT a.producto_id, c.nombre AS comercio, MIN(o.precio) AS precio
+         FROM observaciones o
+         JOIN anuncios a  ON a.anuncio_id = o.anuncio_id
+         JOIN comercios c ON c.comercio_id = o.comercio_id
+        WHERE o.comparable = 1 AND o.id_ejecucion = ?ej
+        GROUP BY a.producto_id, c.nombre),
+     r AS (
+       SELECT producto_id, comercio, precio,
+              RANK() OVER (PARTITION BY producto_id ORDER BY precio ASC)  AS r_barato,
+              RANK() OVER (PARTITION BY producto_id ORDER BY precio DESC) AS r_caro
+         FROM por_comercio)
+SELECT r.producto_id, p.descripcion,
+       GROUP_CONCAT(CASE WHEN r_caro = 1 THEN comercio END, ', ')   AS comercio_mas_caro,
+       MAX(precio) AS precio_max,
+       GROUP_CONCAT(CASE WHEN r_barato = 1 THEN comercio END, ', ') AS comercio_mas_barato,
+       MIN(precio) AS precio_min,
+       ROUND(100.0 * (MAX(precio) - MIN(precio)) / MAX(precio), 1) AS ahorro_pct
+  FROM r
+  JOIN productos p ON p.producto_id = r.producto_id
+ GROUP BY r.producto_id
+ ORDER BY ahorro_pct DESC, p.descripcion;
+```
+
+```{r}
+#| label: q6-resultado
+tabla(q6 |> select(-producto_id)) |>
+  fmt_pesos(c(precio_max, precio_min)) |>
+  fmt_number(ahorro_pct, decimals = 1, dec_mark = ",", pattern = "{x} %") |>
+  cols_label(descripcion = "Presentación", comercio_mas_caro = "Más caro en", precio_max = "Precio más alto",
+             comercio_mas_barato = "Más barato en", precio_min = "Precio más bajo", ahorro_pct = "Ahorro (%)") |>
+  tab_header(title = "Presentaciones ordenadas por ahorro porcentual")
+caro <- q6 |> separate_longer_delim(comercio_mas_caro, ", ") |> count(comercio_mas_caro, sort = TRUE)
+top5 <- head(q6, 5)
+baratos_top <- top5 |> separate_longer_delim(comercio_mas_barato, ", ") |> count(comercio_mas_barato, sort = TRUE)
+promo_top <- top5 |>
+  separate_longer_delim(comercio_mas_barato, ", ") |>
+  left_join(promo_precio, by = c("producto_id", "comercio_mas_barato" = "comercio", "precio_min" = "precio")) |>
+  group_by(producto_id) |>
+  summarise(en_promocion = any(promocion == 1, na.rm = TRUE))
+n_promo_top <- sum(promo_top$en_promocion)
+texto_baratos <- if (nrow(baratos_top) == 1) {
+  paste("siempre", baratos_top$comercio_mas_barato[1])
+} else {
+  paste0(enumerar(paste(baratos_top$comercio_mas_barato, "en", baratos_top$n)),
+         if (sum(baratos_top$n) > nrow(top5)) ", contando empates" else "")
+}
+```
+
+Las cinco mayores diferencias porcentuales van del `r pct(min(top5$ahorro_pct))` al
+`r pct(max(top5$ahorro_pct))`. En esas cinco presentaciones el comercio más barato es
+`r texto_baratos`.
+`r if (n_promo_top == 0) "En ninguna de ellas el precio más bajo estaba en promoción." else if (n_promo_top == 1) "En una de ellas el precio más bajo estaba en promoción, así que esa diferencia puede no mantenerse en otra fecha." else paste0("En ", n_promo_top, " de ellas el precio más bajo estaba en promoción, así que esas diferencias pueden no mantenerse en otra fecha.")`
+Contando empates, el precio más alto lo tiene
+`r enumerar(paste(caro$comercio_mas_caro, "en", caro$n))` de las `r nrow(q6)`
+presentaciones.
+
+## Datos faltantes o inconsistentes {#sec-q7}
+
+```{sql}
+--| connection: con
+--| code-fold: false
+--| output.var: q7
+SELECT c.nombre                                                AS comercio,
+       COUNT(*)                                                AS observaciones,
+       SUM(o.precio IS NULL)                                   AS sin_precio,
+       SUM(a.sku IS NULL)                                      AS sin_sku,
+       SUM(a.excluido = 0 AND a.marca_std IS NULL)             AS sin_marca,
+       SUM(a.excluido = 0 AND a.subcategoria_std IS NULL)      AS sin_subcategoria,
+       SUM(a.excluido = 0 AND a.concentracion_std IS NULL)     AS sin_concentracion,
+       SUM(a.excluido = 0 AND a.contenido_ml IS NULL)          AS sin_contenido,
+       SUM(o.promocion = 1 AND o.precio_antes IS NULL)         AS promocion_sin_precio_antes,
+       SUM(o.precio_antes IS NOT NULL AND o.precio_antes <= o.precio) AS precio_antes_inconsistente,
+       SUM(a.excluido)                                         AS excluidos
+  FROM observaciones o
+  JOIN anuncios a  ON a.anuncio_id = o.anuncio_id
+  JOIN comercios c ON c.comercio_id = o.comercio_id
+ WHERE o.id_ejecucion = ?ej
+ GROUP BY c.nombre;
+```
+
+```{r}
+#| label: q7-resultado
+tabla(q7) |>
+  cols_label(comercio = "Comercio", observaciones = "Observaciones", sin_precio = "Sin precio",
+             sin_sku = "Sin SKU", sin_marca = "Sin marca", sin_subcategoria = "Sin subcategoría",
+             sin_concentracion = "Sin concentración", sin_contenido = "Sin contenido",
+             promocion_sin_precio_antes = "Promoción sin precio tachado",
+             precio_antes_inconsistente = "Precio tachado ≤ precio", excluidos = "Excluidos") |>
+  tab_header(title = "Faltantes e inconsistencias",
+             subtitle = paste0("Ejecución ", ej, ". Marca, subcategoría, concentración y contenido se cuentan solo dentro de la categoría"))
+# Faltante con más casos dentro de la categoría y un ejemplo real de la base.
+faltas <- c(concentracion = sum(q7$sin_concentracion), contenido = sum(q7$sin_contenido), marca = sum(q7$sin_marca))
+falta_mayor <- names(faltas)[which.max(faltas)]
+nombre_falta <- c(concentracion = "la concentración", contenido = "el contenido", marca = "la marca")[[falta_mayor]]
+pronombre_falta <- c(concentracion = "la", contenido = "lo", marca = "la")[[falta_mayor]]
+columna_bd <- c(concentracion = "concentracion_std", contenido = "contenido_ml", marca = "marca_std")[[falta_mayor]]
+ejemplo_falta <- dbGetQuery(con, sprintf("
+  SELECT c.nombre AS comercio, o.nombre_original FROM observaciones o
+    JOIN anuncios a ON a.anuncio_id = o.anuncio_id JOIN comercios c ON c.comercio_id = o.comercio_id
+   WHERE o.id_ejecucion = ? AND a.excluido = 0 AND a.%s IS NULL
+   ORDER BY o.nombre_original LIMIT 1", columna_bd), params = list(ej))
+falta_por_comercio <- q7 |>
+  mutate(n = .data[[paste0("sin_", falta_mayor)]]) |>
+  filter(n > 0) |>
+  arrange(desc(n))
+promo_sin_antes <- dbGetQuery(con, "
+  SELECT c.nombre AS comercio, COALESCE(o.etiqueta_promocion, '(sin etiqueta)') AS etiqueta, COUNT(*) AS n
+    FROM observaciones o JOIN comercios c ON c.comercio_id = o.comercio_id
+   WHERE o.id_ejecucion = ? AND o.promocion = 1 AND o.precio_antes IS NULL
+   GROUP BY c.nombre, etiqueta ORDER BY c.nombre, n DESC", params = list(ej))
+# Por comercio: cuántas son y con qué etiquetas (todas si son hasta tres).
+frase_promos <- promo_sin_antes |>
+  group_by(comercio) |>
+  summarise(total = sum(n),
+            cual = if (n() == 1) paste0("con la etiqueta *", first(etiqueta), "*")
+                   else if (n() <= 3) paste0("con las etiquetas ", enumerar(paste0("*", etiqueta, "*")))
+                   else paste0("sobre todo con la etiqueta *", first(etiqueta), "*"),
+            .groups = "drop") |>
+  mutate(texto = paste0(total, " en ", comercio, ", ", cual))
+hay_2x1 <- any(promo_sin_antes$comercio == "La Riviera" & str_detect(promo_sin_antes$etiqueta, "2X1"))
+```
+
+`r if (sum(q7$sin_precio) == 0) "Todas las observaciones tienen precio." else paste0(sum(q7$sin_precio), " observaciones no tienen precio y no entran en las comparaciones.")`
+Los datos que faltan se dejan como `NULL`; ninguno se reemplazó por cero.
+`r if (max(faltas) == 0) "Ningún producto de la categoría quedó sin marca, concentración o contenido." else paste0("Dentro de la categoría, el dato que más falta es ", nombre_falta, ": ", sum(faltas[falta_mayor]), " productos no ", pronombre_falta, " indican (", enumerar(paste(falta_por_comercio$comercio, falta_por_comercio$n)), "), por ejemplo *", ejemplo_falta$nombre_original, "* en ", ejemplo_falta$comercio, ". Por la regla estricta, estos productos no se emparejan aunque podrían ser la misma presentación; los que se parecen a alguna del catálogo aparecen en la tabla de anuncios que no se emparejaron.")`
+`r if (sum(q7$sin_subcategoria) > 0) paste0("Además, ", sum(q7$sin_subcategoria), " productos no indican el género ni en el nombre ni en la subcategoría del sitio, así que su subcategoría estandarizada quedó vacía. Esto no afecta la comparación, porque las presentaciones comparables toman la subcategoría del catálogo.") else ""`
+`r if (nrow(frase_promos) == 0) "Todas las promociones tienen precio tachado." else if (nrow(frase_promos) == 1) paste0("Hay ", sum(q7$promocion_sin_precio_antes), " promociones sin precio tachado, todas en ", frase_promos$comercio, " y ", frase_promos$cual, ". En estos casos el sitio no muestra el precio anterior", if (hay_2x1) ", y en el 2X1 de La Riviera el descuento tampoco se refleja en el precio de la tarjeta." else ".") else paste0("Hay ", sum(q7$promocion_sin_precio_antes), " promociones sin precio tachado: ", paste(frase_promos$texto, collapse = "; "), ". En estos casos el sitio no muestra el precio anterior", if (hay_2x1) ", y en el 2X1 de La Riviera el descuento tampoco se refleja en el precio de la tarjeta." else ".")`
+`r if (sum(q7$precio_antes_inconsistente) == 0) "No hay casos de precio tachado menor o igual al precio vigente." else paste0("En ", sum(q7$precio_antes_inconsistente), " casos el precio tachado es menor o igual al precio vigente; se dejaron como estaban y no se cuentan como promoción.")`
+
+## Tamaño de la oferta y calidad de la información por comercio {#sec-q8}
+
+```{sql}
+--| connection: con
+--| code-fold: false
+--| output.var: q8
+SELECT o.id_ejecucion, c.nombre AS comercio,
+       COUNT(*)                AS productos_obtenidos,
+       e.n_total_sitio         AS total_sitio,
+       SUM(a.excluido = 0)     AS en_categoria,
+       ROUND(100.0 * SUM(a.excluido = 0 AND a.linea_std IS NOT NULL AND a.linea_std <> '')
+             / SUM(a.excluido = 0), 1)                                         AS pct_descripcion,
+       ROUND(100.0 * SUM(a.excluido = 0 AND a.marca_std IS NOT NULL) / SUM(a.excluido = 0), 1)    AS pct_marca,
+       ROUND(100.0 * SUM(a.excluido = 0 AND a.contenido_ml IS NOT NULL) / SUM(a.excluido = 0), 1) AS pct_contenido,
+       ROUND(100.0 * SUM(a.excluido = 0 AND a.linea_std IS NOT NULL AND a.linea_std <> ''
+                         AND a.marca_std IS NOT NULL AND a.contenido_ml IS NOT NULL)
+             / SUM(a.excluido = 0), 1)                                         AS pct_las_tres
+  FROM observaciones o
+  JOIN anuncios a    ON a.anuncio_id = o.anuncio_id
+  JOIN comercios c   ON c.comercio_id = o.comercio_id
+  JOIN ejecuciones e ON e.id_ejecucion = o.id_ejecucion AND e.comercio_id = o.comercio_id
+ GROUP BY o.id_ejecucion, c.nombre
+ ORDER BY o.id_ejecucion, en_categoria DESC;
+```
+
+```{r}
+#| label: q8-resultado
+tabla(q8, groupname_col = "id_ejecucion") |>
+  fmt_number(c(productos_obtenidos, total_sitio, en_categoria), decimals = 0, sep_mark = ".") |>
+  fmt_number(starts_with("pct"), decimals = 1, dec_mark = ",", pattern = "{x} %") |>
+  cols_label(comercio = "Comercio", productos_obtenidos = "Productos obtenidos", total_sitio = "Total del sitio",
+             en_categoria = "En la categoría", pct_descripcion = "Con descripción", pct_marca = "Con marca",
+             pct_contenido = "Con contenido", pct_las_tres = "Con las tres") |>
+  tab_header(title = "Productos por comercio y ejecución",
+             subtitle = "Los porcentajes se calculan sobre los productos dentro de la categoría")
+q8e <- q8 |> filter(id_ejecucion == ej) |> arrange(desc(en_categoria))
+calidad <- min(q8e$pct_las_tres)
+nivel <- if (calidad >= 90) "alto" else if (calidad >= 70) "intermedio" else "bajo"
+```
+
+En la ejecución analizada, `r q8e$comercio[1]` es el comercio con más perfumes dentro
+de la categoría (`r num(q8e$en_categoria[1])`) y `r q8e$comercio[nrow(q8e)]` el que
+menos tiene (`r num(q8e$en_categoria[nrow(q8e)])`). Eso no quiere decir que el más
+grande sea el más barato, porque cada comercio vende un surtido distinto. Se
+considera que un producto tiene descripción cuando, después de quitar la marca, el
+tamaño y las palabras genéricas, todavía queda un nombre de línea. En los tres
+comercios el porcentaje de perfumes con marca, descripción y contenido es
+`r nivel`; el más bajo es `r pct(calidad)`. En La Riviera la marca siempre tiene
+valor porque se deduce del nombre, ya que el sitio no la publica en un campo aparte;
+los ejemplos de la @sec-estandarizacion permiten revisar si se dedujo bien.
+
+## Cambios de precio entre ejecuciones {#sec-cambios}
+
+Como consulta adicional, se compara el precio de cada presentación comparable entre
+la primera y la última ejecución de la base, en cada comercio.
+
+```{sql}
+--| connection: con
+--| code-fold: false
+--| output.var: cambios
+WITH precios AS (
+       SELECT o.id_ejecucion, a.producto_id, c.nombre AS comercio, MIN(o.precio) AS precio
+         FROM observaciones o
+         JOIN anuncios a  ON a.anuncio_id = o.anuncio_id
+         JOIN comercios c ON c.comercio_id = o.comercio_id
+        WHERE o.comparable = 1
+        GROUP BY o.id_ejecucion, a.producto_id, c.nombre),
+     extremos AS (
+       SELECT MIN(id_ejecucion) AS primera, MAX(id_ejecucion) AS ultima FROM precios)
+SELECT p1.producto_id, p1.comercio,
+       p1.precio AS precio_inicial, p2.precio AS precio_final,
+       p2.precio - p1.precio AS cambio,
+       ROUND(100.0 * (p2.precio - p1.precio) / p1.precio, 1) AS cambio_pct
+  FROM precios p1
+  JOIN precios p2 ON p2.producto_id = p1.producto_id AND p2.comercio = p1.comercio
+  JOIN extremos x ON p1.id_ejecucion = x.primera AND p2.id_ejecucion = x.ultima
+ WHERE x.primera <> x.ultima
+ ORDER BY ABS(p2.precio - p1.precio) DESC, p1.producto_id;
+```
+
+```{r}
+#| label: cambios-resultado
+ids_comparables <- sort(unique(q2_cobertura$id_ejecucion))
+cambios <- cambios |>
+  left_join(dbGetQuery(con, "SELECT producto_id, descripcion FROM productos"), by = "producto_id")
+if (nrow(cambios) > 0) {
+  cambios |>
+    filter(cambio != 0) |>
+    select(descripcion, comercio, precio_inicial, precio_final, cambio, cambio_pct) |>
+    tabla() |>
+    fmt_pesos(c(precio_inicial, precio_final, cambio)) |>
+    fmt_number(cambio_pct, decimals = 1, dec_mark = ",", pattern = "{x} %") |>
+    cols_label(descripcion = "Presentación", comercio = "Comercio", precio_inicial = "Precio inicial",
+               precio_final = "Precio final", cambio = "Cambio", cambio_pct = "Cambio (%)") |>
+    tab_header(title = "Precios que cambiaron entre la primera y la última ejecución",
+               subtitle = paste(first(ids_comparables), "→", last(ids_comparables)))
+}
+```
+
+`r if (nrow(cambios) == 0) "Por ahora solo hay una ejecución con presentaciones comparables, así que esta consulta no devuelve filas. Con una segunda ejecución en otra fecha se podrán ver los cambios." else paste0("Entre la ejecución ", first(ids_comparables), " y la ", last(ids_comparables), " se pueden seguir ", nrow(cambios), " precios, cada uno de una presentación en un comercio. ", if (all(cambios$cambio == 0)) "Ninguno cambió." else paste0("Subieron ", sum(cambios$cambio > 0), ", bajaron ", sum(cambios$cambio < 0), " y ", sum(cambios$cambio == 0), " se mantuvieron. El mayor cambio en pesos fue el de ", cambios$descripcion[1], " en ", cambios$comercio[1], ": ", pesos(cambios$cambio[1]), " (", pct(cambios$cambio_pct[1]), "). Por eso los precios del análisis solo valen para el momento en que se consultaron."))`
+
+# Visualizaciones {#sec-visualizaciones}
+
+```{r}
+#| label: datos-graficos
+por_comercio <- dbGetQuery(con, "
+  SELECT a.producto_id, p.descripcion, p.marca, p.linea, p.concentracion, p.contenido,
+         c.nombre AS comercio, MIN(o.precio) AS precio
+    FROM observaciones o
+    JOIN anuncios a  ON a.anuncio_id = o.anuncio_id
+    JOIN productos p ON p.producto_id = a.producto_id
+    JOIN comercios c ON c.comercio_id = o.comercio_id
+   WHERE o.comparable = 1 AND o.id_ejecucion = ?
+   GROUP BY a.producto_id, c.nombre", params = list(ej)) |>
+  mutate(
+    etiqueta = paste0(str_to_title(marca), " ", linea, " ", concentracion, " ", contenido, " ml"),
+    comercio = factor(comercio, levels = names(COLORES))
+  ) |>
+  group_by(producto_id) |>
+  mutate(pmin = min(precio), pmax = max(precio), ahorro_pct = 100 * (pmax - pmin) / pmax) |>
+  ungroup() |>
+  mutate(etiqueta = forcats::fct_reorder(etiqueta, ahorro_pct))
+pie <- paste0("Fuente: sitios web de La Riviera, Falabella y Farmatodo Colombia. Ejecución ", ej, " del ", dia_corrida, ".\n",
+              "Precios en COP; no incluye precios condicionados (tarjeta CMR, Prime) ni promociones 2X1.")
+```
+
+## Precio de las mismas presentaciones en cada comercio
+
+```{r}
+#| label: fig-precios
+#| fig-height: 8.5
+#| fig-cap: "Precio de cada presentación comparable en los tres comercios."
+#| fig-alt: "Gráfico de puntos: para cada presentación comparable, el precio en La Riviera, Falabella y Farmatodo, unidos por una línea del mínimo al máximo."
+niveles <- levels(por_comercio$etiqueta)
+desplazamiento <- c("La Riviera" = 0.22, "Falabella" = 0, "Farmatodo" = -0.22)
+puntos <- por_comercio |>
+  mutate(y = as.integer(etiqueta) + desplazamiento[as.character(comercio)])
+rangos <- por_comercio |> distinct(etiqueta, pmin, pmax) |> mutate(y = as.integer(etiqueta))
+g_precios <- ggplot() +
+  geom_segment(data = rangos, aes(x = pmin, xend = pmax, y = y, yend = y),
+               colour = "#c9c8c3", linewidth = 1.2, lineend = "round") +
+  geom_point(data = puntos,
+             aes(x = precio, y = y, fill = comercio,
+                 text = paste0(etiqueta, "<br>", comercio, ": ", pesos(precio))),
+             shape = 21, size = 3.2, colour = "white", stroke = 0.8) +
+  scale_fill_manual(values = COLORES, name = NULL, drop = FALSE) +
+  scale_y_continuous(breaks = seq_along(niveles), labels = niveles, expand = expansion(add = 0.6)) +
+  scale_x_continuous(labels = miles, expand = expansion(mult = c(0.02, 0.05))) +
+  labs(title = "Precio de cada presentación comparable por comercio",
+       subtitle = "Ordenadas de mayor a menor diferencia porcentual entre el comercio más caro y el más barato",
+       x = "Precio (COP)", y = NULL, caption = pie) +
+  theme(panel.grid.major.y = element_blank())
+g_precios
+```
+
+Cada fila corresponde a una presentación idéntica en los tres comercios, y la línea
+gris va del precio más bajo al más alto: entre más larga, más se ahorra comprando en
+el comercio adecuado. Los puntos de una misma fila están un poco separados para que se
+vean aunque dos comercios tengan el mismo precio. En la versión interactiva se puede
+ver el precio exacto pasando el cursor, y los valores también están en las tablas de
+la @sec-q3. Hay que tener en cuenta que son precios de una sola ejecución, sin costos de
+envío, y que el eje está en pesos, por lo que en los perfumes más caros las
+diferencias se ven más grandes; la comparación en porcentaje está en la @fig-ahorro.
+
+```{r}
+#| label: grafico-precios-interactivo
+#| fig-height: 8.5
+# Si la versión instalada de plotly no fuera compatible con la de ggplot2, el
+# documento sigue: el gráfico estático de arriba y las tablas tienen los mismos datos.
+tryCatch(
+  ggplotly(g_precios, tooltip = "text") |>
+    layout(legend = list(orientation = "h", y = 1.04)) |>
+    config(displayModeBar = FALSE),
+  error = \(e) cat("No se pudo generar la versión interactiva:", conditionMessage(e))
+)
+```
+
+## Precio por mL entre tamaños del mismo perfume
+
+```{r}
+#| label: fig-por-ml
+#| fig-height: 4.8
+#| fig-cap: "Precio por mililitro en distintos tamaños del mismo perfume."
+#| fig-alt: "Barras de precio por mililitro para dos tamaños del mismo perfume, por comercio."
+if (nrow(q5) > 0) {
+  datos_ml <- q5 |>
+    left_join(nombres_familia |> select(familia, nombre_familia), by = "familia") |>
+    mutate(tamano = paste(ml, "ml"), comercio = factor(comercio, levels = names(COLORES)))
+  ggplot(datos_ml, aes(x = tamano, y = cop_por_ml, fill = comercio)) +
+    geom_col(position = position_dodge2(width = 0.8, padding = 0.15), width = 0.7) +
+    geom_text(aes(label = pesos(cop_por_ml)), position = position_dodge2(width = 0.8, padding = 0.15),
+              vjust = -0.4, size = 3.2, colour = "#3b3a37") +
+    facet_wrap(~ nombre_familia, scales = "free_x", labeller = label_wrap_gen(30)) +
+    scale_fill_manual(values = COLORES, name = NULL, drop = FALSE) +
+    scale_y_continuous(labels = pesos, limits = c(0, NA), expand = expansion(mult = c(0, 0.12))) +
+    labs(title = "Precio por mililitro según el tamaño del envase",
+         subtitle = "Mismo perfume y concentración en distintos tamaños",
+         x = "Tamaño del envase", y = "COP por mL", caption = pie)
+}
+```
+
+`r if (nrow(q5) == 0) "En la ejecución analizada ningún perfume del catálogo apareció en dos tamaños, así que este gráfico no tiene datos." else paste0("En cada panel, la barra más baja corresponde al mililitro más barato. El gráfico solo muestra el precio por mL; el precio total de cada envase está en la @sec-q5. Solo ", cuantos(n_distinct(q5$familia), "perfume", "perfumes"), " del catálogo ", if (n_distinct(q5$familia) == 1) "apareció" else "aparecieron", " en dos tamaños, y no todos los tamaños están en los tres comercios. Además, un mililitro más barato solo representa un ahorro si se usa todo el contenido.")`
+
+## Oportunidades de ahorro
+
+```{r}
+#| label: fig-ahorro
+#| fig-height: 7.5
+#| fig-cap: "Ahorro potencial por presentación al comprar en el comercio más barato."
+#| fig-alt: "Barras horizontales del ahorro porcentual por presentación, coloreadas según el comercio más barato."
+datos_ahorro <- q6 |>
+  left_join(por_comercio |> distinct(producto_id, etiqueta), by = "producto_id") |>
+  mutate(
+    mas_barato = if_else(str_detect(comercio_mas_barato, ","), "Empate", comercio_mas_barato),
+    mas_barato = factor(mas_barato, levels = c(names(COLORES), "Empate")),
+    etiqueta = forcats::fct_reorder(as.character(etiqueta), ahorro_pct),
+    texto = if_else(row_number() <= 5, paste0(pct(ahorro_pct, 0), " · ", miles(precio_max - precio_min)), NA_character_)
+  )
+ggplot(datos_ahorro, aes(x = ahorro_pct, y = etiqueta, fill = mas_barato)) +
+  geom_col(width = 0.65) +
+  geom_text(aes(label = texto), hjust = -0.08, size = 3.2, colour = "#3b3a37", na.rm = TRUE) +
+  scale_fill_manual(values = c(COLORES, "Empate" = "#9a9893"), name = "Comercio más barato",
+                    labels = c(names(COLORES), "Empate"), drop = FALSE) +
+  scale_x_continuous(labels = \(x) paste0(x, " %"), limits = c(0, NA), expand = expansion(mult = c(0, 0.3))) +
+  labs(title = "Ahorro al comprar en el comercio más barato",
+       subtitle = "Ahorro % = (precio más alto − precio más bajo) / precio más alto. Se rotulan las cinco mayores diferencias",
+       x = "Ahorro (%)", y = NULL, caption = pie)
+```
+
+Las barras más largas son las presentaciones en las que más importa dónde se compra.
+El color indica qué comercio tiene el menor precio, y el gris, que hay empate. Las
+presentaciones sin barra tienen el mismo precio en los tres comercios. El porcentaje se
+calcula frente al precio más alto observado, que puede ser un precio de lista sin
+descuento, y si el precio más bajo estaba en promoción (@sec-q6) el ahorro puede
+desaparecer en otra fecha.
+
+## Tamaño y precios de la oferta de cada comercio
+
+```{r}
+#| label: fig-oferta
+#| fig-height: 5.2
+#| fig-cap: "Tamaño del surtido y distribución de precios de toda la categoría en cada comercio."
+#| fig-alt: "Izquierda: número de perfumes en la categoría por comercio. Derecha: distribución de precios de toda la categoría por comercio, en escala logarítmica."
+oferta <- dbGetQuery(con, "
+  SELECT c.nombre AS comercio, o.precio
+    FROM observaciones o
+    JOIN anuncios a  ON a.anuncio_id = o.anuncio_id
+    JOIN comercios c ON c.comercio_id = o.comercio_id
+   WHERE o.id_ejecucion = ? AND a.excluido = 0 AND o.precio IS NOT NULL", params = list(ej)) |>
+  mutate(comercio = factor(comercio, levels = names(COLORES)))
+g_n <- oferta |>
+  count(comercio) |>
+  ggplot(aes(x = comercio, y = n, fill = comercio)) +
+  geom_col(width = 0.55, show.legend = FALSE) +
+  geom_text(aes(label = num(n)), vjust = -0.4, size = 3.4, colour = "#3b3a37") +
+  scale_fill_manual(values = COLORES) +
+  scale_y_continuous(limits = c(0, NA), expand = expansion(mult = c(0, 0.1))) +
+  labs(title = "Perfumes en la categoría", x = NULL, y = "Productos")
+g_dist <- ggplot(oferta, aes(x = comercio, y = precio, fill = comercio)) +
+  geom_boxplot(width = 0.5, outlier.size = 0.8, outlier.alpha = 0.4, show.legend = FALSE,
+               colour = "#52514e", linewidth = 0.4) +
+  scale_fill_manual(values = COLORES) +
+  scale_y_log10(labels = miles) +
+  labs(title = "Distribución de precios de toda la categoría", x = NULL, y = "Precio (COP, escala log)")
+(g_n | g_dist) + plot_annotation(caption = pie)
+medianas <- oferta |> group_by(comercio) |> summarise(mediana = median(precio))
+med <- function(x) pesos(medianas$mediana[medianas$comercio == x])
+```
+
+El panel izquierdo muestra cuántos perfumes tiene cada comercio en la categoría y el
+derecho, cómo se distribuyen sus precios. La mediana es `r med("La Riviera")` en La
+Riviera, `r med("Falabella")` en Falabella y `r med("Farmatodo")` en Farmatodo. Estas
+cifras describen la oferta, pero no sirven para decir qué comercio es más barato,
+porque cada uno vende marcas, tamaños y rangos de precio distintos. Para eso están
+la @fig-precios y la @fig-ahorro, que comparan presentaciones idénticas.
+
+# Limitaciones y conclusiones {#sec-limitaciones}
+
+```{r}
+#| label: cifras-limitaciones
+promo_comparables <- dbGetQuery(con, "
+  SELECT 100.0 * SUM(promocion) / COUNT(*) AS pct FROM observaciones
+   WHERE comparable = 1 AND id_ejecucion = ?", params = list(ej))$pct
+```
+
+## Limitaciones
+
+Los precios corresponden a la fecha y hora de la ejecución (`r fecha_corrida`) y a
+las condiciones de ese momento. El `r pct(promo_comparables)` de las observaciones
+comparables estaba en promoción, y esas rebajas pueden ser temporales.
+
+En la comparación no se usaron el precio con tarjeta CMR, el precio Prime ni los 2X1,
+porque dependen del comprador o exigen comprar dos unidades. Tampoco se incluyeron los
+costos de envío. Los precios de Farmatodo son los de Bogotá y pueden ser distintos en
+otras ciudades. Además, parte de la oferta de Falabella la venden terceros a través de
+su *marketplace*; el precio usado es el que muestra Falabella.com, aunque la venta la
+haga otro vendedor.
+
+La correspondencia de productos fue estricta a propósito. Por eso quedaron por fuera
+los productos que no indican la concentración en el nombre o que tienen el tamaño
+escrito de otra forma (100 frente a 105 mL), aunque es posible que algunos sean el
+mismo producto.
+
+`r if (corrida_completa) "En la ejecución analizada los tres comercios quedaron completos según los controles de la @sec-completitud. En Falabella esa verificación se hace contra el total que informa el sitio; en La Riviera y Farmatodo, que no lo muestran, se basa en el final del recorrido y en el tope de resultados." else paste0("En la ejecución analizada, ", enumerar(parciales$comercio), " no quedó en estado completa (", enumerar(parciales$estado), "), así que sus cifras pueden no cubrir toda la categoría; el detalle está en la @sec-ejecuciones.")`
+`r if (is.null(otro)) "Por último, la recolección solo se ejecutó desde el computador personal; la prueba en otro entorno no se incluyó en esta versión (@sec-otro-entorno)." else "La recolección también se probó desde otro entorno (@sec-otro-entorno)."`
+
+## Conclusiones para el consumidor
+
+```{r}
+#| label: recomendacion
+recomendacion <- q6 |>
+  left_join(q4 |> select(producto_id, ahorro_cop), by = "producto_id") |>
+  transmute(
+    `Presentación` = descripcion,
+    `Dónde conviene comprar` = if_else(ahorro_cop == 0, "Cualquiera (mismo precio)", comercio_mas_barato),
+    `Precio más bajo` = precio_min,
+    `Ahorro frente al más caro` = ahorro_cop,
+    `Ahorro (%)` = ahorro_pct
+  )
+tabla(recomendacion) |>
+  fmt_pesos(c(`Precio más bajo`, `Ahorro frente al más caro`)) |>
+  fmt_number(`Ahorro (%)`, decimals = 1, dec_mark = ",", pattern = "{x} %") |>
+  tab_header(title = "Dónde comprar cada presentación", subtitle = paste("Según los precios de la ejecución", ej))
+grandes <- sum(q4$ahorro_pct >= 20)
+resumen_tamanos <- if (nrow(tamanos) > 0) {
+  tamanos |>
+    group_by(nombre_familia) |>
+    arrange(ml, .by_group = TRUE) |>
+    summarise(texto = case_when(
+      last(precio) > first(precio) & last(cop_por_ml) < first(cop_por_ml) ~
+        paste0("En ", first(nombre_familia), ", el envase grande tiene menor precio por mL, pero cuesta más en total."),
+      last(precio) <= first(precio) ~
+        paste0("En ", first(nombre_familia), ", el envase grande es más barato por mL y también en total."),
+      .default = paste0("En ", first(nombre_familia), ", el envase grande no es más barato por mL.")
+    ), .groups = "drop")
+} else NULL
+```
+
+1. `r if (gana$n[1] == nrow(q3)) paste0("En esta ejecución, ", gana$comercio_menor_precio[1], " tuvo el precio más bajo en todas las presentaciones comparables, aunque la diferencia frente a los demás cambia mucho de un perfume a otro.") else paste0("Ningún comercio es el más barato en todo. En esta ejecución, ", gana$comercio_menor_precio[1], " tiene el menor precio en ", gana$n[1], " de las ", nrow(q3), " presentaciones, contando empates, así que conviene decidir perfume por perfume con la tabla anterior.")`
+2. `r if (grandes > 0) paste0("La diferencia entre el comercio más caro y el más barato supera el 20 % en ", cuantos(grandes, "presentación", "presentaciones"), " y llega a ", pesos(max(q4$ahorro_cop)), " en un solo frasco, así que comparar antes de comprar puede significar un ahorro importante.") else paste0("Ninguna presentación tiene una diferencia mayor al 20 %; la más alta es de ", pct(max(q4$ahorro_pct)), " (", pesos(max(q4$ahorro_cop)), "), así que el ahorro por elegir bien el comercio es moderado.")`
+3. `r if (is.null(resumen_tamanos)) "En esta ejecución no hubo dos tamaños del mismo perfume, así que no se puede decir cuándo un envase grande sale más barato por mL." else paste0(paste(resumen_tamanos$texto, collapse = " "), " El precio por mL y el precio del envase son cosas distintas: cuando el envase grande cuesta más, solo conviene si se va a usar todo el contenido.")`
+4. Antes de comprar también hay que revisar el costo del envío, los medios de pago (con
+   la tarjeta CMR el precio de Falabella baja), las membresías (Prime en Farmatodo) y
+   las promociones por cantidad, como el 2X1 de La Riviera, que no se tuvieron en
+   cuenta en esta comparación.
+
+```{r}
+#| label: cierre
+#| include: false
+dbDisconnect(con)
+```
+
+# Reproducibilidad {.unnumbered}
+
+- Lenguaje: R. Las versiones de los paquetes están en `renv.lock` y se instalan con
+  `renv::restore()`.
+- Recolección en línea: `source("scraper.R"); ejecutar_recoleccion()`, o
+  `quarto render taller_1.qmd -P recolectar:true`.
+- Sin conexión: `ejecutar_recoleccion(modo = "sin_conexion")` reprocesa la copia más
+  reciente de `raw/`, y `reconstruir_desde_raw()` arma una base nueva con todas las
+  copias.
+- Procesamiento: `source("procesamiento.R"); procesar_base(conectar_bd())`.
+- Otro entorno: `prueba_otro_entorno.R` repite la recolección con una base y una
+  carpeta aparte, y deja el resumen en `datos/prueba_otro_entorno.csv`.
+
+```{r}
+#| label: sesion
+#| code-summary: "Información de la sesión"
+sessionInfo()
+```

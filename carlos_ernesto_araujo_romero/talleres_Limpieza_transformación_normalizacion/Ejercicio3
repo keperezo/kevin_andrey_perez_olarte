@@ -1,0 +1,162 @@
+library(tidyverse)
+
+titanic <- read_csv("titanic.csv", show_col_types = FALSE)
+
+# Preparación de datos: extraer títulos y filtrar edades conocidas 
+df_conocidos <- titanic %>%
+  filter(!is.na(age)) %>%
+  mutate(
+    titulo = str_extract(name, "(?<=, )[A-Za-z]+(?=\\.)"),
+    titulo_grupo = case_when(
+      titulo %in% c("Mr") ~ "Mr",
+      titulo %in% c("Mrs", "Mme") ~ "Mrs",
+      titulo %in% c("Miss", "Ms", "Mlle") ~ "Miss",
+      titulo == "Master" ~ "Master",
+      TRUE ~ "Otro"
+    )
+  )
+
+# Funciones de métricas
+calcular_mae  <- function(real, pred) mean(abs(real - pred))
+calcular_rmse <- function(real, pred) sqrt(mean((real - pred)^2))
+
+# a, b, c) Evaluación individual con semilla 2024
+set.seed(2024)
+
+n_total <- nrow(df_conocidos)
+idx_ocultos <- sample(seq_len(n_total), size = floor(0.20 * n_total))
+
+df_split <- df_conocidos %>%
+  mutate(
+    age_real = age,
+    age_obs  = if_else(row_number() %in% idx_ocultos, NA_real_, age)
+  )
+
+# 1. Mediana global 
+med_global <- median(df_split$age_obs, na.rm = TRUE)
+
+# 2. Mediana por pclass y sex
+med_pclass_sex <- df_split %>%
+  filter(!is.na(age_obs)) %>%
+  group_by(pclass, sex) %>%
+  summarise(med_cs = median(age_obs), .groups = "drop")
+
+# 3. Mediana por título social
+med_titulo <- df_split %>%
+  filter(!is.na(age_obs)) %>%
+  group_by(titulo_grupo) %>%
+  summarise(med_tit = median(age_obs), .groups = "drop")
+
+# Unir estimadores e imputar
+df_eval <- df_split %>%
+  left_join(med_pclass_sex, by = c("pclass", "sex")) %>%
+  left_join(med_titulo, by = "titulo_grupo") %>%
+  mutate(
+    imp_global = coalesce(age_obs, med_global),
+    imp_cs     = coalesce(age_obs, med_cs, med_global),
+    imp_tit    = coalesce(age_obs, med_tit, med_global)
+  ) %>%
+
+  slice(idx_ocultos)
+
+resultados_individuales <- tibble(
+  estrategia = c("1. Mediana Global", "2. Pclass + Sex", "3. Título Social"),
+  mae = c(
+    calcular_mae(df_eval$age_real, df_eval$imp_global),
+    calcular_mae(df_eval$age_real, df_eval$imp_cs),
+    calcular_mae(df_eval$age_real, df_eval$imp_tit)
+  ),
+  rmse = c(
+    calcular_rmse(df_eval$age_real, df_eval$imp_global),
+    calcular_rmse(df_eval$age_real, df_eval$imp_cs),
+    calcular_rmse(df_eval$age_real, df_eval$imp_tit)
+  )
+)
+
+print(resultados_individuales)
+
+# d) Simulación Monte Carlo 
+simular_imputacion <- function(semilla, df, prop = 0.20) {
+  set.seed(semilla)
+  n <- nrow(df)
+  idx <- sample(seq_len(n), size = floor(prop * n))
+  
+  df_sim <- df %>%
+    mutate(
+      age_real = age,
+      age_obs  = if_else(row_number() %in% idx, NA_real_, age)
+    )
+  
+  m_global <- median(df_sim$age_obs, na.rm = TRUE)
+  
+  m_cs <- df_sim %>%
+    filter(!is.na(age_obs)) %>%
+    group_by(pclass, sex) %>%
+    summarise(med_cs = median(age_obs), .groups = "drop")
+  
+  m_tit <- df_sim %>%
+    filter(!is.na(age_obs)) %>%
+    group_by(titulo_grupo) %>%
+    summarise(med_tit = median(age_obs), .groups = "drop")
+  
+  eval_sub <- df_sim %>%
+    left_join(m_cs, by = c("pclass", "sex")) %>%
+    left_join(m_tit, by = "titulo_grupo") %>%
+    mutate(
+      # Corrección aquí: usar la columna unida (med_cs / med_tit), no el data frame
+      imp_global = coalesce(age_obs, m_global),
+      imp_cs     = coalesce(age_obs, med_cs, m_global),
+      imp_tit    = coalesce(age_obs, med_tit, m_global)
+    ) %>%
+    slice(idx)
+  
+  tibble(
+    simulacion = semilla,
+    Global     = calcular_mae(eval_sub$age_real, eval_sub$imp_global),
+    Pclass_Sex = calcular_mae(eval_sub$age_real, eval_sub$imp_cs),
+    Titulo     = calcular_mae(eval_sub$age_real, eval_sub$imp_tit)
+  )
+}
+
+# Ejecutar las 200 simulaciones
+simulaciones_mae <- map(1:200, ~ simular_imputacion(.x, df_conocidos)) %>%
+  list_rbind() %>%
+  pivot_longer(cols = c(Global, Pclass_Sex, Titulo), names_to = "estrategia", values_to = "mae")
+
+# Gráfico de distribución del MAE
+ggplot(simulaciones_mae, aes(x = estrategia, y = mae, fill = estrategia)) +
+  geom_boxplot(alpha = 0.7, show.legend = FALSE) +
+  theme_minimal() +
+  labs(
+    title = "Distribución del MAE en 200 simulaciones de imputación",
+    x = "Estrategia",
+    y = "MAE (Años de error)"
+  )
+
+# Porcentaje de veces que gana cada estrategia
+tasa_victorias <- simulaciones_mae %>%
+  group_by(simulacion) %>%
+  slice_min(mae, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  count(estrategia) %>%
+  mutate(porcentaje = round(n / sum(n) * 100, 1))
+
+print(tasa_victorias)
+
+# e) Comparación de la variabilidad (Desviación Estándar)
+sd_comparacion <- tibble(
+  conjunto = c("Edad Real", "Imputada Global", "Imputada Pclass+Sex", "Imputada Título"),
+  sd_edad = c(
+    sd(df_eval$age_real),
+    sd(df_eval$imp_global),
+    sd(df_eval$imp_cs),
+    sd(df_eval$imp_tit)
+  )
+)
+
+print(sd_comparacion)
+
+# Consecuencia teórica:
+# Al sustituir muchos valores por una constante (la mediana), la variabilidad se colapsa artificialmente 
+# y la distribución acumula una masa espuria en ese punto. Esto estrecha los intervalos de confianza,
+# subestima el error estándar en regresiones y distorsiona las correlaciones con otras variables.

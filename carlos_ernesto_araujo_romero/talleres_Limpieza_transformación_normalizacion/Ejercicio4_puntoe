@@ -1,0 +1,35 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
+
+# 1. Cargar datos
+moviles = pd.read_csv("mobile_data.csv")
+cols = ["ram", "battery_power", "int_memory", "px_height", "px_width"]
+
+# 2. Partición 70/30 reproducible
+X_train, X_test = train_test_split(moviles[cols], test_size=0.30, random_state=2024)
+
+# 3. Ajustar escalador ÚNICAMENTE con entrenamiento
+scaler = MinMaxScaler()
+scaler.fit(X_train)
+
+# Transformar prueba con los parámetros del entrenamiento
+X_test_scaled = pd.DataFrame(scaler.transform(X_test), columns=cols)
+
+# 4. Contar cuántos valores caen fuera de [0, 1]
+menores_cero = (X_test_scaled < 0).sum()
+mayores_uno  = (X_test_scaled > 1).sum()
+fuera_rango  = menores_cero + mayores_uno
+
+resumen_python = pd.DataFrame({
+    "menores_cero": menores_cero,
+    "mayores_uno": mayores_uno,
+    "total_fuera": fuera_rango,
+    "pct_fuera": (fuera_rango / len(X_test) * 100).round(2)
+})
+
+print("=" * 55)
+print("Valores fuera de [0, 1] en el conjunto de prueba (Python):")
+print("=" * 55)
+print(resumen_python)
